@@ -1,0 +1,4 @@
+certs/
+*.log
+.env
+.agents/

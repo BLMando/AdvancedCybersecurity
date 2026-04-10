@@ -1,0 +1,23 @@
+services:
+
+  # ── MongoDB ────────────────────────────────────────
+  mongo:
+
+  # ── Splunk SIEM ────────────────────────────────────
+  splunk:
+
+  # ── Envoy Proxy (PEP) ─────────────────────────────
+  envoy:
+
+  # ── OPA (PDP) ──────────────────────────────────────
+  opa:
+
+
+networks:
+frontend-net:
+  driver: bridge
+backend-net:
+  driver: bridge
+
+volumes:
+  mongdata:
