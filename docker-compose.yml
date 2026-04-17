@@ -2,22 +2,97 @@ services:
 
   # ── MongoDB ────────────────────────────────────────
   mongo:
-
-  # ── Splunk SIEM ────────────────────────────────────
-  splunk:
+    build:
+      context: ./mongo
+      dockerfile: Dockerfile
+    container_name: mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    volumes:
+      - mongdata:/data/db
+    networks:
+      - backend-net
 
   # ── Envoy Proxy (PEP) ─────────────────────────────
   envoy:
+    build:
+      context: ./envoy
+      dockerfile: Dockerfile
+    container_name: envoy
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - opa
+    ports:
+      - "10000:10000"
+      - "9901:9901"
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    networks:
+      - frontend-net
+      - backend-net
 
   # ── OPA (PDP) ──────────────────────────────────────
   opa:
+    build:
+      context: ./opa
+      dockerfile: Dockerfile
+    container_name: opa
+    restart: unless-stopped
+    ports:
+      - "8181:8181"
+      - "9002:9002"
+    volumes:
+      - ./opa/policies:/policies:ro
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --set=plugins.envoy_ext_authz_grpc.addr=:9002
+      - --log-level=info
+      - /policies
+    networks:
+      - backend-net
+
+  # ── Snort 3 (NIDS) ────────────────────────────────
+  snort:
+    image: ciscotalos/snort3:latest
+    container_name: snort
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: host
+    volumes:
+      - ./snort/snort.lua:/etc/snort/snort.lua:ro
+      - ./snort/rules:/etc/snort/rules:ro
+      - ./logs/snort:/var/log/snort
+    command: |
+      sh -c "snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort || true"
+
+  # ── NFTables (L3/L4 Firewall) ──────────────────────
+  nftables:
+    image: alpine:latest
+    container_name: nftables
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    volumes:
+      - ./nftables/nftables.conf:/etc/nftables.conf:ro
+      - ./logs/nftables:/var/log/nftables
+    command: |
+      sh -c "apk add --no-cache nftables && nft -f /etc/nftables.conf && tail -f /dev/null"
 
 
 networks:
-frontend-net:
-  driver: bridge
-backend-net:
-  driver: bridge
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
 
 volumes:
   mongdata:
