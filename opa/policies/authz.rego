@@ -8,6 +8,7 @@ default allow := false
 # Final decision: risk must stay under the threshold and the action must be
 # permitted for the current collection.
 allow if {
+	valid_action
 	risk_score <= threshold
 	action_allowed
 }
@@ -45,16 +46,20 @@ threshold := t if {
 } else := t if {
 	action_name == "delete"
 	t := 20
-} else := 100
+}
 
 # Some actions are always suspicious, especially destructive ones.
 action_allowed if {
+	valid_action
 	not is_destructive_operation
+	not collection_is_sensitive
 }
 
 action_allowed if {
-	collection_name in sensitive_collections
+	valid_action
+	collection_is_sensitive
 	risk_score < threshold / 2
+	not is_destructive_operation
 }
 
 # The policy accepts both Envoy-shaped input and direct test payloads.
@@ -76,12 +81,30 @@ user_identity := user if {
 device_identity := device if {
 	device := input.parsed_body.device
 	device != ""
+
+} else := ja3 if {
+	tls_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})
+	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
+	ja3 := object.get(tls_inspector, "ja3", "")
+	ja3 != ""
+
+} else := ja3h if {
+	tls_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})
+	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
+	ja3h := object.get(tls_inspector, "ja3_hash", "")
+	ja3h != ""
+
 } else := "no-tpm"
 
 # Network identity is simply the source IP used for subnet checks.
 network_identity := ip if {
 	ip := input.parsed_body.network_ip
 	ip != ""
+
+} else := ip if {
+	ip := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "address", "")
+	ip != ""
+
 } else := "0.0.0.0"
 
 # The command and collection tell us whether the operation is read-only,
@@ -113,9 +136,17 @@ sensitive_collections := {
 	"security_events"
 }
 
+collection_is_sensitive if {
+	collection_name in sensitive_collections
+}
+
+valid_action if {
+	action_name in {"find", "insert", "update", "delete"}
+}
+
 # Simple subnet matching is enough for this phase.
 is_internal_network if {
-	cidr_match := regex.match(`^(172\.20\.|10\.|192\.168\.)`, network_identity)
+	cidr_match := regex.match(`^(172\.20\.|10\.)`, network_identity)
 	cidr_match == true
 }
 
@@ -132,8 +163,12 @@ response_headers := object.union_n([
 	{"x-zta-action": action_name},
 	{"x-zta-collection": collection_name},
 	{"x-zta-risk-score": sprintf("%d", [risk_score])},
-	{"x-zta-decision": allow and "ALLOW" or "DENY"}
+	{"x-zta-decision": decision_label}
 ])
+
+decision_label := "ALLOW" if {
+	allow
+} else := "DENY"
 
 # Explicit deny rules help with clarity in tests and with non-recoverable cases.
 deny if {
@@ -142,6 +177,10 @@ deny if {
 
 deny if {
 	is_destructive_operation
+}
+
+deny if {
+	not valid_action
 }
 
 # ─── Test Helpers ─────────────────────────────────

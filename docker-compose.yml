@@ -28,9 +28,11 @@ services:
       - opa
     ports:
       - "10000:10000"
-      - "9901:9901"
+      - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./certs/ca:/etc/certs/ca:ro
+      - ./certs/server:/etc/certs/server:ro
     networks:
       - frontend-net
       - backend-net
@@ -43,8 +45,8 @@ services:
     container_name: opa
     restart: unless-stopped
     ports:
-      - "8181:8181"
-      - "9002:9002"
+      - "127.0.0.1:8181:8181"
+      - "127.0.0.1:9002:9002"
     volumes:
       - ./opa/policies:/policies:ro
     command:
@@ -62,6 +64,7 @@ services:
     image: ciscotalos/snort3:latest
     container_name: snort
     restart: unless-stopped
+    entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -70,23 +73,37 @@ services:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules:/etc/snort/rules:ro
       - ./logs/snort:/var/log/snort
-    command: |
-      sh -c "snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort || true"
+    command:
+      - |
+        if ! snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort; then
+          echo "snort failed to start, container kept alive for debugging"
+        fi
+        tail -f /dev/null
 
   # ── NFTables (L3/L4 Firewall) ──────────────────────
   nftables:
     image: alpine:latest
     container_name: nftables
     restart: unless-stopped
+    entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
     network_mode: host
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
       - ./logs/nftables:/var/log/nftables
-    command: |
-      sh -c "apk add --no-cache nftables && nft -f /etc/nftables.conf && tail -f /dev/null"
-
+    command:
+      - |
+        apk add --no-cache nftables
+        if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
+          tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
+          if ! nft -f /tmp/nftables.conf; then
+            echo "nftables rules failed, container kept alive for debugging"
+          fi
+        else
+          echo "nftables safe mode: rules not applied (set APPLY_NFT_RULES=1 to enable)"
+        fi
+        tail -f /dev/null
 
 networks:
   frontend-net:

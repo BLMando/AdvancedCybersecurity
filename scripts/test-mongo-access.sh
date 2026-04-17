@@ -42,11 +42,14 @@ echo -e "\n${YELLOW}[TEST 1] Legitimate Query - mario.rossi from Internal Networ
 echo "Query: db.utenti.find()"
 echo "Expected: ALLOW (known user, internal network, read operation)"
 
-MONGO_OUTPUT=$(mongosh \
+docker cp "$CERTS_DIR/ca/ca.crt" mongo:/tmp/ca.crt >/dev/null
+docker cp "$CERTS_DIR/clients/mario.pem" mongo:/tmp/mario.pem >/dev/null
+
+MONGO_OUTPUT=$(docker exec mongo mongosh \
 	--tls \
-	--tlsCAFile "$CERTS_DIR/ca/ca.crt" \
-	--tlsCertificateKeyFile "$CERTS_DIR/clients/mario.pem" \
-	"mongodb://admin:secret@localhost:10000/zta_db?authSource=admin" \
+	--tlsCAFile /tmp/ca.crt \
+	--tlsCertificateKeyFile /tmp/mario.pem \
+	"mongodb://admin:secret@envoy:10000/zta_db?authSource=admin" \
 	--eval "db.utenti.find().pretty()" 2>&1 || true)
 
 if echo "$MONGO_OUTPUT" | grep -q "Alice\|Bob\|Charlie"; then
@@ -62,11 +65,13 @@ echo -e "\n${YELLOW}[TEST 2] Restricted Query - unknown.user (No Device Binding)
 echo "Query: db.utenti.find()"
 echo "Expected: Possible DENY (unknown user + no TPM + risk > threshold)"
 
-MONGO_UNKNOWN=$(mongosh \
+docker cp "$CERTS_DIR/clients/unknown.pem" mongo:/tmp/unknown.pem >/dev/null
+
+MONGO_UNKNOWN=$(docker exec mongo mongosh \
 	--tls \
-	--tlsCAFile "$CERTS_DIR/ca/ca.crt" \
-	--tlsCertificateKeyFile "$CERTS_DIR/clients/unknown.pem" \
-	"mongodb://admin:secret@localhost:10000/zta_db?authSource=admin" \
+	--tlsCAFile /tmp/ca.crt \
+	--tlsCertificateKeyFile /tmp/unknown.pem \
+	"mongodb://admin:secret@envoy:10000/zta_db?authSource=admin" \
 	--eval "db.utenti.find().pretty()" 2>&1 || true)
 
 if echo "$MONGO_UNKNOWN" | grep -q "Alice\|Bob\|error\|denied\|unauthorized"; then
@@ -85,11 +90,11 @@ fi
 echo -e "\n${YELLOW}[TEST 3] Count Query - mario.rossi${NC}"
 echo "Query: db.utenti.countDocuments()"
 
-COUNT_OUTPUT=$(mongosh \
+COUNT_OUTPUT=$(docker exec mongo mongosh \
 	--tls \
-	--tlsCAFile "$CERTS_DIR/ca/ca.crt" \
-	--tlsCertificateKeyFile "$CERTS_DIR/clients/mario.pem" \
-	"mongodb://admin:secret@localhost:10000/zta_db?authSource=admin" \
+	--tlsCAFile /tmp/ca.crt \
+	--tlsCertificateKeyFile /tmp/mario.pem \
+	"mongodb://admin:secret@envoy:10000/zta_db?authSource=admin" \
 	--eval "print('Document count: ' + db.utenti.countDocuments())" 2>&1 || true)
 
 if echo "$COUNT_OUTPUT" | grep -qE "Document count:|[0-9]"; then
@@ -104,11 +109,11 @@ echo -e "\n${YELLOW}[TEST 4] Insert Operation - mario.rossi${NC}"
 echo "Query: db.utenti.insertOne({nome: 'Eve', eta: 32})"
 echo "Expected: Possible DENY (insert operation, higher threshold)"
 
-INSERT_OUTPUT=$(mongosh \
+INSERT_OUTPUT=$(docker exec mongo mongosh \
 	--tls \
-	--tlsCAFile "$CERTS_DIR/ca/ca.crt" \
-	--tlsCertificateKeyFile "$CERTS_DIR/clients/mario.pem" \
-	"mongodb://admin:secret@localhost:10000/zta_db?authSource=admin" \
+	--tlsCAFile /tmp/ca.crt \
+	--tlsCertificateKeyFile /tmp/mario.pem \
+	"mongodb://admin:secret@envoy:10000/zta_db?authSource=admin" \
 	--eval "db.utenti.insertOne({nome: 'Eve', eta: 32}); print('Insert completed')" 2>&1 || true)
 
 if echo "$INSERT_OUTPUT" | grep -qE "acknowledged|completed|error"; then

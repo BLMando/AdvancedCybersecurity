@@ -115,7 +115,6 @@ Action Thresholds:
 - Docker & Docker Compose
 - bash shell
 - openssl (for certificate generation)
-- mongosh (for database access)
 
 ### 1. Generate Certificates
 

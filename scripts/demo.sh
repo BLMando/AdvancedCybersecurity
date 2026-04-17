@@ -47,7 +47,15 @@ print_ok "Docker available"
 # Step 2: Generate certificates
 print_step "Step 2: Generating certificates..."
 if [ ! -f "$PROJECT_ROOT/certs/ca/ca.crt" ]; then
-	bash "$SCRIPT_DIR/generate-certs.sh" >/dev/null 2>&1
+	mkdir -p "$PROJECT_ROOT/logs"
+	CERT_LOG="$PROJECT_ROOT/logs/generate-certs.log"
+	if ! bash "$SCRIPT_DIR/generate-certs.sh" >"$CERT_LOG" 2>&1; then
+		print_error "Certificate generation failed"
+		echo "See full log: $CERT_LOG"
+		echo "Last lines:"
+		tail -n 20 "$CERT_LOG" || true
+		exit 1
+	fi
 	print_ok "Certificates generated"
 else
 	print_ok "Certificates already exist"
@@ -56,17 +64,35 @@ fi
 # Step 3: Start containers
 print_step "Step 3: Starting Docker containers..."
 cd "$PROJECT_ROOT"
-docker compose up -d >/dev/null 2>&1
+mkdir -p "$PROJECT_ROOT/logs"
+COMPOSE_LOG="$PROJECT_ROOT/logs/docker-compose-up.log"
+if ! docker compose up -d >"$COMPOSE_LOG" 2>&1; then
+	print_error "docker compose up failed"
+	echo "See full log: $COMPOSE_LOG"
+	echo "Last lines:"
+	tail -n 30 "$COMPOSE_LOG" || true
+	exit 1
+fi
 echo "Waiting for services to stabilize..."
 sleep 5
 print_ok "All containers running"
 docker compose ps --format "table {{.Names}}\t{{.Status}}"
 
+UNHEALTHY_SERVICES=$(docker compose ps --format "{{.Names}} {{.Status}}" | grep -Ei "Restarting|Exited|Dead" || true)
+if [ -n "$UNHEALTHY_SERVICES" ]; then
+	print_error "Some containers are not healthy yet"
+	echo "$UNHEALTHY_SERVICES"
+	echo "Tip: inspect logs with 'docker compose logs --tail=80 <service>'"
+	exit 1
+fi
+
 # Step 4: Initialize database
 print_step "Step 4: Initializing MongoDB database..."
-docker exec mongo mongosh \
+MONGO_PASSWORD="${MONGO_ROOT_PASSWORD:-secret}"
+MONGO_INIT_OUTPUT=$(docker exec mongo mongosh \
 	-u admin \
-	-p secret \
+	-p "$MONGO_PASSWORD" \
+	--authenticationDatabase admin \
 	--eval "
 	db = db.getSiblingDB('zta_db');
 	try { db.createCollection('utenti'); } catch(e) {}
@@ -76,18 +102,33 @@ docker exec mongo mongosh \
 		{nome: 'Bob', eta: 25, department: 'Sales'},
 		{nome: 'Charlie', eta: 35, department: 'Finance'}
 	]);
-	print('✓ Database ready');
-	" 2>&1 | grep -E "Database|utenti"
+	print('Database ready: zta_db.utenti');
+	" 2>&1 || true)
+
+if echo "$MONGO_INIT_OUTPUT" | grep -q "Database ready: zta_db.utenti"; then
+	print_ok "MongoDB database initialized"
+else
+	print_error "MongoDB initialization failed"
+	if echo "$MONGO_INIT_OUTPUT" | grep -qi "Authentication failed"; then
+		echo "MongoDB credentials in existing data volume do not match .env."
+		echo "For a clean demo reset, run: docker compose down -v && docker compose up -d"
+	fi
+	echo "$MONGO_INIT_OUTPUT" | tail -n 20
+	exit 1
+fi
 
 # Step 5: Test legitimate access
 print_step "Step 5: Testing LEGITIMATE access (mario.rossi)..."
 echo "→ Running: db.utenti.find().count()"
 
-RESULT=$(mongosh \
+docker cp "$PROJECT_ROOT/certs/ca/ca.crt" mongo:/tmp/ca.crt >/dev/null
+docker cp "$PROJECT_ROOT/certs/clients/mario.pem" mongo:/tmp/mario.pem >/dev/null
+
+RESULT=$(docker exec mongo mongosh \
 	--tls \
-	--tlsCAFile "$PROJECT_ROOT/certs/ca/ca.crt" \
-	--tlsCertificateKeyFile "$PROJECT_ROOT/certs/clients/mario.pem" \
-	"mongodb://admin:secret@localhost:10000/zta_db?authSource=admin" \
+	--tlsCAFile /tmp/ca.crt \
+	--tlsCertificateKeyFile /tmp/mario.pem \
+	"mongodb://admin:secret@envoy:10000/zta_db?authSource=admin" \
 	--eval "print('Count: ' + db.utenti.countDocuments())" 2>&1 || true)
 
 if echo "$RESULT" | grep -q "Count:"; then
