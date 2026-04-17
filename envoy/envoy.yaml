@@ -1,0 +1,156 @@
+static_resources:
+  listeners:
+    # ─── MongoDB Listener with mTLS ────────────────────
+    - name: mongo_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      listener_filters:
+        # Run before TLS termination so Envoy can inspect the ClientHello
+        # and derive the JA3 fingerprint used as a device hint.
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+            enable_ja3_fingerprinting: true
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                # Envoy presents this certificate to the client.
+                tls_certificates:
+                  - certificate_chain:
+                      filename: /etc/certs/server/envoy.crt
+                    private_key:
+                      filename: /etc/certs/server/envoy.key
+                validation_context:
+                  # Trusted CA used to validate client certificates.
+                  trusted_ca:
+                    filename: /etc/certs/ca/ca.crt
+                  verify_subject_alt_name:
+                    - "*"
+              # Fail closed: the connection is rejected if the client does not
+              # present a valid certificate.
+              require_client_certificate: true
+          filters:
+            # Lua enriches the connection context with user, device and
+            # network metadata so later filters do not need to recompute it.
+            - name: envoy.filters.network.lua
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.lua.v3.Lua
+                inline_code: |
+                  function envoy_on_new_connection(handle)
+                    local ssl_conn = handle:connection():ssl()
+                    local cert_subject = "unknown"
+                    local device_id = "no-device"
+                    local network_ip = "0.0.0.0"
+                    
+                    if ssl_conn then
+                      -- The certificate Subject gives us the human identity.
+                      cert_subject = ssl_conn:subjectPeerCertificate() or "unknown"
+                      cert_subject = cert_subject:match("CN=([^,/]+)") or "unknown"
+                      
+                      -- If a hardware OID is not available, fall back to JA3.
+                      local ja3 = ssl_conn:ja3_fingerprint() or "unknown"
+                      device_id = ja3 ~= "unknown" and ja3:sub(1, 16) or "no-tpm"
+                    end
+                    
+                    -- The source IP identifies the network context.
+                    local source = handle:connection():remoteAddress()
+                    network_ip = source:match("^([^:]+)") or "0.0.0.0"
+                    
+                    -- Store the identity tuple so the rest of the pipeline can
+                    -- reuse it for logging and policy checks.
+                    handle:connection():streamInfo():dynamicMetadata():set(
+                      "zta.identity",
+                      {user = cert_subject, device = device_id, network_ip = network_ip}
+                    )
+                  end
+
+            # Mongo proxy inspects the MongoDB wire protocol so we can log the
+            # actual command and collection being accessed.
+            - name: envoy.filters.network.mongo_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.mongo_proxy.v3.MongoProxy
+                stat_prefix: mongo_stats
+                access_log:
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /dev/stdout
+                      format: |
+                        {
+                          "timestamp": "%START_TIME%",
+                          "user": "%DYNAMIC_METADATA(zta.identity:user)%",
+                          "device": "%DYNAMIC_METADATA(zta.identity:device)%",
+                          "network_ip": "%DYNAMIC_METADATA(zta.identity:network_ip)%",
+                          "command": "%MONGODB_COMMAND%",
+                          "collection": "%MONGODB_COLLECTION%",
+                          "database": "%MONGODB_DATABASE%"
+                        }
+
+            # Ask OPA for an allow/deny decision before forwarding traffic to
+            # MongoDB. This is the policy gate of the system.
+            - name: envoy.filters.network.ext_authz
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz
+                stat_prefix: opa_authz
+                transport_api_version: V3
+                grpc_service:
+                  envoy_grpc:
+                    cluster_name: opa_cluster
+                    timeout: 2s
+                failure_mode_allow: false
+                # Fail closed: if OPA is unavailable, the request is denied.
+                with_request_body: true
+
+            # If the request passes the checks, forward it to MongoDB.
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: mongo_tcp
+                cluster: mongo_cluster
+                upstream_connect_mode: ON_DOWNSTREAM_DATA
+
+  # ─── Clusters ──────────────────────────────────────
+  clusters:
+    - name: mongo_cluster
+      connect_timeout: 2s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: mongo_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: mongo
+                      port_value: 27017
+
+    - name: opa_cluster
+      connect_timeout: 2s
+      type: STRICT_DNS
+      http2_protocol_options: {}
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: opa_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: opa
+                      port_value: 9002
+
+admin:
+  access_log_path: /tmp/admin_access.log
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
