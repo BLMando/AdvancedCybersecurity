@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piano Atomico ZTA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8f8f6;color:#1a1a18;padding:1.5rem}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:20px;font-weight:600;margin-bottom:4px}
+.subtitle{font-size:13px;color:#666;margin-bottom:1.25rem}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:1.25rem}
+.sc{background:#fff;border:0.5px solid #e0dfd7;border-radius:10px;padding:10px 12px;text-align:center}
+.sc .sv{font-size:22px;font-weight:600}
+.sc .sl{font-size:11px;color:#888;margin-top:2px}
+.pbar-wrap{margin-bottom:1.5rem}
+.pbar-bg{height:6px;background:#e8e8e4;border-radius:3px;overflow:hidden}
+.pbar-fg{height:100%;background:#1D9E75;border-radius:3px;transition:width .3s}
+.pbar-label{font-size:12px;color:#888;margin-top:4px;text-align:right}
+.phase{border:0.5px solid #e0dfd7;border-radius:12px;margin-bottom:10px;background:#fff;overflow:hidden}
+.ph{display:flex;align-items:center;gap:10px;padding:13px 15px;cursor:pointer;user-select:none}
+.ph:hover{background:#f5f5f2}
+.phase.open>.ph{background:#f5f5f2}
+.pbadge{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.ptitle{font-size:14px;font-weight:600}
+.psub{font-size:11px;color:#888;margin-top:1px}
+.pmeta{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+.dpill{font-size:10px;padding:2px 8px;border-radius:8px;background:#f0efe8;color:#666;border:0.5px solid #e0dfd7}
+.dots{display:flex;gap:3px}
+.dot{width:7px;height:7px;border-radius:50%;background:#ddd}
+.dot.d{background:#1D9E75}
+.chev{font-size:11px;color:#aaa;transition:transform .2s;width:16px;text-align:center}
+.phase.open>.ph .chev{transform:rotate(180deg)}
+.pbody{display:none;border-top:0.5px solid #e8e8e4}
+.phase.open>.pbody{display:block}
+.task{border-bottom:0.5px solid #f0efe8}
+.task:last-child{border-bottom:none}
+.tk-h{display:flex;align-items:center;gap:10px;padding:10px 15px 10px 22px;cursor:pointer;user-select:none}
+.tk-h:hover{background:#fafaf8}
+.task.open>.tk-h{background:#fafaf8}
+.tcb{width:16px;height:16px;border-radius:4px;border:1px solid #ccc;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+.tcb.ck{background:#1D9E75;border-color:#1D9E75}
+.tcb.ck::after{content:'';display:block;width:9px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+.tcb.part{background:#e1f5ee;border-color:#1D9E75}
+.ttitle{font-size:13px;font-weight:600}
+.ttitle.done{text-decoration:line-through;color:#aaa}
+.tsub{font-size:11px;color:#999;margin-top:1px}
+.tcount{font-size:11px;color:#aaa;margin-left:auto;flex-shrink:0;min-width:30px;text-align:right}
+.tchev{font-size:10px;color:#aaa;transition:transform .2s;width:14px;text-align:center}
+.task.open>.tk-h .tchev{transform:rotate(180deg)}
+.tbody{display:none;padding:0 15px 12px 48px}
+.task.open>.tbody{display:block}
+.stlabel{font-size:10px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px}
+.subtasks{display:flex;flex-direction:column;gap:5px}
+.st{display:flex;align-items:flex-start;gap:9px;padding:9px 11px;background:#f8f8f6;border-radius:8px;cursor:pointer;transition:background .15s;border:0.5px solid transparent}
+.st:hover{background:#f0efe8;border-color:#e0dfd7}
+.st.done{border-color:#9FE1CB}
+.scb{width:14px;height:14px;border-radius:3px;border:1px solid #ccc;flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.scb.ck{background:#1D9E75;border-color:#1D9E75}
+.scb.ck::after{content:'';display:block;width:7px;height:4px;border-left:1.5px solid #fff;border-bottom:1.5px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+.stcontent{flex:1}
+.stt{font-size:12px;font-weight:600;color:#1a1a18;line-height:1.4}
+.st.done .stt{text-decoration:line-through;color:#aaa}
+.exp{font-size:11px;color:#666;margin-top:3px;line-height:1.6}
+.cmd{font-family:"Courier New",monospace;font-size:10px;background:#2d2d2a;color:#e8e8e0;padding:6px 9px;border-radius:6px;margin-top:5px;display:block;word-break:break-all;line-height:1.7;white-space:pre-wrap}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+.tag{font-size:10px;padding:2px 6px;border-radius:5px;font-weight:500}
+.t-e{background:#E6F1FB;color:#185FA5}
+.t-o{background:#E1F5EE;color:#0F6E56}
+.t-s{background:#EEEDFE;color:#534AB7}
+.t-n{background:#FAEEDA;color:#854F0B}
+.t-sn{background:#FAECE7;color:#993C1D}
+.t-m{background:#EAF3DE;color:#3B6D11}
+.t-c{background:#FBEAF0;color:#993556}
+.t-d{background:#F1EFE8;color:#5F5E5A}
+.t-t{background:#FCEBEB;color:#A32D2D}
+.warn{margin-top:10px;padding:8px 11px;border-left:3px solid #EF9F27;background:#fdf5e6;border-radius:0 8px 8px 0;font-size:11px;color:#633806;line-height:1.5}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Piano Atomico — Zero Trust Architecture</h1>
+<div class="subtitle">6 fasi · 28 task · sottotask atomici con istruzioni operative</div>
+<div class="stats">
+  <div class="sc"><div class="sv" id="sst">0</div><div class="sl">sottotask completati</div></div>
+  <div class="sc"><div class="sv" id="stk">0</div><div class="sl">task in corso</div></div>
+  <div class="sc"><div class="sv" id="sph">0/6</div><div class="sl">fasi avviate</div></div>
+  <div class="sc"><div class="sv" id="stt2">0</div><div class="sl">task completati</div></div>
+</div>
+<div class="pbar-wrap">
+  <div class="pbar-bg"><div class="pbar-fg" id="gfill" style="width:0%"></div></div>
+  <div class="pbar-label" id="glabel">0 / 0 sottotask · 0%</div>
+</div>
+<div id="plan"></div>
+</div>
+<script>
+const DATA=[
+{id:'p0',color:'#E1F5EE',tc:'#085041',label:'0',title:'Setup infrastruttura',sub:'Git · Docker Compose · CA · Certificati X.509',dur:'Sett. 1',tasks:[
+{id:'t00',title:'Creare il repository e la struttura a cartelle',sub:'Git · directory layout',subtasks:[
+{t:'Inizializzare il repository git',e:'Crea la cartella del progetto ed esegui git init. Crea subito un .gitignore che escluda certs/ (non pushare mai le chiavi private), *.log e il file .env.',cmd:'mkdir zta-project && cd zta-project && git init\necho "certs/\n*.log\n.env" > .gitignore',tags:['d']},
+{t:'Creare la struttura di cartelle del progetto',e:'Ogni servizio ha la sua cartella. I certificati vanno in certs/ con sottocartelle separate per ca, server, clients.',cmd:'mkdir -p envoy/lua opa/policies splunk snort mongo certs/{ca,server,clients} scripts tests',tags:['d']},
+{t:'Creare un file .env per le variabili condivise',e:'Centralizza qui password, token HEC Splunk e nomi dei container. Il docker-compose.yml leggerà da qui con ${VAR}.',cmd:'echo \'SPLUNK_PASSWORD=changeme\nMONGO_ROOT_PASS=secret\nSPLUNK_HEC_TOKEN=\' > .env',tags:['d']},
+{t:'Creare README.md scheletro con sezioni predefinite',e:'Scrivi subito la struttura del README: Overview, Architecture, Prerequisites, Quick Start, Components, Testing, Known Limitations. Riempirai le sezioni man mano.',cmd:'touch README.md',tags:['d']}
+]},
+{id:'t01',title:'Scrivere il docker-compose.yml base',sub:'Reti · volumi · servizi placeholder',subtasks:[
+{t:'Definire le due reti Docker isolate',e:'frontend-net collega Client → NFTables → Envoy. backend-net collega Envoy → MongoDB. Questa separazione impedisce al client di raggiungere MongoDB direttamente.',cmd:'networks:\n  frontend-net:\n    driver: bridge\n  backend-net:\n    driver: bridge',tags:['d']},
+{t:'Aggiungere il servizio MongoDB',e:'Usa mongo:7. Esponi la porta 27017 solo sulla backend-net, non all\'esterno. Aggiungi il volume mongdata per persistenza.',cmd:'mongo:\n  image: mongo:7\n  networks: [backend-net]\n  environment:\n    MONGO_INITDB_ROOT_USERNAME: admin\n    MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS}\n  volumes: [mongdata:/data/db]',tags:['m']},
+{t:'Aggiungere il servizio Splunk',e:'Usa splunk/splunk:latest con SPLUNK_LICENSE_URI=Free per non consumare il trial. Porta 8000 per la UI, 8088 per HEC, 8089 per la REST API.',cmd:'splunk:\n  image: splunk/splunk:latest\n  environment:\n    SPLUNK_START_ARGS: --accept-license\n    SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}\n    SPLUNK_LICENSE_URI: Free\n  ports: ["8000:8000","8088:8088","8089:8089"]',tags:['s']},
+{t:'Aggiungere Envoy come placeholder',e:'Per ora usa l\'immagine ufficiale senza configurazione custom — solo per verificare che il container si avvii.',cmd:'envoy:\n  image: envoyproxy/envoy:v1.29-latest\n  ports: ["10000:10000","9901:9901"]\n  networks: [frontend-net, backend-net]',tags:['e']},
+{t:'Aggiungere OPA come placeholder',e:'Usa openpolicyagent/opa:latest-envoy. Il tag -envoy include il plugin gRPC per Envoy precompilato.',cmd:'opa:\n  image: openpolicyagent/opa:latest-envoy\n  ports: ["8181:8181","9002:9002"]\n  networks: [backend-net]\n  command: ["run","--server","--addr=0.0.0.0:8181"]',tags:['o']},
+{t:'Eseguire primo docker compose up e verificare',e:'Tutti i container devono passare allo stato healthy. Splunk impiega ~60s per il primo avvio.',cmd:'docker compose up -d\ndocker compose ps\ncurl -k https://localhost:8000',tags:['d']}
+]},
+{id:'t02',title:'Generare la CA interna e i certificati mTLS',sub:'OpenSSL · CA · OID device · certificati client',subtasks:[
+{t:'Creare la Root Certificate Authority',e:'La CA è la radice di fiducia. Genera una chiave RSA 4096-bit e un certificato auto-firmato valido 10 anni.',cmd:'openssl req -x509 -newkey rsa:4096 -days 3650 \\\n  -keyout certs/ca/ca.key -out certs/ca/ca.crt \\\n  -subj "/CN=ZTA-RootCA/O=UniPM/C=IT" -nodes',tags:['c']},
+{t:'Creare il certificato server per Envoy',e:'Genera chiave e CSR per Envoy, poi firmalo con la CA. Il CN deve corrispondere all\'hostname del container.',cmd:'openssl req -newkey rsa:2048 -nodes \\\n  -keyout certs/server/envoy.key \\\n  -out certs/server/envoy.csr \\\n  -subj "/CN=envoy/O=ZTA"\nopenssl x509 -req -in certs/server/envoy.csr \\\n  -CA certs/ca/ca.crt -CAkey certs/ca/ca.key \\\n  -CAcreateserial -out certs/server/envoy.crt -days 365',tags:['c','e']},
+{t:'Creare il certificato client per "mario.rossi"',e:'Il CN diventerà lo user-id estratto da Envoy.',cmd:'openssl req -newkey rsa:2048 -nodes \\\n  -keyout certs/clients/mario.key \\\n  -out certs/clients/mario.csr \\\n  -subj "/CN=mario.rossi/O=ZTA"\nopenssl x509 -req -in certs/clients/mario.csr \\\n  -CA certs/ca/ca.crt -CAkey certs/ca/ca.key \\\n  -CAcreateserial -out certs/clients/mario.crt -days 365',tags:['c']},
+{t:'Aggiungere OID custom per il device-id',e:'Simula il binding hardware con un OID custom nel Subject Alternative Name.',cmd:'# In openssl.cnf:\n[ v3_client ]\nsubjectAltName = otherName:1.3.6.1.4.1.99999.1;UTF8:device-laptop-001\n# Firmalo con:\nopenssl x509 -req -in mario.csr \\\n  -extfile openssl.cnf -extensions v3_client \\\n  -CA ca.crt -CAkey ca.key -out mario.crt',tags:['c']},
+{t:'Creare secondo client "unknown.user" senza OID',e:'Servirà per testare lo scenario device senza identità hardware.',cmd:'openssl req -newkey rsa:2048 -nodes \\\n  -keyout certs/clients/unknown.key \\\n  -out certs/clients/unknown.csr \\\n  -subj "/CN=unknown.user/O=ZTA"',tags:['c','t']},
+{t:'Verificare la catena di fiducia dei certificati',e:'Il comando deve restituire "OK" per tutti i certificati.',cmd:'openssl verify -CAfile certs/ca/ca.crt certs/clients/mario.crt\nopenssl x509 -in certs/clients/mario.crt \\\n  -text -noout | grep -A2 "Subject\\|OID"',tags:['c']}
+]},
+{id:'t03',title:'Avviare e verificare i container base',sub:'Smoke test · HEC token · connettività',subtasks:[
+{t:'Configurare il token HEC su Splunk',e:'Il token HEC è la chiave che i container usano per spedire log. Usa la REST API per crearlo in modo scriptabile.',cmd:'curl -k -u admin:${SPLUNK_PASSWORD} \\\n  https://localhost:8089/services/data/inputs/http \\\n  -d name=zta-hec -d index=main\n# Copia il token in .env come SPLUNK_HEC_TOKEN',tags:['s']},
+{t:'Testare l\'invio di un evento a Splunk HEC',e:'Manda un evento JSON manuale per verificare che la pipeline di ingestione funzioni.',cmd:'curl -k https://localhost:8088/services/collector/event \\\n  -H "Authorization: Splunk ${SPLUNK_HEC_TOKEN}" \\\n  -d \'{"event":{"test":"hello ZTA"},"index":"main"}\'',tags:['s']},
+{t:'Verificare la connessione a MongoDB',e:'Prova a connetterti con mongosh per verificare credenziali e raggiungibilità.',cmd:'docker exec -it zta-project-mongo-1 mongosh \\\n  -u admin -p ${MONGO_ROOT_PASS} \\\n  --eval "db.adminCommand({ping:1})"',tags:['m']},
+{t:'Creare database e collection di test',e:'Crea zta_db con la collection utenti e alcuni documenti di prova.',cmd:'docker exec -it zta-project-mongo-1 mongosh \\\n  -u admin -p secret \\\n  --eval \'use zta_db; db.utenti.insertMany([\n  {nome:"Alice",eta:30},\n  {nome:"Bob",eta:25}\n])\'',tags:['m']}
+]}
+]},
+{id:'p1',color:'#EEEDFE',tc:'#3C3489',label:'1',title:'Identification layer',sub:'mTLS · JA3 · OID device · IP/subnet',dur:'Sett. 2',tasks:[
+{id:'t10',title:'Configurare Envoy con mTLS obbligatorio',sub:'envoy.yaml · TLS downstream · require_client_certificate',subtasks:[
+{t:'Creare envoy.yaml con il listener base sulla porta 10000',e:'Scrivi la struttura minimale: static_resources con un listener su 0.0.0.0:10000.',cmd:'static_resources:\n  listeners:\n  - address:\n      socket_address:\n        address: 0.0.0.0\n        port_value: 10000\n    filter_chains: [...]',tags:['e']},
+{t:'Configurare il DownstreamTlsContext',e:'Aggiungi il blocco transport_socket alla filter_chain con il certificato server Envoy.',cmd:'transport_socket:\n  name: envoy.transport_sockets.tls\n  typed_config:\n    "@type": ...DownstreamTlsContext\n    common_tls_context:\n      tls_certificates:\n      - certificate_chain:\n          filename: /etc/certs/server/envoy.crt\n        private_key:\n          filename: /etc/certs/server/envoy.key',tags:['e','c']},
+{t:'Abilitare require_client_certificate: true',e:'Questo flag rende il certificato client obbligatorio. Envoy rifiuta connessioni senza certificato.',cmd:'validation_context:\n  trusted_ca:\n    filename: /etc/certs/ca/ca.crt\nrequire_client_certificate: true',tags:['e','c']},
+{t:'Montare la cartella certs/ nel container Envoy',e:'Nel docker-compose.yml aggiungi il volume binding.',cmd:'volumes:\n  - ./certs:/etc/certs:ro\n  - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro',tags:['e','d']},
+{t:'Testare rifiuto senza certificato e accesso con certificato',e:'curl senza cert deve fallire, con cert deve passare.',cmd:'# Deve fallire:\ncurl --cacert certs/ca/ca.crt https://localhost:10000\n\n# Deve funzionare:\ncurl --cacert certs/ca/ca.crt \\\n  --cert certs/clients/mario.crt \\\n  --key certs/clients/mario.key \\\n  https://localhost:10000',tags:['e','c','t']}
+]},
+{id:'t11',title:'Scrivere il filtro Lua per l\'estrazione delle identità',sub:'identity_extractor.lua · CN · OID · JA3 · IP',subtasks:[
+{t:'Creare identity_extractor.lua e abilitarlo in envoy.yaml',e:'Il filtro va nella http_filter chain PRIMA del router.',cmd:'http_filters:\n- name: envoy.filters.http.lua\n  typed_config:\n    "@type": ...LuaPerRoute\n    source_code:\n      inline_string: "..."\n- name: envoy.filters.http.router',tags:['e']},
+{t:'Estrarre il CN del certificato client (user-id)',e:'Usa handle:streamInfo():downstreamSslConnection():subjectPeerCertificate().',cmd:'local ssl = handle:streamInfo():downstreamSslConnection()\nlocal cn = "unknown"\nif ssl then\n  local subj = ssl:subjectPeerCertificate()\n  cn = subj:match("CN=([^,/]+)") or "unknown"\nend',tags:['e']},
+{t:'Estrarre l\'IP sorgente (network-id)',e:'Usa handle:streamInfo():downstreamRemoteAddress().',cmd:'local addr = handle:streamInfo():downstreamRemoteAddress()\nlocal ip = addr:match("^([^:]+)") or "0.0.0.0"',tags:['e']},
+{t:'Abilitare JA3 fingerprinting nel TLS Inspector',e:'Aggiungi tls_inspector al listener con enable_ja3_fingerprinting: true.',cmd:'listener_filters:\n- name: envoy.filters.listener.tls_inspector\n  typed_config:\n    "@type": ...TlsInspector\n    enable_ja3_fingerprinting: true',tags:['e']},
+{t:'Comporre l\'header x-identity-context',e:'Costruisci un JSON con tutti i campi estratti e iniettalo come header.',cmd:'local identity = string.format(\n  \'{"user":"%s","software":"%s","network_ip":"%s"}\',\n  cn, ja3, ip\n)\nhandle:headers():add("x-identity-context", identity)',tags:['e']},
+{t:'Verificare l\'header nei log di Envoy',e:'Controlla che x-identity-context sia valorizzato su ogni richiesta.',cmd:'docker logs zta-project-envoy-1 2>&1 | grep x-identity-context',tags:['e','t']}
+]},
+{id:'t12',title:'Configurare il filtro mongo_proxy',sub:'BSON decode · collection · command · query',subtasks:[
+{t:'Aggiungere mongo_proxy come network filter',e:'Il filtro va nella filter_chain a livello di rete, prima dell\'http_connection_manager.',cmd:'filter_chains:\n- filters:\n  - name: envoy.filters.network.mongo_proxy\n    typed_config:\n      "@type": ...MongoProxy\n      stat_prefix: mongo\n      access_log: /dev/stdout\n  - name: envoy.filters.network.tcp_proxy\n    typed_config:\n      cluster: mongodb_cluster',tags:['e','m']},
+{t:'Configurare il cluster upstream verso MongoDB',e:'Aggiungi mongodb_cluster nei clusters, puntando al container mongo sulla backend-net.',cmd:'clusters:\n- name: mongodb_cluster\n  type: STRICT_DNS\n  load_assignment:\n    cluster_name: mongodb_cluster\n    endpoints:\n    - lb_endpoints:\n      - endpoint:\n          address:\n            socket_address:\n              address: mongo\n              port_value: 27017',tags:['e','m']},
+{t:'Verificare decodifica comandi BSON nei log',e:'Esegui una query MongoDB tramite Envoy e controlla i log.',cmd:'mongosh --tls --tlsCAFile certs/ca/ca.crt \\\n  --tlsCertificateKeyFile certs/clients/mario.pem \\\n  --host localhost --port 10000 zta_db \\\n  --eval "db.utenti.find({eta:{\\$gt:20}})"',tags:['e','m','t']},
+{t:'Verificare i campi command e resource nell\'access_log',e:'Il mongo_proxy deve loggare: command_type, database_name, collection_name.',cmd:'# Nel log di Envoy:\n{"command_type":"OP_MSG","database":"zta_db",\n "collection":"utenti","query":{"eta":{"$gt":20}}}',tags:['e','m','t']}
+]},
+{id:'t13',title:'Test di identificazione end-to-end',sub:'mongosh · log · u,d,n,a,r verificati',subtasks:[
+{t:'Creare il file PEM combinato per mongosh',e:'mongosh richiede chiave e certificato in un unico file .pem.',cmd:'cat certs/clients/mario.crt certs/clients/mario.key > certs/clients/mario.pem',tags:['c','m']},
+{t:'Eseguire una query di test completa tramite Envoy',e:'Connettiti a MongoDB tramite Envoy usando il certificato di mario.rossi.',cmd:'mongosh --tls --tlsCAFile certs/ca/ca.crt \\\n  --tlsCertificateKeyFile certs/clients/mario.pem \\\n  "mongodb://admin:secret@localhost:10000/zta_db?authSource=admin"\n> db.utenti.find()',tags:['m','c','t']},
+{t:'Verificare i campi u,d,n,a,r nei log di Envoy',e:'Controlla che x-identity-context contenga: user, device/software, network_ip.',cmd:'docker logs zta-project-envoy-1 2>&1 | \\\n  grep -i "identity\\|collection\\|command" | head -20',tags:['e','t']},
+{t:'Testare lo scenario unknown.user',e:'Ripeti la query con unknown.user. Il campo device deve mostrare "no-tpm".',cmd:'mongosh --tls --tlsCAFile certs/ca/ca.crt \\\n  --tlsCertificateKeyFile certs/clients/unknown.pem \\\n  "mongodb://admin:secret@localhost:10000/zta_db"',tags:['c','t']}
+]}
+]},
+{id:'p2',color:'#E6F1FB',tc:'#0C447C',label:'2',title:'PEP — Envoy enforcement point',sub:'ext_authz · WAF Lua · logging Splunk',dur:'Sett. 3–4',tasks:[
+{id:'t20',title:'Configurare ext_authz verso OPA',sub:'filtro gRPC · failure_mode_allow · timeout',subtasks:[
+{t:'Aggiungere il filtro ext_authz alla http_filter chain',e:'Il filtro deve essere PRIMA del router. Chiama OPA via gRPC su ogni richiesta.',cmd:'http_filters:\n- name: envoy.filters.http.ext_authz\n  typed_config:\n    "@type": ...ExtAuthz\n    transport_api_version: V3\n    grpc_service:\n      envoy_grpc:\n        cluster_name: opa_cluster\n    timeout: 2s\n    failure_mode_allow: false',tags:['e','o']},
+{t:'Configurare il cluster OPA in envoy.yaml',e:'Aggiungi opa_cluster puntando al container OPA, porta 9002 (gRPC ext_authz).',cmd:'- name: opa_cluster\n  type: STRICT_DNS\n  http2_protocol_options: {}\n  load_assignment:\n    cluster_name: opa_cluster\n    endpoints:\n    - lb_endpoints:\n      - endpoint:\n          address:\n            socket_address:\n              address: opa\n              port_value: 9002',tags:['e','o']},
+{t:'Impostare failure_mode_allow: false (fail-closed)',e:'Se OPA non risponde, la richiesta viene NEGATA. Principio ZTA: in caso di dubbio, blocca.',cmd:'failure_mode_allow: false\n# Test: spegni OPA e verifica che le richieste vengano negate:\ndocker stop zta-project-opa-1\ncurl --cert ... https://localhost:10000',tags:['e','o','t']},
+{t:'Creare policy OPA allow-all per smoke test',e:'Verifica il flusso completo con una policy banale prima di quelle reali.',cmd:'# policies/allow_all.rego\npackage envoy.authz\ndefault allow = true\n\ncurl -X PUT localhost:8181/v1/policies/test \\\n  --data-binary @policies/allow_all.rego',tags:['o','t']},
+{t:'Creare policy deny-all e verificare 403',e:'Inverti la logica e verifica che mongosh riceva un errore di autorizzazione.',cmd:'# policies/deny_all.rego\npackage envoy.authz\ndefault allow = false\n# mongosh deve ricevere:\n# MongoServerError: not authorized',tags:['o','t']}
+]},
+{id:'t21',title:'Scrivere il WAF Lua per ispezione payload',sub:'query anomale · operatori pericolosi · blocco L7',subtasks:[
+{t:'Creare waf.lua con il framework di ispezione',e:'Il WAF è un secondo filtro Lua che interviene dopo l\'estrazione identità.',cmd:'function envoy_on_request(handle)\n  local body = handle:body():getBytes(\n    0, handle:body():length())\n  local query = body:lower()\n  -- check anomalie...\nend',tags:['e']},
+{t:'Rilevare query senza filtro su collection sensibili',e:'Una find({}) su collection sensibili è un data dump. Aggiungi rischio all\'header.',cmd:'if query:find("find.*utenti") and\n   query:find("filter.*{}")\nthen\n  handle:headers():add("x-waf-risk","high")\nend',tags:['e']},
+{t:'Bloccare operatori MongoDB pericolosi',e:'$where e $function eseguono JavaScript lato server. Blocca immediatamente.',cmd:'local dangerous = {"$where","$function","$accumulator","mapReduce"}\nfor _, op in ipairs(dangerous) do\n  if query:find(op, 1, true) then\n    handle:respond(\n      {[":status"]="403"},\n      "blocked by WAF: forbidden operator"\n    )\n    return\n  end\nend',tags:['e','t']},
+{t:'Loggare le anomalie WAF verso Splunk HEC',e:'Ogni rilevamento del WAF genera un evento in Splunk via HEC.',cmd:'local headers, body = handle:httpCall(\n  "splunk_cluster",\n  {[":method"]="POST",\n   [":path"]="/services/collector/event",\n   ["Authorization"]="Splunk "..HEC_TOKEN},\n  \'{"event":{"type":"waf_alert"}}\',\n  2000\n)',tags:['e','s']}
+]},
+{id:'t22',title:'Implementare logging strutturato verso Splunk',sub:'JSON access log · HEC · campi strutturati',subtasks:[
+{t:'Configurare access_log in formato JSON',e:'Definisci i campi esatti: identità, decisione, comando, risorsa, timestamp.',cmd:'access_log:\n- name: envoy.access_loggers.file\n  typed_config:\n    "@type": ...FileAccessLog\n    path: /dev/stdout\n    json_format:\n      user: "%REQ(x-identity-context)%"\n      decision: "%RESPONSE_CODE%"\n      timestamp: "%START_TIME%"',tags:['e','s']},
+{t:'Creare sidecar container per forwardare log a Splunk',e:'Un container alpine legge stdout di Envoy e manda gli eventi all\'HEC.',cmd:'log-forwarder:\n  image: alpine/curl\n  volumes: [./logs:/logs]\n  command: sh -c "tail -n0 -F /logs/envoy.log |\n    while read line; do\n      curl -s -k -X POST https://splunk:8088/services/collector/event\n        -H \\"Authorization: Splunk $HEC_TOKEN\\"\n        -d \\"{\\\\\"event\\\\\":$line}\\"\n    done"',tags:['s','d']},
+{t:'Verificare gli eventi in Splunk UI',e:'Nella UI (localhost:8000) fai una ricerca: index=main sourcetype=envoy.',cmd:'# SPL in Splunk:\nindex=main | rex field=_raw\n  "user\\":\\"(?<user>[^\\"]+)"\n| table _time user decision command',tags:['s','t']},
+{t:'Creare sourcetype "zta_access" con JSON extraction',e:'In Splunk: Settings → Source Types → New. Rende i campi clickable.',cmd:'# Settings → Source Types → New\n# Name: zta_access\n# Indexed Extractions: json',tags:['s']}
+]},
+{id:'t23',title:'Test del PEP con OPA stub',sub:'allow-all · deny-all · 403 · verifica header',subtasks:[
+{t:'Verificare passaggio richieste con policy allow-all',e:'Query MongoDB devono arrivare al database con OPA che risponde always true.',cmd:'opa eval -d /policies/allow_all.rego \\\n  -i <(echo \'{"input":{}}\') \\\n  "data.envoy.authz.allow"',tags:['o','t']},
+{t:'Verificare blocco con policy deny-all',e:'Il client deve ricevere un 403 da Envoy. Verifica il messaggio di errore.',cmd:'# mongosh con deny-all deve ricevere:\n# RBAC: access denied\n# o messaggio custom dalla policy',tags:['o','t']},
+{t:'Verificare i log OPA con la decisione e il contesto',e:'Con decision_logs abilitato, OPA logga ogni decisione con il contesto.',cmd:'docker logs zta-project-opa-1 2>&1 | grep -A5 "decision"\n# Abilita log in OPA:\n--set=decision_logs.console=true',tags:['o','t']},
+{t:'Misurare la latenza baseline del PEP',e:'Misura il tempo di risposta con e senza ext_authz. La differenza è l\'overhead.',cmd:'# Senza OPA (MongoDB diretto):\ntime mongosh localhost:27017 --eval "db.utenti.find()"\n# Con OPA (Envoy):\ntime mongosh --tls ... localhost:10000 --eval "db.utenti.find()"',tags:['t','o','e']}
+]}
+]},
+{id:'p3',color:'#FAEEDA',tc:'#633806',label:'3',title:'PDP — OPA + risk scoring',sub:'Policy Rego · SPL query · risk score · soglia',dur:'Sett. 4–5',tasks:[
+{id:'t30',title:'Progettare la struttura delle policy Rego',sub:'package · input schema · allow rule · risk_score',subtasks:[
+{t:'Definire lo schema dell\'input atteso',e:'Documenta i campi esatti che Envoy invia a OPA prima di scrivere le regole.',cmd:'# Input schema:\n# input.parsed_body.user (string)\n# input.parsed_body.device (string)\n# input.parsed_body.software (string)\n# input.parsed_body.network_ip (string)\n# input.parsed_body.resource (string)\n# input.parsed_body.command (string)',tags:['o']},
+{t:'Scrivere la regola allow principale',e:'allow è true se risk_score ≤ soglia per quell\'azione.',cmd:'package envoy.authz\ndefault allow := false\nallow if {\n  risk := risk_score\n  threshold := action_threshold[input_command]\n  risk <= threshold\n}',tags:['o']},
+{t:'Implementare risk_score come somma pesata',e:'Il risk score accumula punti per ogni fattore di rischio.',cmd:'risk_score := score if {\n  score := sum([\n    user_risk, device_risk,\n    network_risk, history_risk\n  ])\n}\nuser_risk := 30 if {\n  not known_users[input_user]\n} else := 0',tags:['o']},
+{t:'Definire whitelist utenti, device e reti',e:'Set statici come base. In una ZTA reale vengono da un identity store.',cmd:'known_users := {"mario.rossi","anna.verdi","admin"}\nknown_devices := {"device-laptop-001"}\ninternal_networks := {"172.20.0.0/16","10.0.0.0/8"}\naction_threshold := {\n  "find":60,"insert":40,"update":30,"delete":20\n}',tags:['o']},
+{t:'Testare la policy con opa eval in locale',e:'Test rapido prima di collegare tutto a Envoy.',cmd:'opa eval \\\n  -d policies/authz.rego \\\n  -i <(echo \'{"user":"mario.rossi","command":"find","network_ip":"172.20.0.5"}\') \\\n  "data.envoy.authz"',tags:['o','t']}
+]},
+{id:'t31',title:'Implementare la chiamata HTTP a Splunk da OPA',sub:'http.send · SPL · parse JSON · fallback',subtasks:[
+{t:'Testare manualmente la REST API di Splunk',e:'Verifica formato risposta prima di scrivere Rego.',cmd:'curl -k -u admin:${SPLUNK_PASSWORD} \\\n  "https://localhost:8089/services/search/jobs/export" \\\n  --data-urlencode "search=search index=main user=mario.rossi earliest=-1h | stats count by decision" \\\n  -d "output_mode=json"',tags:['s','o']},
+{t:'Scrivere http.send in Rego',e:'Chiamata HTTP sincrona a Splunk. OPA aspetta la risposta.',cmd:'splunk_history := result if {\n  url := sprintf(\n    "https://splunk:8089/.../export?search=%s&output_mode=json",\n    [urlquery.encode(...)]\n  )\n  response := http.send({\n    "method":"GET","url":url,\n    "headers":{"Authorization":"Basic ..."},\n    "tls_insecure_skip_verify":true\n  })\n  result := response.body\n}',tags:['o','s']},
+{t:'Parsare la risposta JSON di Splunk',e:'Estrai il conteggio delle richieste DENY recenti per il risk score.',cmd:'history_risk := score if {\n  data := splunk_history\n  deny_count := to_number(data.results[_].count)\n  deny_count > 5\n  score := 50\n} else := 0',tags:['o','s']},
+{t:'Gestire il fallback quando Splunk non risponde',e:'Usa not per rilevare il caso e impostare un valore neutro.',cmd:'history_risk := 15 if {\n  not splunk_history\n}',tags:['o','s']},
+{t:'Configurare caching con OPA bundles',e:'Bundle JSON pre-calcolato ogni 30s riduce la latenza.',cmd:'# config.yaml OPA:\nbundles:\n  splunk_data:\n    resource: http://cache:8080/bundle.tar.gz\n    polling:\n      min_delay_seconds: 30\n      max_delay_seconds: 60',tags:['o','s']}
+]},
+{id:'t32',title:'Definire le policy per azione e risorsa',sub:'matrice CRUD · collection sensibili · deny espliciti',subtasks:[
+{t:'Scrivere la matrice delle policy su documento',e:'Prima del codice: tabella azione × collection × soglia rischio.',cmd:'# matrice_policy.md\n| Action | utenti | payments | logs |\n|--------|--------|----------|------|\n| find   |   60   |    40    |  80  |\n| insert |   40   |    20    |  60  |\n| update |   30   |    15    |  40  |\n| delete |   15   |    10    |  20  |\n| drop   |  DENY  |   DENY   | DENY |',tags:['o']},
+{t:'Implementare deny esplicito per operazioni distruttive',e:'Il drop deve essere sempre negato indipendentemente dal risk score.',cmd:'deny if {\n  input_command == "drop"\n}\ndeny if {\n  input_command == "delete"\n  input_resource == "payments"\n  risk_score > 10\n}\nallow if {\n  not deny\n  risk_score <= action_resource_threshold\n}',tags:['o']},
+{t:'Implementare penalty per reti esterne',e:'Richieste da IP fuori dalla subnet interna: +15 al risk score.',cmd:'network_risk := 15 if {\n  not net.cidr_contains(\n    "172.20.0.0/16", input_ip)\n  not net.cidr_contains(\n    "10.0.0.0/8", input_ip)\n} else := 0',tags:['o']}
+]},
+{id:'t33',title:'Scrivere unit test per le policy Rego',sub:'opa test · scenari allow/deny · coverage',subtasks:[
+{t:'Creare authz_test.rego con la struttura base',e:'OPA ha un framework di test nativo. Regole che iniziano con test_.',cmd:'package envoy.authz_test\nimport data.envoy.authz\n\ntest_nome_scenario if {\n  result := authz.allow with input as {...}\n  result == true\n}',tags:['o','t']},
+{t:'Test: utente legittimo + device noto → allow',e:'Il caso felice: tutti i fattori positivi, risk score basso.',cmd:'test_legit_user_allow if {\n  authz.allow with input as {\n    "user":"mario.rossi",\n    "device":"device-laptop-001",\n    "network_ip":"172.20.0.5",\n    "command":"find",\n    "resource":"utenti"\n  }\n}',tags:['o','t']},
+{t:'Test: utente sconosciuto → deny',e:'CN non nel set known_users, user_risk = 30.',cmd:'test_unknown_user_deny if {\n  not authz.allow with input as {\n    "user":"hacker.evil",\n    "command":"find",\n    "network_ip":"172.20.0.5"\n  }\n}',tags:['o','t']},
+{t:'Test: comando drop → deny sempre',e:'Drop deve essere negato indipendentemente dall\'identità.',cmd:'test_drop_always_deny if {\n  not authz.allow with input as {\n    "user":"mario.rossi",\n    "command":"drop",\n    "resource":"utenti"\n  }\n}',tags:['o','t']},
+{t:'Eseguire tutti i test con opa test',e:'Aggiungi --coverage per vedere le righe non coperte.',cmd:'opa test policies/ -v\n# Output atteso: PASS: 8/8\nopa test policies/ --coverage',tags:['o','t']}
+]},
+{id:'t34',title:'Integrazione completa OPA-Envoy-Splunk',sub:'end-to-end · startup sequence · benchmark',subtasks:[
+{t:'Configurare startup order con depends_on',e:'I container devono avviarsi: MongoDB → Splunk → OPA → Envoy.',cmd:'envoy:\n  depends_on:\n    opa: {condition: service_healthy}\n    mongo: {condition: service_healthy}\nopa:\n  depends_on:\n    splunk: {condition: service_healthy}',tags:['d','o','e','s']},
+{t:'Test allow end-to-end con risk score reale',e:'Genera traffico benigno e verifica che OPA legga la history da Splunk.',cmd:'for i in {1..5}; do\n  mongosh --tls ... --eval "db.utenti.find()"\ndone\ndocker logs zta-project-opa-1 | grep risk_score',tags:['o','e','s','t']},
+{t:'Misurare la latenza end-to-end con OPA+Splunk',e:'Obiettivo: sotto 100ms. Se supera, usa OPA bundles invece di http.send.',cmd:'# Misura latenza:\ntime mongosh --tls ... localhost:10000 \\\n  --eval "db.utenti.find()"\n# Confronta con accesso diretto MongoDB',tags:['t','o','e']}
+]}
+]},
+{id:'p4',color:'#FAECE7',tc:'#712B13',label:'4',title:'Sicurezza di rete — NFTables + Snort',sub:'Firewall L3 · NIDS · blocklist dinamica',dur:'Sett. 6',tasks:[
+{id:'t40',title:'Configurare NFTables come primo firewall',sub:'chain · @blocklist · rate limiting · NET_ADMIN',subtasks:[
+{t:'Creare container con NET_ADMIN per NFTables',e:'NFTables richiede privilegi kernel. Usa cap_add: NET_ADMIN, evita --privileged.',cmd:'nftables:\n  image: alpine\n  cap_add: [NET_ADMIN]\n  network_mode: host\n  volumes:\n    - ./nftables/nftables.conf:/etc/nftables.conf\n  command: sh -c "apk add nftables &&\n    nft -f /etc/nftables.conf && tail -f /dev/null"',tags:['n']},
+{t:'Scrivere la struttura base di nftables.conf',e:'Tre chain fondamentali: input, forward, output. Policy drop di default.',cmd:'table inet filter {\n  chain input {\n    type filter hook input priority 0;\n    policy drop;\n    ct state established,related accept\n    tcp dport 10000 accept  # Envoy\n    tcp dport 22 accept     # SSH admin\n    tcp dport 27017 drop    # MongoDB: mai diretto\n  }\n}',tags:['n']},
+{t:'Aggiungere il set @blocklist dinamico',e:'Il set è aggiornabile a runtime senza ricaricare il ruleset.',cmd:'set blocklist {\n  type ipv4_addr\n  flags interval\n  timeout 1h  # auto-scadenza\n}\nchain input {\n  ip saddr @blocklist drop\n  ...\n}',tags:['n']},
+{t:'Implementare rate limiting per DDoS',e:'Limita nuove connessioni SYN per IP al secondo.',cmd:'tcp flags syn limit rate 20/second \\\n  burst 50 packets accept\ntcp flags syn drop',tags:['n']},
+{t:'Testare blocco diretto di MongoDB',e:'Tentativo connessione porta 27017 dall\'esterno deve ricevere timeout.',cmd:'telnet localhost 27017\n# Timeout atteso\nnft list ruleset | grep -A5 "blocklist"',tags:['n','t']}
+]},
+{id:'t41',title:'Configurare Snort 3 con regole personalizzate',sub:'snort.lua · port scan · alert_json · IDS mode',subtasks:[
+{t:'Avviare Snort in modalità IDS',e:'Snort deve sniffare il traffico sulla rete Docker.',cmd:'docker run -d --name snort \\\n  --cap-add=NET_ADMIN --net=host \\\n  -v $(pwd)/snort:/etc/snort \\\n  -v $(pwd)/logs/snort:/var/log/snort \\\n  ciscotalos/snort3 \\\n  snort -i eth0 -c /etc/snort/snort.lua \\\n  -A alert_json -l /var/log/snort',tags:['sn']},
+{t:'Scrivere la regola per port scanning',e:'Molte SYN su porte diverse in poco tempo = port scan.',cmd:'alert tcp any any -> $HOME_NET any (\n  msg:"PORT SCAN RILEVATO";\n  flags:S;\n  threshold: type both,\n    track by_src, count 10, seconds 5;\n  sid:1000001; rev:1;\n)',tags:['sn']},
+{t:'Scrivere la regola per connessione diretta MongoDB',e:'Qualsiasi tentativo diretto a porta 27017 non da backend-net.',cmd:'alert tcp !$BACKEND_NET any -> $HOME_NET 27017 (\n  msg:"DIRECT MONGODB ACCESS ATTEMPT";\n  flow:to_server,established;\n  sid:1000002; rev:1;\n)',tags:['sn']},
+{t:'Configurare snort.lua per output JSON',e:'Output JSON facilita l\'integrazione con Splunk.',cmd:'-- snort.lua\nalert_json = {\n  file = true,\n  limit = 100,\n  fields = "timestamp msg src dst sport dport proto"\n}',tags:['sn']},
+{t:'Verificare alert con nmap test',e:'Genera traffico sospetto e controlla il file di alert.',cmd:'docker run --rm --net=host instrumentisto/nmap \\\n  -sS -p 1-1000 localhost\ndocker exec snort \\\n  cat /var/log/snort/alert.json | head -5',tags:['sn','t']}
+]},
+{id:'t42',title:'Collegare Snort a Splunk e blocklist NFTables',sub:'forwarder · block-ip.sh · pipeline automatica',subtasks:[
+{t:'Creare sidecar che forwarda alert.json a Splunk HEC',e:'Container che legge il file JSON di Snort e manda ogni alert all\'HEC.',cmd:'snort-forwarder:\n  image: alpine/curl\n  volumes: [./logs/snort:/logs]\n  command: sh -c "tail -n0 -F /logs/alert.json |\n    while read line; do\n      curl -s -k -X POST\n        https://splunk:8088/services/collector/event\n        -H \\"Authorization: Splunk $HEC_TOKEN\\"\n        -d \\"{\\\\\"event\\\\\":$line,\n          \\\\\"sourcetype\\\\\":\\\\\"snort_alert\\\\\"}\\";\n    done"',tags:['sn','s']},
+{t:'Scrivere lo script block-ip.sh',e:'Aggiunge un IP alla @blocklist di NFTables. Chiamato da Splunk alert.',cmd:'#!/bin/sh\n# block-ip.sh <IP>\nIP=$1\n[ -z "$IP" ] && exit 1\nnft add element inet filter blocklist { $IP }\necho "$(date): Blocked $IP" >> /var/log/blocks.log',tags:['n','sn']},
+{t:'Creare saved search Splunk per trigger automatico',e:'Ogni minuto: se >5 alert Snort da stesso IP, chiama block-ip.sh.',cmd:'# SPL:\nindex=main sourcetype=snort_alert earliest=-1m\n| stats count by src_ip\n| where count > 5\n| eval cmd="curl http://nftables-api/block?ip="+src_ip',tags:['s','n','sn']},
+{t:'Testare pipeline completa Snort→Splunk→NFTables',e:'Il momento più importante: nmap → alert → blocco automatico in ~60s.',cmd:'docker run --rm --net=host \\\n  instrumentisto/nmap -sS localhost\nsleep 60\nnft list set inet filter blocklist',tags:['sn','s','n','t']}
+]},
+{id:'t43',title:'Test simulazione attacchi',sub:'nmap · direct MongoDB · $where · verifica blocco',subtasks:[
+{t:'Simulare port scan e cronometrare il rilevamento',e:'Misura quanto impiega dalla scan all\'alert in Splunk.',cmd:'START=$(date +%s)\ndocker run --rm --net=host \\\n  instrumentisto/nmap -sS -T4 -p 1-65535 localhost\necho "Scan lanciato: $(date)"\nwatch -n1 "docker exec snort tail -1 /var/log/snort/alert.json"',tags:['sn','t']},
+{t:'Tentare connessione diretta a MongoDB',e:'Porta 27017 deve essere bloccata da NFTables con timeout.',cmd:'timeout 5 telnet localhost 27017 || echo "BLOCKED"\nnft list ruleset | grep -A2 "27017"',tags:['n','sn','t']},
+{t:'Testare blocco query con $where da WAF',e:'Il WAF Envoy deve intercettare e restituire 403.',cmd:'mongosh --tls ... localhost:10000/zta_db --eval \\\n  "db.utenti.find({\\$where: \'this.eta > 20\'})"',tags:['e','t']}
+]}
+]},
+{id:'p5',color:'#FCEBEB',tc:'#791F1F',label:'5',title:'Testing e demo finale',sub:'Scenari · dashboard Splunk · demo.sh · README',dur:'Sett. 7–8',tasks:[
+{id:'t50',title:'Creare gli scenari di test benigni',sub:'5 scenari legittimi · traffico reale · Splunk log',subtasks:[
+{t:'Script scenario-1: utente legittimo da rete interna',e:'Caso base: mario.rossi, device noto, IP interno, find → allow con risk score ~10.',cmd:'#!/bin/bash\nfor i in {1..10}; do\n  mongosh --tls --tlsCAFile certs/ca/ca.crt \\\n    --tlsCertificateKeyFile certs/clients/mario.pem \\\n    "mongodb://admin:secret@localhost:10000/zta_db" \\\n    --eval "db.utenti.find({eta:{\\$lt:50}})"\n  sleep 2\ndone',tags:['t']},
+{t:'Script scenario-2: stesso utente da rete esterna',e:'IP fuori dalla subnet: risk score sale +15 ma find rimane sotto soglia.',cmd:'# Simula IP esterno modificando subnet\n# o usando container su rete separata',tags:['t']},
+{t:'Script scenario-3: utente senza OID hardware',e:'unknown.user: device_risk +20. Può essere allow o deny secondo policy.',cmd:'mongosh --tls --tlsCAFile certs/ca/ca.crt \\\n  --tlsCertificateKeyFile certs/clients/unknown.pem \\\n  "mongodb://admin:secret@localhost:10000/zta_db"',tags:['t','c']},
+{t:'Script scenario-4: history negativa che accumula deny',e:'10 delete in 2 minuti costruiscono history in Splunk. Alla Nx anche le find vengono bloccate.',cmd:'for i in {1..10}; do\n  mongosh ... --eval \\\n    "db.utenti.deleteOne({_id:ObjectId()})"\n  sleep 10\ndone\nmongosh ... --eval "db.utenti.find()"',tags:['t','o','s']},
+{t:'Script scenario-5: delete su collection payments',e:'Soglia minima: anche mario.rossi non può fare delete su payments.',cmd:'mongosh ... --eval \\\n  "db.payments.deleteOne({importo:{\\$gt:1000}})"',tags:['t','o']}
+]},
+{id:'t51',title:'Creare gli scenari di attacco simulato',sub:'3 attacchi · rilevamento · blocco verificato',subtasks:[
+{t:'Script attacco-1: port scan con cronometro',e:'Misura il tempo dal lancio all\'alert in Splunk.',cmd:'#!/bin/bash\nSTART=$(date +%s)\ndocker run --rm --net=host \\\n  instrumentisto/nmap -sS -T4 -p 1-10000 localhost\necho "Attendi alert su Splunk: localhost:8000"',tags:['sn','t']},
+{t:'Script attacco-2: bypass Envoy verso MongoDB diretto',e:'Verifica che due livelli di difesa (NFTables + Snort) siano attivi.',cmd:'#!/bin/bash\necho "Tentativo accesso diretto MongoDB..."\ntimeout 5 nc -zv localhost 27017 2>&1 || echo "BLOCKED by NFTables"\ndocker exec snort grep "DIRECT MONGODB" /var/log/snort/alert.json',tags:['n','sn','t']},
+{t:'Script attacco-3: injection con $where',e:'WAF Envoy deve bloccare a L7 prima che OPA venga interrogato.',cmd:'#!/bin/bash\nmongosh --tls --tlsCAFile certs/ca/ca.crt \\\n  --tlsCertificateKeyFile certs/clients/mario.pem \\\n  "mongodb://admin:secret@localhost:10000/zta_db" \\\n  --eval "db.utenti.find({\\$where: \'sleep(2000)||\' true})" 2>&1\necho "Atteso: 403 da WAF Envoy"',tags:['e','t']}
+]},
+{id:'t52',title:'Costruire la dashboard Splunk',sub:'4 pannelli · time chart · risk users · alert',subtasks:[
+{t:'Creare pannello "Accessi allowed vs denied nel tempo"',e:'Timechart SPL che mostra distribuzione allow/deny nell\'ultima ora.',cmd:'index=main sourcetype=zta_access earliest=-1h\n| timechart span=5m count by decision\n# Tipo: Line Chart',tags:['s']},
+{t:'Creare pannello "Top utenti per risk score"',e:'Utenti con risk score medio più alto nell\'ultima ora.',cmd:'index=main sourcetype=zta_access earliest=-1h\n| stats avg(risk_score) as avg_risk, count by user\n| sort -avg_risk | head 10\n# Tipo: Table',tags:['s']},
+{t:'Creare pannello "Alert Snort per tipo"',e:'Distribuzione degli alert per categoria.',cmd:'index=main sourcetype=snort_alert earliest=-1h\n| stats count by msg\n| sort -count\n# Tipo: Bar Chart',tags:['s','sn']},
+{t:'Creare pannello "Blocklist NFTables attiva"',e:'IP bloccati e da quanti minuti.',cmd:'index=main sourcetype=block_log earliest=-24h\n| stats max(_time) as blocked_at by ip\n| eval since=round((now()-blocked_at)/60)." min ago"\n| table ip since\n# Tipo: Table',tags:['s','n']},
+{t:'Esportare la dashboard come file XML',e:'Includi il file nel repository per ripristino rapido.',cmd:'# Splunk Web:\n# Settings → Dashboards → Edit Source\n# Copia in splunk/dashboard_zta.xml',tags:['s']}
+]},
+{id:'t53',title:'Documentazione finale e README professionale',sub:'architettura · avvio · limitazioni · estensioni',subtasks:[
+{t:'Scrivere sezione Architecture con diagramma ASCII',e:'Diagramma testuale del flusso e tabella componenti/porte.',cmd:'## Architecture\nClient → NFTables (L3) → Snort (NIDS)\n  → Envoy:10000 (PEP)\n  → OPA:9002 (PDP) ← Splunk:8089 (SIEM)\n  → MongoDB:27017 (Resource)',tags:['d']},
+{t:'Scrivere Quick Start in 3 comandi',e:'Avvio completo in meno di 5 minuti.',cmd:'git clone ... && cd zta-project\n./scripts/generate-certs.sh\ndocker compose up -d\n./scripts/demo.sh',tags:['d']},
+{t:'Documentare le limitazioni note',e:'Limitazioni dichiarate = maturità tecnica.',cmd:'## Limitazioni\n- JA3 senza TPM: device indistinguibili con stesso OS/client\n- Latenza OPA→Splunk: 50-200ms per richiesta\n- NFTables richiede NET_ADMIN\n- Splunk Free: no alerting dopo 60gg trial',tags:['d']},
+{t:'Documentare le possibili estensioni future',e:'Dimostra visione sul dominio.',cmd:'## Estensioni future\n- SPIFFE/SPIRE per identità crittografica workload\n- OPA bundle server per policy centralizzate\n- Sostituzione Splunk con stack ELK\n- Kerberos per autenticazione enterprise',tags:['d']}
+]},
+{id:'t54',title:'Preparare lo script demo.sh',sub:'sequenza automatizzata · 5 minuti · output colorato',subtasks:[
+{t:'Creare struttura demo.sh con output colorato',e:'Output visivamente leggibile durante la presentazione.',cmd:'#!/bin/bash\nGREEN="\\033[0;32m" RED="\\033[0;31m" NC="\\033[0m" BOLD="\\033[1m"\nstep() { echo -e "\\n${BOLD}=== STEP $1: $2 ===${NC}"; }\nok()   { echo -e "${GREEN}[OK]${NC} $1"; }\nfail() { echo -e "${RED}[FAIL]${NC} $1"; }',tags:['t','d']},
+{t:'Step 1: avvio sistema e health check',e:'Verifica che tutti i container siano running. Stop immediato se qualcuno non parte.',cmd:'step 1 "Avvio sistema e health check"\ndocker compose up -d --wait\ndocker compose ps --format \\\n  "table {{.Name}}\\t{{.Status}}"',tags:['d','t']},
+{t:'Step 2: traffico benigno con allow visibile',e:'3 query MongoDB con mario.rossi, visibili come allow in Splunk.',cmd:'step 2 "Traffico benigno — 3 query autorizzate"\nfor i in 1 2 3; do\n  mongosh --tls ... --eval "db.utenti.find()"\n  ok "Query $i: allow (risk_score basso)"\n  sleep 1\ndone',tags:['t','o','s']},
+{t:'Step 3: attacco port scan con blocco automatico',e:'Il momento più spettacolare della demo: nmap → alert → blocklist.',cmd:'step 3 "Attacco: port scan → blocco automatico"\ndocker run --rm --net=host \\\n  instrumentisto/nmap -sS -T4 -p 1-1000 localhost &\nok "Port scan lanciato"\nsleep 30\nok "Blocklist NFTables:"\nnft list set inet filter blocklist',tags:['sn','n','t']},
+{t:'Testare demo.sh completo e cronometrare',e:'Deve stare sotto 5 minuti. Se supera, taglia i sleep.',cmd:'time ./scripts/demo.sh\n# Obiettivo: < 5:00',tags:['t','d']}
+]}
+]}
+];
+
+let stState={}, totalST=0;
+function renderAll(){
+  const plan=document.getElementById('plan');
+  let html='';
+  DATA.forEach((ph,pi)=>{
+    let phST=0;
+    ph.tasks.forEach(t=>{phST+=t.subtasks.length;totalST+=t.subtasks.length;});
+    const dotCount=Math.min(ph.tasks.length,6);
+    html+=`<div class="phase" id="${ph.id}">
+<div class="ph" onclick="togglePhase('${ph.id}')">
+  <div class="pbadge" style="background:${ph.color};color:${ph.tc}">${ph.label}</div>
+  <div class="pinfo"><div class="ptitle">${ph.title}</div><div class="psub">${ph.sub}</div></div>
+  <div class="pmeta">
+    <span class="dpill">${ph.dur}</span>
+    <div class="dots" id="dots_${ph.id}">${'<div class="dot"></div>'.repeat(dotCount)}</div>
+  </div>
+  <div class="chev">▼</div>
+</div>
+<div class="pbody">`;
+    ph.tasks.forEach((tk,ti)=>{
+      html+=`<div class="task" id="${ph.id}_${ti}">
+<div class="tk-h" onclick="toggleTask('${ph.id}','${ti}')">
+  <div class="tcb" id="tcb_${ph.id}_${ti}" onclick="event.stopPropagation();taskCheckAll('${ph.id}','${ti}')"></div>
+  <div class="tinfo"><div class="ttitle" id="ttl_${ph.id}_${ti}">${tk.title}</div><div class="tsub">${tk.sub}</div></div>
+  <div class="tcount" id="tc_${ph.id}_${ti}">0/${tk.subtasks.length}</div>
+  <div class="tchev">▼</div>
+</div>
+<div class="tbody">
+<div class="stlabel">Sottotask atomici</div>
+<div class="subtasks">`;
+      tk.subtasks.forEach((st,si)=>{
+        const sid=`${ph.id}_${ti}_${si}`;
+        stState[sid]=false;
+        const tags=(st.tags||[]).map(tg=>{
+          const m={e:'Envoy',o:'OPA',s:'Splunk',n:'NFTables',sn:'Snort',m:'MongoDB',c:'Certificati',d:'Docker',t:'Test'};
+          return `<span class="tag t-${tg}">${m[tg]||tg}</span>`;
+        }).join('');
+        const cmd=st.cmd?`<code class="cmd">${st.cmd.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</code>`:'';
+        html+=`<div class="st" id="st_${sid}" onclick="toggleST('${sid}','${ph.id}','${ti}')">
+  <div class="scb" id="scb_${sid}"></div>
+  <div class="stcontent">
+    <div class="stt" id="stt_${sid}">${st.t}</div>
+    <div class="exp">${st.e}</div>
+    ${cmd}<div class="tags">${tags}</div>
+  </div>
+</div>`;
+      });
+      html+='</div></div></div>';
+    });
+    html+='</div></div>';
+  });
+  plan.innerHTML=html;
+  document.getElementById('glabel').textContent=`0 / ${totalST} sottotask · 0%`;
+}
+
+function togglePhase(id){document.getElementById(id).classList.toggle('open');}
+function toggleTask(ph,ti){document.getElementById(`${ph}_${ti}`).classList.toggle('open');}
+
+function taskCheckAll(phId,ti){
+  const ph=DATA.find(p=>p.id===phId);
+  const tk=ph.tasks[parseInt(ti)];
+  const allDone=tk.subtasks.every((_,si)=>stState[`${phId}_${ti}_${si}`]);
+  tk.subtasks.forEach((_,si)=>{
+    const sid=`${phId}_${ti}_${si}`;
+    stState[sid]=!allDone;
+    document.getElementById('scb_'+sid)?.classList.toggle('ck',!allDone);
+    document.getElementById('st_'+sid)?.classList.toggle('done',!allDone);
+  });
+  refreshTask(phId,ti);
+  refreshGlobal();
+  refreshDots(phId);
+}
+
+function toggleST(sid,phId,ti){
+  stState[sid]=!stState[sid];
+  document.getElementById('scb_'+sid)?.classList.toggle('ck',stState[sid]);
+  document.getElementById('st_'+sid)?.classList.toggle('done',stState[sid]);
+  refreshTask(phId,ti);
+  refreshGlobal();
+  refreshDots(phId);
+}
+
+function refreshTask(phId,ti){
+  const ph=DATA.find(p=>p.id===phId);
+  const tk=ph.tasks[parseInt(ti)];
+  const done=tk.subtasks.filter((_,si)=>stState[`${phId}_${ti}_${si}`]).length;
+  const total=tk.subtasks.length;
+  const tc=document.getElementById(`tc_${phId}_${ti}`);
+  const tcb=document.getElementById(`tcb_${phId}_${ti}`);
+  const ttl=document.getElementById(`ttl_${phId}_${ti}`);
+  if(tc) tc.textContent=`${done}/${total}`;
+  if(tcb){tcb.classList.remove('ck','part');if(done===total)tcb.classList.add('ck');else if(done>0)tcb.classList.add('part');}
+  if(ttl) ttl.classList.toggle('done',done===total);
+}
+
+function refreshDots(phId){
+  const ph=DATA.find(p=>p.id===phId);
+  const dotsEl=document.getElementById('dots_'+phId);
+  if(!dotsEl) return;
+  const done=ph.tasks.filter((tk,ti)=>tk.subtasks.every((_,si)=>stState[`${phId}_${ti}_${si}`])).length;
+  dotsEl.querySelectorAll('.dot').forEach((d,i)=>{d.classList.toggle('d',i<done);});
+}
+
+function refreshGlobal(){
+  let done=0,tDone=0,tStarted=0,phStarted=new Set();
+  DATA.forEach(ph=>{
+    ph.tasks.forEach((tk,ti)=>{
+      const d=tk.subtasks.filter((_,si)=>stState[`${ph.id}_${ti}_${si}`]).length;
+      done+=d;
+      if(d===tk.subtasks.length) tDone++;
+      if(d>0){tStarted++;phStarted.add(ph.id);}
+    });
+  });
+  const pct=totalST>0?Math.round(done/totalST*100):0;
+  document.getElementById('gfill').style.width=pct+'%';
+  document.getElementById('glabel').textContent=`${done} / ${totalST} sottotask completati · ${pct}%`;
+  document.getElementById('sst').textContent=done;
+  document.getElementById('stk').textContent=tStarted;
+  document.getElementById('sph').textContent=phStarted.size+'/6';
+  document.getElementById('stt2').textContent=tDone;
+}
+
+renderAll();
+</script>
+</body>
+</html>
