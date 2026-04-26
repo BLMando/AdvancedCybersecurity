@@ -7,6 +7,9 @@ services:
       dockerfile: Dockerfile
     container_name: mongo
     restart: unless-stopped
+    # ONLY FOR DEV, MONGO SHOULD NOT BE EXPOSED IN PRODUCTION
+    ports:
+      - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}

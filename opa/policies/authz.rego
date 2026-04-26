@@ -2,20 +2,33 @@ package envoy.authz
 
 import future.keywords
 
-# Default to deny. A request must prove it is safe.
+# ──────────────────────────────────────────────────────────────────────────────
+# Merged Authorization Policy
+#
+# Combines:
+#   - Risk-score based access control (from original authz.rego)
+#   - Role-based + collection-level access (from healthcare_rls.rego)
+#
+# Final allow requires:
+#   1. Valid action (not destructive)
+#   2. risk_score <= threshold
+#   3. role_action_allowed (role × collection × command matrix)
+#   4. No hard-deny rules triggered
+# ──────────────────────────────────────────────────────────────────────────────
+
 default allow := false
 
-# Final decision: risk must stay under the threshold and the action must be
-# permitted for the current collection.
 allow if {
 	valid_action
 	risk_score <= threshold
 	action_allowed
+	role_action_allowed
+	not hard_deny
 }
 
 # Risk is the sum of the three identity dimensions.
 risk_score := total_risk if {
-	total_risk := user_risk + device_risk + network_risk
+	total_risk := user_risk + device_risk + network_risk + collection_risk_boost
 }
 
 # Known users are trusted; unknown users add risk.
@@ -33,7 +46,6 @@ network_risk := 0 if {
 	is_internal_network
 } else := 15
 
-# Each MongoDB command has its own tolerance level.
 threshold := t if {
 	action_name == "find"
 	t := 60
@@ -48,7 +60,8 @@ threshold := t if {
 	t := 20
 }
 
-# Some actions are always suspicious, especially destructive ones.
+# ─── Action Validation (from original authz.rego) ────────────────────────────────
+
 action_allowed if {
 	valid_action
 	not is_destructive_operation
@@ -62,7 +75,32 @@ action_allowed if {
 	not is_destructive_operation
 }
 
-# The policy accepts both Envoy-shaped input and direct test payloads.
+valid_action if {
+	action_name in {"find", "insert", "update", "delete", "aggregate"}
+}
+
+is_destructive_operation if {
+	action_name in ["drop", "delete_database"]
+}
+
+collection_is_sensitive if {
+	collection_name in sensitive_collections
+}
+
+sensitive_collections := {
+	"clinical_records", 
+    "billing"
+}
+
+# ─── Collection Risk Boost (from healthcare_rls.rego) ────────────────────────
+
+collection_risk_boost := boost if {
+	collection_name in {"clinical_records", "billing"}
+	boost := 15
+} else := 0
+
+# ─── Identity Extraction (from original authz.rego) ───────────────────────────
+
 user_identity := user if {
 	user := object.get(
 		object.get(input, "attributes", {}),
@@ -83,26 +121,25 @@ device_identity := device if {
 	device != ""
 
 } else := ja3 if {
-	tls_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})
+	tls_meta := object.get(object.get(input.attributes, "metadata_context", {}), "filter_metadata", {})
 	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
 	ja3 := object.get(tls_inspector, "ja3", "")
 	ja3 != ""
 
 } else := ja3h if {
-	tls_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})
+	tls_meta := object.get(object.get(input.attributes, "metadata_context", {}), "filter_metadata", {})
 	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
 	ja3h := object.get(tls_inspector, "ja3_hash", "")
 	ja3h != ""
 
 } else := "no-tpm"
 
-# Network identity is simply the source IP used for subnet checks.
 network_identity := ip if {
 	ip := input.parsed_body.network_ip
 	ip != ""
 
 } else := ip if {
-	ip := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "address", "")
+	ip := object.get(object.get(input.attributes, "source", {}), "address", "")
 	ip != ""
 
 } else := "0.0.0.0"
@@ -119,58 +156,113 @@ collection_name := coll if {
 	coll != ""
 } else := "unknown"
 
-# Users explicitly trusted in the current test scenario.
 known_users := {
 	"mario.rossi",
 	"anna.verdi",
+	"giulia.bianchi", 
+	"luca.ferrari",
 	"admin",
 	"test.user"
 }
 
-# Collections that deserve stricter handling because they contain more
-# valuable or sensitive data.
-sensitive_collections := {
-	"payments",
-	"credentials",
-	"audit_logs",
-	"security_events"
-}
-
-collection_is_sensitive if {
-	collection_name in sensitive_collections
-}
-
-valid_action if {
-	action_name in {"find", "insert", "update", "delete"}
-}
-
-# Simple subnet matching is enough for this phase.
 is_internal_network if {
 	cidr_match := regex.match(`^(172\.20\.|10\.)`, network_identity)
 	cidr_match == true
 }
 
-# Drop and database-destroying actions are never acceptable.
-is_destructive_operation if {
-	action_name in ["drop", "delete_database"]
+# ─── Role Mapping (from healthcare_rls.rego) ────────────────────────────────
+
+user_role_map := {
+	"mario.rossi":    "doctor",
+	"anna.verdi":     "billing_staff",
+	"giulia.bianchi": "auditor",
+	"luca.ferrari":   "receptionist",
+	"admin":         "admin",
+	"test.user":      "auditor"
 }
 
-# These headers summarize the evaluation context for debugging and audit.
-response_headers := object.union_n([
-	{"x-zta-user": user_identity},
-	{"x-zta-device": device_identity},
-	{"x-zta-network": network_identity},
-	{"x-zta-action": action_name},
-	{"x-zta-collection": collection_name},
-	{"x-zta-risk-score": sprintf("%d", [risk_score])},
-	{"x-zta-decision": decision_label}
-])
+current_role := role if {
+	role := user_role_map[user_identity]
+} else := "unknown"
 
-decision_label := "ALLOW" if {
-	allow
-} else := "DENY"
+# ─── Permission Matrix (from healthcare_rls.rego) ────────────────────────────
 
-# Explicit deny rules help with clarity in tests and with non-recoverable cases.
+permissions := {
+	"admin": {
+		"patients":         {"find", "insert", "update", "delete"},
+		"providers":        {"find", "insert", "update", "delete"},
+		"admissions":       {"find", "insert", "update", "delete"},
+		"clinical_records": {"find", "insert", "update", "delete"},
+"billing":          {"find", "insert", "update", "delete"}
+	},
+	"doctor": {
+		"patients":         {"find"},
+		"providers":        {"find"},
+		"admissions":       {"find", "insert", "update"},
+		"clinical_records": {"find", "insert", "update"},
+		"billing":          {}
+	},
+	"billing_staff": {
+		"patients":         {"find"},
+		"providers":        {"find"},
+		"admissions":       {"find"},
+		"clinical_records": {},
+		"billing":          {"find", "insert", "update"}
+	},
+	"auditor": {
+		"patients":         {"find"},
+		"providers":        {"find"},
+		"admissions":       {"find"},
+		"clinical_records": {"find"},
+		"billing":          {"find"}
+	},
+	"receptionist": {
+		"patients":         {"find", "insert", "update"},
+		"providers":        {"find"},
+		"admissions":       {"find", "insert", "update"},
+		"clinical_records": {},
+		"billing":          {}
+	},
+	"unknown": {}
+}
+
+role_action_allowed if {
+	allowed_cmds := permissions[current_role][collection_name]
+	action_name in allowed_cmds
+}
+
+role_action_denied if {
+	not permissions[current_role][collection_name]
+}
+
+role_action_denied if {
+	allowed_cmds := permissions[current_role][collection_name]
+	not action_name in allowed_cmds
+}
+
+# ─── Hard-Deny Rules (from healthcare_rls.rego) ──────────────────────────────
+
+hard_deny if {
+	current_role == "unknown"
+}
+
+hard_deny if {
+	current_role == "billing_staff"
+	collection_name == "clinical_records"
+}
+
+hard_deny if {
+	current_role == "receptionist"
+	collection_name in {"billing", "clinical_records"}
+}
+
+hard_deny if {
+	current_role == "doctor"
+	collection_name == "billing"
+}
+
+# ─── Denial Rules (from original authz.rego) ───────────────────────────────────────
+
 deny if {
 	risk_score > threshold
 }
@@ -183,7 +275,31 @@ deny if {
 	not valid_action
 }
 
-# ─── Test Helpers ─────────────────────────────────
+deny if {
+	hard_deny
+}
+
+# ─── Response Headers ─────────────────────────────────────────────────────────────
+
+response_headers := object.union_n([
+	{"x-zta-user": user_identity},
+	{"x-zta-device": device_identity},
+	{"x-zta-network": network_identity},
+	{"x-zta-action": action_name},
+	{"x-zta-collection": collection_name},
+	{"x-zta-risk-score": sprintf("%d", [risk_score])},
+	{"x-zta-decision": decision_label},
+	{"x-zta-role": current_role},
+	{"x-zta-eff-risk": sprintf("%d", [risk_score])},
+	{"x-zta-command": action_name}
+])
+
+decision_label := "ALLOW" if {
+	allow
+} else := "DENY"
+
+# ─── Tests ─────────────────────────────────────────────────────────────────
+
 test_legitimate_user if {
 	allow with input as {
 		"attributes": {"source": {"principal": "mario.rossi"}},
@@ -219,3 +335,86 @@ test_destructive_denied if {
 	}
 }
 
+test_doctor_clinical_find if {
+	allow with input as {
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records"
+		}
+	}
+}
+
+test_doctor_billing_denied if {
+	deny with input as {
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "billing"
+		}
+	}
+}
+
+test_billing_staff_clinical_denied if {
+	deny with input as {
+		"parsed_body": {
+			"user": "anna.verdi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records"
+		}
+	}
+}
+
+test_auditor_read_all if {
+	allow with input as {
+		"parsed_body": {
+			"user": "giulia.bianchi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "billing"
+		}
+	}
+}
+
+test_auditor_no_write if {
+	deny with input as {
+		"parsed_body": {
+			"user": "giulia.bianchi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "insert",
+			"collection": "patients"
+		}
+	}
+}
+
+test_unknown_role_denied if {
+	deny with input as {
+		"parsed_body": {
+			"user": "attacker.external",
+			"device": "no-tpm",
+			"network_ip": "8.8.8.8",
+			"command": "find",
+			"collection": "patients"
+		}
+	}
+}
+
+test_receptionist_no_clinical if {
+	deny with input as {
+		"parsed_body": {
+			"user": "luca.ferrari",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records"
+		}
+	}
+}
