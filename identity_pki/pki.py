@@ -286,6 +286,27 @@ class PKIService:
         clean_department = _clean_text(department) or role_definition["department"]
         hardware = self.resolve_hardware(hardware_mode, mac=mac, cpu=cpu)
 
+        # Check if a valid certificate already exists for this DN
+        bundle_slug = _slugify(clean_user)
+        bundle_dir = self.issued_dir / bundle_slug
+        metadata_path = bundle_dir / "metadata.json"
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                expires_at_str = metadata.get("expires_at")
+                if expires_at_str:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if expires_at > datetime.now():
+                        raise ValueError(
+                            f"A valid certificate already exists for user '{clean_user}' "
+                            f"(expires: {expires_at_str}). CN-based uniqueness enforced."
+                        )
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                if isinstance(e, ValueError) and "valid certificate" in str(e):
+                    raise
+                # If metadata is corrupted, proceed with new issuance
+                pass
+
         client_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         subject = x509.Name(
             [
@@ -334,13 +355,10 @@ class PKIService:
             .sign(self._ca_record.private_key, hashes.SHA256())
         )
 
-        bundle_slug = _slugify(clean_user)
-        bundle_dir = self.issued_dir / bundle_slug
         bundle_dir.mkdir(parents=True, exist_ok=True)
         cert_path = bundle_dir / f"{bundle_slug}.crt"
         key_path = bundle_dir / f"{bundle_slug}.key"
         pem_path = bundle_dir / f"{bundle_slug}.pem"
-        metadata_path = bundle_dir / "metadata.json"
 
         cert_bytes = certificate.public_bytes(serialization.Encoding.PEM)
         key_bytes = client_key.private_bytes(
