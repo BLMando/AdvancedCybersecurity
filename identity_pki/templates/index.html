@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Identity PKI Console</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">ZTA · PKI & Identity</p>
+        <h1>Generazione certificati con CA persistente e binding hardware.</h1>
+        <p class="lede">
+          Questa console crea certificati mTLS con Subject, SAN hardware e CA riutilizzabile,
+          pronta per Envoy e OPA. MAC e CPU possono essere presi dal dispositivo corrente oppure
+          randomizzati dal codice.
+        </p>
+      </div>
+
+      <aside class="status-card">
+        <span class="status-badge">CA ready</span>
+        <h2>Root CA</h2>
+        <dl>
+          <div><dt>Subject</dt><dd>{{ ca.subject }}</dd></div>
+          <div><dt>Fingerprint</dt><dd class="mono">{{ ca.fingerprint_sha256[:32] }}…</dd></div>
+          <div><dt>Data dir</dt><dd class="mono">{{ ca.data_dir }}</dd></div>
+        </dl>
+        <a class="ghost-link" href="{{ url_for('download_ca_file', filename='hospital_ca.crt') }}">Scarica CA CRT</a>
+      </aside>
+    </section>
+
+    <section class="panel-grid">
+      <section class="panel">
+        <h2>Crea certificato</h2>
+        {% if error %}
+        <div class="error-box">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="{{ url_for('create_certificate') }}" class="form-grid">
+          <label>
+            <span>Utente</span>
+            <input type="text" name="user" placeholder="mario.rossi" value="{{ form_values.get('user', '') }}" required>
+          </label>
+
+          <label>
+            <span>Ruolo</span>
+            <select name="role">
+              {% for key, role in roles.items() %}
+              <option value="{{ key }}" {% if form_values.get('role', 'doctor') == key %}selected{% endif %}>
+                {{ role.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+
+          <label>
+            <span>Reparto / OU</span>
+            <input type="text" name="department" placeholder="Cardiologia" value="{{ form_values.get('department', '') }}">
+          </label>
+
+          <label>
+            <span>Modalità hardware</span>
+            <select name="hardware_mode">
+              <option value="local" {% if form_values.get('hardware_mode', 'local') == 'local' %}selected{% endif %}>Locale</option>
+              <option value="random" {% if form_values.get('hardware_mode') == 'random' %}selected{% endif %}>Casuale</option>
+            </select>
+          </label>
+
+          <div class="actions">
+            <button type="submit">Genera certificato</button>
+            <p>Il certificato viene salvato sotto <span class="mono">certs/identity_pki/issued</span> e include i dati hardware scelti in automatico.</p>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel info-panel">
+        <h2>Compatibilità diretta</h2>
+        <ul>
+          <li>CA persistente con file <span class="mono">hospital_ca.key</span> e <span class="mono">hospital_ca.crt</span>.</li>
+          <li>SAN con <span class="mono">MAC-…</span> e <span class="mono">CPU-…</span> per l’estrazione da Envoy.</li>
+          <li>Modalità supportate nella UI: lettura dal dispositivo corrente oppure randomizzazione via codice.</li>
+          <li>API JSON e interfaccia HTML per test rapidi o integrazione automatica.</li>
+          <li>Containerizzazione pronta con Dockerfile dedicato.</li>
+        </ul>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

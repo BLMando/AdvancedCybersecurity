@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Certificato creato</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero compact">
+      <div class="hero-copy">
+        <p class="eyebrow">Certificato generato</p>
+        <h1>{{ bundle.user }} · {{ bundle.role }}</h1>
+        <p class="lede">Il certificato è pronto per il download e include il fingerprint hardware richiesto.</p>
+      </div>
+      <aside class="status-card success">
+        <span class="status-badge">Ready</span>
+        <h2>Fingerprint</h2>
+        <dl>
+          <div><dt>MAC</dt><dd class="mono">{{ bundle.hardware.mac }}</dd></div>
+          <div><dt>CPU</dt><dd class="mono">{{ bundle.hardware.cpu }}</dd></div>
+          <div><dt>SAN</dt><dd class="mono">{{ bundle.san_dns|join(' · ') }}</dd></div>
+        </dl>
+      </aside>
+    </section>
+
+    <section class="panel-grid single">
+      <section class="panel">
+        <h2>Dettagli certificato</h2>
+        <div class="detail-grid">
+          <div><span>Subject</span><strong class="mono">{{ bundle.subject }}</strong></div>
+          <div><span>Serial</span><strong class="mono">{{ bundle.serial_number }}</strong></div>
+          <div><span>Expires</span><strong class="mono">{{ bundle.expires_at }}</strong></div>
+          <div><span>Fingerprint SHA-256</span><strong class="mono">{{ bundle.fingerprint_sha256 }}</strong></div>
+          <div><span>Paths</span><strong class="mono">{{ bundle.paths.certificate }}</strong></div>
+        </div>
+
+        <div class="download-row">
+          <a class="button-link" href="{{ download_certificate }}">Download CRT</a>
+          <a class="button-link" href="{{ download_key }}">Download KEY</a>
+          <a class="button-link" href="{{ download_pem }}">Download PEM</a>
+          <a class="button-link ghost" href="{{ download_metadata }}">Download JSON</a>
+        </div>
+
+        <div class="actions">
+          <a class="ghost-link" href="{{ url_for('index') }}">Crea un altro certificato</a>
+          <a class="ghost-link" href="{{ url_for('health') }}">Controlla health JSON</a>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>
