@@ -7,6 +7,7 @@ the SAN extension so Envoy/OPA can consume them.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import platform
@@ -395,6 +396,84 @@ class PKIService:
                 pem_bundle=pem_path,
                 metadata=metadata_path,
             ),
+        )
+
+    def issue_server_certificate(
+        self, cn: str = "envoy", dns_names: Optional[list] = None
+    ) -> CertificatePaths:
+        """Generate a server certificate signed by the CA."""
+        clean_cn = _clean_text(cn) or "envoy"
+        if dns_names is None:
+            dns_names = ["envoy", "localhost", "127.0.0.1"]
+
+        server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, self.organization_name),
+                x509.NameAttribute(NameOID.COMMON_NAME, clean_cn),
+            ]
+        )
+        san_values = [x509.DNSName(name) for name in dns_names] + [
+            x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))
+        ]
+
+        now = datetime.now()
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self._ca_record.certificate.subject)
+            .public_key(server_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=365))
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None), critical=True
+            )
+            .add_extension(x509.SubjectAlternativeName(san_values), critical=False)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    key_encipherment=True,
+                    content_commitment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+                critical=False,
+            )
+            .sign(self._ca_record.private_key, hashes.SHA256())
+        )
+
+        server_dir = Path(__file__).resolve().parents[1] / "certs" / "server"
+        server_dir.mkdir(parents=True, exist_ok=True)
+        cert_path = server_dir / "envoy.crt"
+        key_path = server_dir / "envoy.key"
+        pem_path = server_dir / "envoy.pem"
+
+        cert_bytes = certificate.public_bytes(serialization.Encoding.PEM)
+        key_bytes = server_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
+        cert_path.write_bytes(cert_bytes)
+        key_path.write_bytes(key_bytes)
+        pem_path.write_bytes(cert_bytes + key_bytes)
+
+        return CertificatePaths(
+            certificate=cert_path,
+            private_key=key_path,
+            pem_bundle=pem_path,
+            metadata=server_dir / "metadata.json",
         )
 
     def ca_summary(self) -> Dict[str, object]:

@@ -1,5 +1,25 @@
 services:
 
+  # ── Identity & PKI (Certificate Management) ─────
+  identity-pki:
+    build:
+      context: ./identity_pki
+      dockerfile: Dockerfile
+    container_name: identity-pki
+    restart: on-failure
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      IDENTITY_APP_HOST: 0.0.0.0
+      IDENTITY_APP_PORT: 8080
+      ZTA_PKI_DATA_DIR: /data/certs
+      ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
+      ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
+    volumes:
+      - ./certs/identity_pki:/data/certs
+    networks:
+      - backend-net
+
   # ── MongoDB ────────────────────────────────────────
   mongo:
     build:
@@ -28,13 +48,14 @@ services:
     restart: unless-stopped
     depends_on:
       - mongo
+      - identity-pki
       - opa
     ports:
       - "10000:10000"
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./certs/ca:/etc/certs/ca:ro
+      - ./certs/identity_pki/ca:/etc/certs/ca:ro
       - ./certs/server:/etc/certs/server:ro
     networks:
       - frontend-net

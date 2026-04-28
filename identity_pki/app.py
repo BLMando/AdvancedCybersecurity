@@ -13,6 +13,13 @@ def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
     service = PKIService(data_dir=data_dir)
+    
+    # Generate Envoy server certificate on startup
+    try:
+        service.issue_server_certificate(cn="envoy", dns_names=["envoy", "localhost", "127.0.0.1"])
+        print("✓ Envoy server certificate generated/verified")
+    except Exception as e:
+        print(f"⚠ Error generating server certificate: {e}")
 
     def render_home(error: str = "", form_values=None):
         form_values = form_values or {}

@@ -28,7 +28,7 @@ static_resources:
                 validation_context:
                   # Trusted CA used to validate client certificates.
                   trusted_ca:
-                    filename: /etc/certs/ca/ca.crt
+                    filename: /etc/certs/ca/hospital_ca.crt
               # Fail closed: the connection is rejected if the client does not
               # present a valid certificate.
               require_client_certificate: true
