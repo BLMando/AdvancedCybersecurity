@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Identity PKI Console</title>
+  <title>Identity PKI Console - CSR Enrollment</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -11,11 +11,10 @@
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">ZTA · PKI & Identity</p>
-        <h1>Generazione certificati con CA persistente e binding hardware.</h1>
+        <h1>Enrollment certificati con CSR lato client e binding hardware.</h1>
         <p class="lede">
-          Questa console crea certificati mTLS con Subject, SAN hardware e CA riutilizzabile,
-          pronta per Envoy e OPA. MAC e CPU possono essere presi dal dispositivo corrente oppure
-          randomizzati dal codice.
+          Genera un CSR nel tuo dispositivo usando <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">scripts/generate_client_csr.py</code> o carica un CSR esistente.
+          La chiave privata rimane nel tuo dispositivo, il server firma solo il CSR.
         </p>
       </div>
 
@@ -33,58 +32,260 @@
 
     <section class="panel-grid">
       <section class="panel">
-        <h2>Crea certificato</h2>
-        {% if error %}
-        <div class="error-box">{{ error }}</div>
-        {% endif %}
-        <form method="post" action="{{ url_for('create_certificate') }}" class="form-grid">
+        <h2>CSR Upload & Signing</h2>
+        <div id="error-box" class="error-box" style="display: none;"></div>
+        <div id="success-box" class="success-box" style="display: none;"></div>
+
+        <form id="csr-form" class="form-grid">
+          <label>
+            <span>CSR File (PEM)</span>
+            <textarea id="csr-pem" placeholder="-----BEGIN CERTIFICATE REQUEST-----&#10;...&#10;-----END CERTIFICATE REQUEST-----" required style="font-family: monospace; font-size: 12px; min-height: 150px;"></textarea>
+            <small>Incolla il contenuto del file .csr generato da scripts/generate_client_csr.py</small>
+          </label>
+
           <label>
             <span>Utente</span>
-            <input type="text" name="user" placeholder="mario.rossi" value="{{ form_values.get('user', '') }}" required>
+            <input type="text" id="user" placeholder="dr_mario_rossi" required>
           </label>
 
           <label>
             <span>Ruolo</span>
-            <select name="role">
+            <select id="role">
               {% for key, role in roles.items() %}
-              <option value="{{ key }}" {% if form_values.get('role', 'doctor') == key %}selected{% endif %}>
-                {{ role.label }}
-              </option>
+              <option value="{{ key }}">{{ role.label }}</option>
               {% endfor %}
             </select>
           </label>
 
           <label>
             <span>Reparto / OU</span>
-            <input type="text" name="department" placeholder="Cardiologia" value="{{ form_values.get('department', '') }}">
+            <input type="text" id="department" placeholder="Cardiologia">
           </label>
 
-          <label>
-            <span>Modalità hardware</span>
-            <select name="hardware_mode">
-              <option value="local" {% if form_values.get('hardware_mode', 'local') == 'local' %}selected{% endif %}>Locale</option>
-              <option value="random" {% if form_values.get('hardware_mode') == 'random' %}selected{% endif %}>Casuale</option>
-            </select>
+          <div id="extracted-hardware" style="display: none; background: #f0f7ff; padding: 1rem; border-radius: 4px; margin: 1rem 0; border-left: 4px solid #0066cc;">
+            <p style="margin: 0 0 0.5rem 0; font-weight: bold;">📋 Estratto dal CSR:</p>
+            <small>
+              MAC: <code id="extracted-mac" style="background: white; padding: 2px 4px; border-radius: 2px;"></code><br>
+              CPU: <code id="extracted-cpu" style="background: white; padding: 2px 4px; border-radius: 2px;"></code>
+            </small>
+          </div>
+
+          <label style="display: none;" id="mac-cpu-fields">
+            <span>MAC Address (opzionale - sovrascrivi estratto)</span>
+            <input type="text" id="hardware_mac" placeholder="00:1A:2B:3C:4D:5E">
+            <small>Lascia vuoto per usare il valore dal CSR</small>
+          </label>
+
+          <label style="display: none;" id="cpu-field">
+            <span>CPU Model (opzionale - sovrascrivi estratto)</span>
+            <input type="text" id="hardware_cpu" placeholder="Intel(R) Core(TM) i7-10700K">
+            <small>Lascia vuoto per usare il valore dal CSR</small>
           </label>
 
           <div class="actions">
-            <button type="submit">Genera certificato</button>
-            <p>Il certificato viene salvato sotto <span class="mono">certs/identity_pki/issued</span> e include i dati hardware scelti in automatico.</p>
+            <button type="submit" id="submit-btn">Firma CSR</button>
+            <p>
+              <strong>Flusso:</strong><br>
+              1️⃣ Genera CSR localmente: <code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">python scripts/generate_client_csr.py</code><br>
+              2️⃣ Incolla il CSR (file .csr) nella textarea<br>
+              3️⃣ I dati hardware (MAC e CPU) vengono estratti automaticamente dal CSR<br>
+              4️⃣ Inserisci user, role, department e opzionalmente sovrascrivi hardware<br>
+              5️⃣ Il server firma il CSR e ritorna il certificato
+            </p>
           </div>
         </form>
+
+        <div id="result-section" style="display: none; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #eee;">
+          <h3>✓ Certificato firmato</h3>
+          <div class="detail-grid">
+            <div><span>User</span><strong class="mono" id="result-user"></strong></div>
+            <div><span>Serial</span><strong class="mono" id="result-serial"></strong></div>
+            <div><span>Expires</span><strong class="mono" id="result-expires"></strong></div>
+            <div><span>Fingerprint SHA-256</span><strong class="mono" id="result-fingerprint"></strong></div>
+          </div>
+
+          <div style="margin-top: 1rem;">
+            <h4>SAN (Device Binding)</h4>
+            <pre id="result-san" style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto; max-height: 150px;"></pre>
+          </div>
+
+          <div class="download-row">
+            <a id="download-cert-link" class="button-link" href="#" download>📥 Download Certificato</a>
+            <a id="download-metadata-link" class="button-link ghost" href="#" download>📋 Download Metadata</a>
+          </div>
+
+          <div class="actions">
+            <a class="ghost-link" href="{{ url_for('index') }}">Firma un altro CSR</a>
+          </div>
+        </div>
       </section>
 
       <section class="panel info-panel">
-        <h2>Compatibilità diretta</h2>
+        <h2>CSR-Based Enrollment</h2>
         <ul>
-          <li>CA persistente con file <span class="mono">hospital_ca.key</span> e <span class="mono">hospital_ca.crt</span>.</li>
-          <li>SAN con <span class="mono">MAC-…</span> e <span class="mono">CPU-…</span> per l’estrazione da Envoy.</li>
-          <li>Modalità supportate nella UI: lettura dal dispositivo corrente oppure randomizzazione via codice.</li>
-          <li>API JSON e interfaccia HTML per test rapidi o integrazione automatica.</li>
-          <li>Containerizzazione pronta con Dockerfile dedicato.</li>
+          <li><strong>Sicurezza:</strong> Keypair generata nel dispositivo del client, mai inviata al server</li>
+          <li><strong>CSR:</strong> Solo il Certificate Signing Request viene inviato al server</li>
+          <li><strong>Device binding:</strong> MAC e CPU nel certificato (SAN) per Zero-Trust</li>
+          <li><strong>Uniqueness:</strong> Non puoi avere due certificati per lo stesso CN</li>
+          <li><strong>X.509v3:</strong> BasicConstraints, KeyUsage, ExtendedKeyUsage, SubjectAlternativeName</li>
+          <li><strong>CA persistente:</strong> Riutilizzabile per più iscrizioni</li>
+          <li><strong>Metadata:</strong> Tracking enrollment_method, timestamp, hardware_info</li>
         </ul>
+        <hr style="margin: 1rem 0; border: none; border-top: 1px solid #ddd;">
+        <h3>Genera CSR localmente</h3>
+        <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;">python scripts/generate_client_csr.py \
+  --cn dr_mario_rossi \
+  --department Cardiologia \
+  --mac "00:1A:2B:3C:4D:5E" \
+  --cpu "Intel(R) Core(TM) i7"</pre>
       </section>
     </section>
   </main>
+
+  <script>
+    // Parse CSR to extract hardware identifiers from SAN
+    function parseCSRForHardware(csrPem) {
+      try {
+        // Extract base64 content from PEM
+        const base64 = csrPem
+          .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, '')
+          .replace(/-----END CERTIFICATE REQUEST-----/g, '')
+          .replace(/\s/g, '');
+        
+        // Decode base64 to get binary data
+        const binary = atob(base64);
+        
+        // Look for MAC- and CPU- patterns in the binary data
+        // These are DNS names in the SAN extension
+        const macMatch = binary.match(/MAC-([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})/);
+        const cpuMatch = binary.match(/CPU-([^\x00]+?)(?:\x00|$)/);
+        
+        // Alternative: search in the whole binary string for readable patterns
+        let mac = null, cpu = null;
+        
+        // Look for MAC pattern more carefully
+        const macRegex = /MAC-([0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2})/gi;
+        const macMatch2 = macRegex.exec(binary);
+        if (macMatch2) {
+          mac = macMatch2[1];
+        }
+        
+        // Look for CPU pattern - it's usually readable text
+        const cpuRegex = /CPU-([A-Za-z0-9()\-\s.®™]+)/;
+        const cpuMatch2 = cpuRegex.exec(binary);
+        if (cpuMatch2) {
+          cpu = cpuMatch2[1].trim();
+        }
+        
+        return { mac, cpu };
+      } catch (e) {
+        console.error('CSR parsing error:', e);
+        return { mac: null, cpu: null };
+      }
+    }
+
+    // Listen to CSR textarea changes
+    document.getElementById('csr-pem').addEventListener('input', (e) => {
+      const csrPem = e.target.value.trim();
+      if (csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
+        const { mac, cpu } = parseCSRForHardware(csrPem);
+        const extractedBox = document.getElementById('extracted-hardware');
+        const macField = document.getElementById('mac-cpu-fields');
+        const cpuField = document.getElementById('cpu-field');
+        
+        if (mac || cpu) {
+          if (mac) {
+            document.getElementById('extracted-mac').textContent = mac;
+            document.getElementById('hardware_mac').value = mac;
+          }
+          if (cpu) {
+            document.getElementById('extracted-cpu').textContent = cpu;
+            document.getElementById('hardware_cpu').value = cpu;
+          }
+          extractedBox.style.display = 'block';
+          macField.style.display = 'block';
+          cpuField.style.display = 'block';
+        }
+      }
+    });
+
+    // Handle form submission
+    document.getElementById('csr-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const csrPem = document.getElementById('csr-pem').value.trim();
+      const user = document.getElementById('user').value;
+      const role = document.getElementById('role').value;
+      const department = document.getElementById('department').value;
+      const hardware_mac = document.getElementById('hardware_mac').value;
+      const hardware_cpu = document.getElementById('hardware_cpu').value;
+
+      const errorBox = document.getElementById('error-box');
+      const submitBtn = document.getElementById('submit-btn');
+      const resultSection = document.getElementById('result-section');
+
+      errorBox.style.display = 'none';
+      resultSection.style.display = 'none';
+
+      if (!csrPem) {
+        errorBox.textContent = '❌ Incolla il CSR nella textarea';
+        errorBox.style.display = 'block';
+        return;
+      }
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Firma in corso...';
+
+        const response = await fetch('/api/csr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            csr: csrPem,
+            user: user,
+            role: role,
+            department: department,
+            hardware_mac: hardware_mac,
+            hardware_cpu: hardware_cpu,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Server error');
+        }
+
+        // Display result
+        const bundle = data.certificate;
+        document.getElementById('result-user').textContent = bundle.user;
+        document.getElementById('result-serial').textContent = bundle.serial_number;
+        document.getElementById('result-expires').textContent = bundle.expires_at;
+        document.getElementById('result-fingerprint').textContent = bundle.fingerprint_sha256;
+        document.getElementById('result-san').textContent = bundle.san_dns.join('\n');
+
+        // Setup downloads
+        const certificatePem = data.certificate_pem;
+        const metadataJson = JSON.stringify(bundle, null, 2);
+
+        document.getElementById('download-cert-link').href = 'data:text/plain,' + encodeURIComponent(certificatePem);
+        document.getElementById('download-cert-link').download = `${user}.crt`;
+
+        document.getElementById('download-metadata-link').href = 'data:application/json,' + encodeURIComponent(metadataJson);
+        document.getElementById('download-metadata-link').download = `${user}_metadata.json`;
+
+        resultSection.style.display = 'block';
+        document.getElementById('csr-form').style.opacity = '0.5';
+        document.getElementById('csr-form').style.pointerEvents = 'none';
+
+      } catch (error) {
+        errorBox.textContent = `❌ ${error.message}`;
+        errorBox.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Firma CSR';
+      }
+    });
+  </script>
 </body>
 </html>

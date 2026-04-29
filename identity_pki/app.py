@@ -21,78 +21,48 @@ def create_app(data_dir=None) -> Flask:
     except Exception as e:
         print(f"⚠ Error generating server certificate: {e}")
 
-    def render_home(error: str = "", form_values=None):
-        form_values = form_values or {}
+    @app.get("/")
+    def index():
         return render_template(
             "index.html",
             ca=service.ca_summary(),
             roles=DEFAULT_ROLES,
-            error=error,
-            form_values=form_values,
         )
-
-    @app.get("/")
-    def index():
-        return render_home()
 
     @app.get("/health")
     def health():
         return jsonify({"status": "ok", "ca": service.ca_summary()})
 
-    @app.post("/certificates")
-    def create_certificate():
-        form = request.form or request.get_json(silent=True) or {}
-        hardware_mode = form.get("hardware_mode", "local")
-        try:
-            bundle = service.issue_certificate(
-                user=form.get("user", ""),
-                role=form.get("role", "doctor"),
-                department=form.get("department", ""),
-                hardware_mode=hardware_mode,
-                mac=form.get("mac", ""),
-                cpu=form.get("cpu", ""),
-            )
-        except ValueError as exc:
-            return render_home(str(exc), form_values=form), 400
 
-        return render_template(
-            "result.html",
-            ca=service.ca_summary(),
-            bundle=bundle.to_dict(),
-            download_certificate=url_for(
-                "download_issued_file",
-                user_slug=bundle.slug,
-                filename=bundle.paths.certificate.name,
-            ),
-            download_key=url_for(
-                "download_issued_file",
-                user_slug=bundle.slug,
-                filename=bundle.paths.private_key.name,
-            ),
-            download_pem=url_for(
-                "download_issued_file",
-                user_slug=bundle.slug,
-                filename=bundle.paths.pem_bundle.name,
-            ),
-            download_metadata=url_for(
-                "download_issued_file",
-                user_slug=bundle.slug,
-                filename=bundle.paths.metadata.name,
-            ),
-        )
 
-    @app.post("/api/certificates")
-    def api_create_certificate():
+    @app.post("/api/csr")
+    def api_sign_csr():
+        """Sign a Certificate Signing Request (CSR) from the client device.
+        
+        Client device generates its keypair locally, creates a CSR, and sends it here.
+        This is the standard/secure enrollment flow.
+        """
         payload = request.get_json(silent=True) or {}
-        bundle = service.issue_certificate(
-            user=payload.get("user", ""),
-            role=payload.get("role", "doctor"),
-            department=payload.get("department", ""),
-            hardware_mode=payload.get("hardware_mode", "local"),
-            mac=payload.get("mac", ""),
-            cpu=payload.get("cpu", ""),
-        )
-        return jsonify({"status": "created", "certificate": bundle.to_dict()})
+        csr_pem = payload.get("csr", "")
+        if not csr_pem:
+            return jsonify({"error": "CSR required"}), 400
+        
+        try:
+            bundle = service.sign_csr(
+                csr_pem=csr_pem,
+                user=payload.get("user", ""),
+                role=payload.get("role", "doctor"),
+                department=payload.get("department", ""),
+                hardware_mac=payload.get("hardware_mac", ""),
+                hardware_cpu=payload.get("hardware_cpu", ""),
+            )
+            return jsonify({
+                "status": "signed",
+                "certificate": bundle.to_dict(),
+                "certificate_pem": bundle.paths.certificate.read_text(),
+            })
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
 
     @app.get("/download/<user_slug>/<filename>")
     def download_issued_file(user_slug: str, filename: str):

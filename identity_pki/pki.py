@@ -24,6 +24,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from datetime import timezone
 
 DEFAULT_ROLES: Dict[str, Dict[str, str]] = {
     "doctor": {"label": "Doctor", "department": "Cardiologia"},
@@ -181,7 +182,7 @@ class PKIService:
                 x509.NameAttribute(NameOID.COMMON_NAME, self.ca_common_name),
             ]
         )
-        now = datetime.now()
+        now = datetime.now(datetime.timezone.utc)
         certificate = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -296,7 +297,7 @@ class PKIService:
                 expires_at_str = metadata.get("expires_at")
                 if expires_at_str:
                     expires_at = datetime.fromisoformat(expires_at_str)
-                    if expires_at > datetime.now():
+                    if expires_at > datetime.now(datetime.timezone.utc):
                         raise ValueError(
                             f"A valid certificate already exists for user '{clean_user}' "
                             f"(expires: {expires_at_str}). CN-based uniqueness enforced."
@@ -436,7 +437,7 @@ class PKIService:
             x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))
         ]
 
-        now = datetime.now()
+        now = datetime.now(datetime.timezone.utc)
         certificate = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -492,6 +493,161 @@ class PKIService:
             private_key=key_path,
             pem_bundle=pem_path,
             metadata=server_dir / "metadata.json",
+        )
+
+    def sign_csr(
+        self,
+        csr_pem: str,
+        user: str,
+        role: str,
+        department: Optional[str] = None,
+        hardware_mac: Optional[str] = None,
+        hardware_cpu: Optional[str] = None,
+    ) -> CertificateBundle:
+        """Sign a CSR (Certificate Signing Request) from the client device.
+        
+        The client device generates its own keypair and sends a CSR.
+        The CA signs it and returns the certificate.
+        This is the standard enrollment flow (more secure than server-side key generation).
+        """
+        clean_user = _clean_text(user)
+        if not clean_user:
+            raise ValueError("Username is required.")
+
+        clean_role = _clean_text(role).lower()
+        if clean_role not in DEFAULT_ROLES:
+            raise ValueError("Unsupported role. Choose doctor, billing, or auditor.")
+
+        role_definition = DEFAULT_ROLES[clean_role]
+        clean_department = _clean_text(department) or role_definition["department"]
+
+        # Parse the CSR
+        try:
+            csr_bytes = csr_pem.encode("utf-8") if isinstance(csr_pem, str) else csr_pem
+            csr = x509.load_pem_x509_csr(csr_bytes)
+        except Exception as e:
+            raise ValueError(f"Invalid CSR format: {e}")
+
+        # Check if a valid certificate already exists for this CN
+        bundle_slug = _slugify(clean_user)
+        bundle_dir = self.issued_dir / bundle_slug
+        metadata_path = bundle_dir / "metadata.json"
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                expires_at_str = metadata.get("expires_at")
+                if expires_at_str:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    now = datetime.now(timezone.utc) if expires_at.tzinfo else datetime.now(datetime.timezone.utc)
+                    if expires_at > now:
+                        raise ValueError(
+                            f"A valid certificate already exists for user '{clean_user}' "
+                            f"(expires: {expires_at_str}). CN-based uniqueness enforced."
+                        )
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                if isinstance(e, ValueError) and "valid certificate" in str(e):
+                    raise
+                pass
+
+        # Extract SAN from CSR if present, otherwise create new ones
+        san_values = []
+        try:
+            san_ext = csr.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            san_values = list(san_ext.value)
+        except x509.ExtensionNotFound:
+            pass
+
+        # Add hardware identifiers if not already in CSR
+        hardware_mac = hardware_mac or _clean_text(hardware_mac) or ""
+        hardware_cpu = hardware_cpu or _clean_text(hardware_cpu) or ""
+        
+        san_dns_list = [v.value for v in san_values if isinstance(v, x509.DNSName)]
+        if hardware_mac and f"MAC-{hardware_mac}" not in san_dns_list:
+            san_values.append(x509.DNSName(f"MAC-{hardware_mac}"))
+        if hardware_cpu and f"CPU-{hardware_cpu}" not in san_dns_list:
+            san_values.append(x509.DNSName(f"CPU-{hardware_cpu}"))
+
+        # Sign the CSR
+        now = datetime.utcnow()
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(csr.subject)
+            .issuer_name(self._ca_record.certificate.subject)
+            .public_key(csr.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=365))
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None), critical=True
+            )
+            .add_extension(x509.SubjectAlternativeName(san_values), critical=False)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    key_encipherment=True,
+                    content_commitment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+                critical=False,
+            )
+            .sign(self._ca_record.private_key, hashes.SHA256())
+        )
+
+        # Save certificate
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        cert_path = bundle_dir / f"{bundle_slug}.crt"
+        metadata_path = bundle_dir / "metadata.json"
+
+        cert_bytes = certificate.public_bytes(serialization.Encoding.PEM)
+        cert_path.write_bytes(cert_bytes)
+
+        metadata = {
+            "user": clean_user,
+            "role": role_definition["label"],
+            "department": clean_department,
+            "hardware": {
+                "mac": hardware_mac,
+                "cpu": hardware_cpu,
+                "source": "csr",
+            },
+            "subject": certificate.subject.rfc4514_string(),
+            "san_dns": [value.value for value in san_values if isinstance(value, x509.DNSName)],
+            "serial_number": str(certificate.serial_number),
+            "expires_at": _certificate_expiry_iso(certificate),
+            "fingerprint_sha256": certificate.fingerprint(hashes.SHA256()).hex(),
+            "ca_cert": str(self.ca_cert_path),
+            "enrollment_method": "csr",
+        }
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
+        return CertificateBundle(
+            slug=bundle_slug,
+            user=clean_user,
+            role=role_definition["label"],
+            department=clean_department,
+            hardware=HardwareProfile(mac=hardware_mac, cpu=hardware_cpu, source="csr"),
+            subject=certificate.subject.rfc4514_string(),
+            san_dns=[value.value for value in san_values if isinstance(value, x509.DNSName)],
+            serial_number=certificate.serial_number,
+            expires_at=_certificate_expiry_iso(certificate),
+            fingerprint_sha256=certificate.fingerprint(hashes.SHA256()).hex(),
+            paths=CertificatePaths(
+                certificate=cert_path,
+                private_key=Path(),  # Client keeps its own private key
+                pem_bundle=Path(),
+                metadata=metadata_path,
+            ),
         )
 
     def ca_summary(self) -> Dict[str, object]:
