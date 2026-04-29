@@ -6,10 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     IDENTITY_APP_PORT=8080 \
     ZTA_PKI_DATA_DIR=/data/certs
 
-COPY identity_pki/requirements.txt /tmp/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY identity_pki /app/identity_pki
+COPY . /app/identity_pki
 
 RUN mkdir -p /data/certs
 
