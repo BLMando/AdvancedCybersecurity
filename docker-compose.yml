@@ -16,7 +16,7 @@ services:
       ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
     volumes:
-      - ./certs/identity_pki:/data/certs
+      - ./certs/ca:/data/certs
       - ./certs/client:/data/certs/client
     networks:
       - backend-net
@@ -56,7 +56,7 @@ services:
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./certs/identity_pki/ca:/etc/certs/ca:ro
+      - ./certs/ca:/etc/certs/ca:ro
       - ./certs/server:/etc/certs/server:ro
     networks:
       - frontend-net

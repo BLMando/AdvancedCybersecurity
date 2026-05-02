@@ -112,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("--role", default="doctor")
     parser.add_argument("--department", default="Cardiologia")
     parser.add_argument("--server", default="http://localhost:8080")
-    parser.add_argument("--output-dir", default="./certs/client")
+    parser.add_argument("--output-dir", default=str(Path(__file__).parent.parent / "certs" / "client"))
     parser.add_argument("--mac", help="Manually specify MAC address")
     parser.add_argument("--cpu", help="Manually specify CPU model")
     enroll(parser.parse_args())

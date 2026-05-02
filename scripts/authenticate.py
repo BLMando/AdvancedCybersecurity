@@ -5,6 +5,7 @@ import json
 import base64
 import os
 import sys
+import platform
 from pathlib import Path
 
 # ZTA Authentication Simulator (Lightweight - No dependencies)
@@ -80,7 +81,7 @@ def main():
     # We need the public_key_pem for the server to verify.
     # Let's add a small helper in Swift or just use a dummy one if the server allows.
     # Wait, the server needs it. Let's get it from the cert if it exists.
-    cert_file = f"certs/client/{CN}.crt"
+    cert_file = Path(__file__).parent.parent / "certs" / "client" / f"{CN}.crt"
     if os.path.exists(cert_file):
         with open(cert_file, "r") as f:
             cert_content = f.read()
