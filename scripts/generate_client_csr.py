@@ -56,21 +56,36 @@ def enroll(args):
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode()
 
+    # Rilevamento automatico se non forniti
+    mac = args.mac
+    if not mac:
+        import uuid
+        mac_int = uuid.getnode()
+        mac = ':'.join(('%012X' % mac_int)[i:i+2] for i in range(0, 12, 2))
+    
+    cpu = args.cpu
+    if not cpu:
+        import platform
+        cpu = platform.processor() or platform.machine()
+
     payload = {
         "user": args.cn,
         "role": args.role,
         "department": args.department,
         "challenge_id": ch_id,
-        "proof_string": data["csr_pem"], # La stringa firmata nativamente da Swift
+        "proof_string": data["csr_pem"], 
         "attestation_sig_b64": data["signature_b64"],
         "public_key_pem": pub_pem,
-        "is_native_proof": True
+        "is_native_proof": True,
+        "mac": mac,
+        "cpu": cpu
     }
 
     try:
         r = requests.post(f"{args.server}/api/csr", json=payload)
         r.raise_for_status()
         print(f"\n[✓✓✓] ENROLLMENT SUCCESSFUL (HARDWARE-BOUND)!")
+        print(f"[*] Identity verified with MAC: {mac} and CPU: {cpu}")
         
         cert_path = Path(args.output_dir) / f"{args.cn}.crt"
         cert_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,4 +103,6 @@ if __name__ == "__main__":
     parser.add_argument("--department", default="Cardiologia")
     parser.add_argument("--server", default="http://localhost:8080")
     parser.add_argument("--output-dir", default="./certs/client")
+    parser.add_argument("--mac", help="Manually specify MAC address")
+    parser.add_argument("--cpu", help="Manually specify CPU model")
     enroll(parser.parse_args())

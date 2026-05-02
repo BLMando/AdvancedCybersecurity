@@ -10,3 +10,17 @@ python scripts/generate_client_csr.py --cn mario --department Cardiologia
 
 # Oppure con i valori manuali
 python scripts/generate_client_csr.py --cn mario --department Cardiologia --mac "AA:BB:CC:DD:EE:FF" --cpu "Intel i7"
+
+
+### Enrollment
+```bash
+python3 generate_client_csr.py --cn "paolo.roselli" --role doctor --department "Cardiologia"
+python3 generate_client_csr.py --cn "paolo.roselli" --mac "DE:AD:BE:EF:00:11" --cpu "Apple M2 Max"
+```
+
+### Autenticazione
+```bash
+python3 simulate_auth.py
+```
+
+---

@@ -146,7 +146,7 @@ class PKIService:
             print(f"Verification failed: {e}")
             return False
 
-    def issue_hardware_bound_certificate(self, csr_pem=None, challenge_id=None, signature_b64=None, public_key_pem=None, is_hardware_csr=False, proof_string=None, user=None):
+    def issue_hardware_bound_certificate(self, csr_pem=None, challenge_id=None, signature_b64=None, public_key_pem=None, is_hardware_csr=False, proof_string=None, user=None, **kwargs):
         """Issue a certificate bound to verified hardware."""
         
         # 1. Attestation
@@ -165,11 +165,17 @@ class PKIService:
             clean_user = subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
         elif proof_string:
             # For native proof, we use the public_key_pem provided
-            pub_key = serialization.load_pem_public_key(public_key_pem.encode())
+            pub_key = serialization.load_pem_rsa_public_key(public_key_pem.encode()) if "BEGIN RSA" in public_key_pem else serialization.load_pem_public_key(public_key_pem.encode())
             clean_user = user or "unknown"
-            subject = x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, clean_user),
-            ])
+            
+            # Costruiamo il Subject includendo MAC e CPU se presenti
+            subject_attrs = [x509.NameAttribute(NameOID.COMMON_NAME, clean_user)]
+            if kwargs.get("mac"):
+                subject_attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"MAC:{kwargs['mac']}"))
+            if kwargs.get("cpu"):
+                subject_attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"CPU:{kwargs['cpu']}"))
+            
+            subject = x509.Name(subject_attrs)
         else:
             csr_obj = x509.load_pem_x509_csr(csr_pem.encode())
             pub_key = csr_obj.public_key()

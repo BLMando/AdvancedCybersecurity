@@ -57,7 +57,9 @@ def create_app(data_dir=None) -> Flask:
                 public_key_pem=payload.get("public_key_pem"),
                 is_hardware_csr=is_hw,
                 proof_string=payload.get("proof_string"),
-                user=payload.get("user")
+                user=payload.get("user"),
+                mac=payload.get("mac"),
+                cpu=payload.get("cpu")
             )
                 
             return jsonify({
