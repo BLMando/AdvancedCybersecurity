@@ -3,88 +3,77 @@
 from __future__ import annotations
 
 import os
-
-from flask import Flask, abort, jsonify, render_template, request, send_from_directory, url_for
-
-from .pki import DEFAULT_ROLES, PKIService
-
+import base64
+from flask import Flask, abort, jsonify, render_template, request, send_from_directory
+from .pki import PKIService
 
 def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
-    service = PKIService(data_dir=data_dir)
     
-    # Generate Envoy server certificate on startup
-    try:
-        service.issue_server_certificate(cn="envoy", dns_names=["envoy", "localhost", "127.0.0.1"])
-        print("✓ Envoy server certificate generated/verified")
-    except Exception as e:
-        print(f"⚠ Error generating server certificate: {e}")
-
+    # Use /data/certs by default for persistence in Docker
+    cert_dir = data_dir or os.environ.get("ZTA_PKI_DATA_DIR", "/data/certs")
+    service = PKIService(cert_dir=cert_dir)
+    
     @app.get("/")
     def index():
-        return render_template(
-            "index.html",
-            ca=service.ca_summary(),
-            roles=DEFAULT_ROLES,
-        )
+        return "ZTA PKI Server is running"
 
     @app.get("/health")
     def health():
-        return jsonify({"status": "ok", "ca": service.ca_summary()})
+        return jsonify({"status": "ok"})
 
-
+    @app.get("/api/challenge")
+    def api_get_challenge():
+        """Get a challenge for hardware attestation."""
+        challenge_id, nonce_b64 = service.create_challenge()
+        return jsonify({
+            "challenge_id": challenge_id,
+            "nonce_b64": nonce_b64
+        })
 
     @app.post("/api/csr")
     def api_sign_csr():
-        """Sign a Certificate Signing Request (CSR) from the client device.
-        
-        Client device generates its keypair locally, creates a CSR, and sends it here.
-        This is the standard/secure enrollment flow.
-        """
+        """Sign a CSR with Hardware Attestation."""
         payload = request.get_json(silent=True) or {}
         csr_pem = payload.get("csr", "")
-        if not csr_pem:
-            return jsonify({"error": "CSR required"}), 400
+        challenge_id = payload.get("challenge_id")
+        signature_b64 = payload.get("attestation_sig_b64")
+        is_hw = payload.get("is_hardware_csr", False)
+        
+        proof_string = payload.get("proof_string")
+        
+        if not csr_pem and not is_hw and not proof_string:
+            return jsonify({"error": "CSR or Proof String required"}), 400
         
         try:
-            bundle = service.sign_csr(
-                csr_pem=csr_pem,
-                user=payload.get("user", ""),
-                role=payload.get("role", "doctor"),
-                department=payload.get("department", ""),
-                hardware_mac=payload.get("hardware_mac", ""),
-                hardware_cpu=payload.get("hardware_cpu", ""),
+            # If it's a hardware CSR, csr_pem might be empty or same as signature
+            effective_csr = csr_pem if not is_hw else base64.b64decode(signature_b64).decode()
+            
+            cert_pem = service.issue_hardware_bound_certificate(
+                csr_pem=effective_csr,
+                challenge_id=challenge_id,
+                signature_b64=signature_b64,
+                public_key_pem=payload.get("public_key_pem"),
+                is_hardware_csr=is_hw,
+                proof_string=payload.get("proof_string"),
+                user=payload.get("user")
             )
+                
             return jsonify({
                 "status": "signed",
-                "certificate": bundle.to_dict(),
-                "certificate_pem": bundle.paths.certificate.read_text(),
+                "certificate_pem": cert_pem,
             })
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-    @app.get("/download/<user_slug>/<filename>")
-    def download_issued_file(user_slug: str, filename: str):
-        directory = service.issued_dir / user_slug
-        if not directory.exists():
-            abort(404)
-        return send_from_directory(directory, filename, as_attachment=True)
-
-    @app.get("/download/ca/<filename>")
-    def download_ca_file(filename: str):
-        return send_from_directory(service.ca_dir, filename, as_attachment=True)
-
     return app
-
 
 def main() -> None:
     app = create_app()
     host = os.environ.get("IDENTITY_APP_HOST", "0.0.0.0")
     port = int(os.environ.get("IDENTITY_APP_PORT", "8080"))
-    debug = os.environ.get("IDENTITY_APP_DEBUG", "0") == "1"
-    app.run(host=host, port=port, debug=debug)
-
+    app.run(host=host, port=port, debug=True)
 
 if __name__ == "__main__":
     main()

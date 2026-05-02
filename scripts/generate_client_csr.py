@@ -1,200 +1,91 @@
 #!/usr/bin/env python3
-"""Generate a Certificate Signing Request (CSR) for device enrollment.
-
-This script should run ON THE CLIENT DEVICE (the doctor's machine/laptop).
-It generates a local keypair and creates a CSR that gets sent to the PKI server.
-The private key NEVER leaves the device.
-
-Usage:
-  python3 generate_client_csr.py \
-    --cn "paolo" \
-    --department "Cardiologia" \
-    --mac "00:1A:2B:3C:4D:5E" \
-    --cpu "Intel(R) Core(TM) i7-10700K" \
-    --output-dir ./certs
-
-This creates:
-  - client_key.pem (KEEP SECURE! Never share)
-  - client_csr.pem (send to PKI server via /api/csr)
-"""
-
 import argparse
+import base64
 import json
-import platform
-import uuid
+import os
+import subprocess
+import sys
 from pathlib import Path
 
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
+# Try to import required libraries
+try:
+    import requests
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.x509.oid import NameOID
+except ImportError:
+    print("[!] Missing libraries. Install them with: pip install requests cryptography")
+    sys.exit(1)
 
+def enroll(args):
+    print(f"\n{'='*70}")
+    print(f" ZTA PROFESSIONAL HARDWARE ENROLLMENT: {args.cn.upper()}")
+    print(f"{'='*70}\n")
 
-def _format_mac(raw_value: int) -> str:
-    """Format MAC address."""
-    return ":".join(
-        "{:02X}".format((raw_value >> shift) & 0xFF)
-        for shift in range(40, -1, -8)
-    )
+    helper_path = Path(__file__).parent / "hw_attestation_helper"
+    if not helper_path.exists():
+        print(f"[!] Helper not found. Please compile it first.")
+        return
 
+    try:
+        res = subprocess.run([str(helper_path), args.cn], capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"[!] Hardware helper failed (exit {e.returncode}):")
+        print(f"    {e.stderr or e.stdout}")
+        print(f"\n[!] Suggestion: Try to run the helper manually to see if it prompts for Keychain access:")
+        print(f"    {helper_path} {args.cn}")
+        return
+    except Exception as e:
+        print(f"[!] Unexpected error during hardware access: {e}")
+        return
 
-def generate_client_csr(
-    cn: str,
-    organization: str = "Ospedale-San-Raffaele",
-    department: str = "Cardiologia",
-    country: str = "IT",
-    mac: str = None,
-    cpu: str = None,
-    output_dir: Path = None,
-) -> dict:
-    """Generate a CSR on the client device (locally generated keys).
+    # Build the payload for the server
+    print(f"[*] Fetching server challenge...")
+    resp = requests.get(f"{args.server}/api/challenge")
+    ch_id = resp.json()["challenge_id"]
+
+    print(f"[*] Submitting Enrollment (Zero Trust Proof of Possession)...")
     
-    Args:
-        cn: Common Name (username/device identifier)
-        organization: Organization name
-        department: Department/OU
-        country: Country code
-        mac: MAC address (auto-detected if None)
-        cpu: CPU identifier (auto-detected if None)
-        output_dir: Directory to save key and CSR (default: current dir)
-    
-    Returns:
-        dict with paths and metadata
-    """
-    output_dir = Path(output_dir or ".")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Auto-detect hardware if not provided
-    if not mac:
-        mac = _format_mac(uuid.getnode())
-    if not cpu:
-        cpu = (
-            platform.processor()
-            or platform.uname().processor
-            or platform.machine()
-            or "Generic-CPU"
-        )
-
-    # Generate local keypair
-    print(f"[*] Generating RSA keypair (2048 bits) on {cn}...")
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-
-    # Create subject DN
-    subject = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COUNTRY_NAME, country),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
-            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, department),
-            x509.NameAttribute(NameOID.COMMON_NAME, cn),
-        ]
-    )
-
-    # Create SAN extension with hardware identifiers
-    san_list = [
-        x509.DNSName(f"{cn.lower().replace(' ', '-')}.internal"),
-        x509.DNSName(f"MAC-{mac}"),
-        x509.DNSName(f"CPU-{cpu}"),
-    ]
-
-    # Build CSR
-    print("[*] Building CSR with device identifiers...")
-    csr = (
-        x509.CertificateSigningRequestBuilder()
-        .subject_name(subject)
-        .add_extension(
-            x509.SubjectAlternativeName(san_list),
-            critical=False,
-        )
-        .add_extension(
-            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH]),
-            critical=False,
-        )
-        .sign(private_key, hashes.SHA256())
-    )
-
-    # Save private key locally
-    key_path = output_dir / f"{cn}_key.pem"
-    key_pem = private_key.private_bytes(
+    # Preariamo la chiave pubblica in formato PEM per il server
+    pub_raw = base64.b64decode(data["pub_key_b64"])
+    from cryptography.hazmat.backends import default_backend
+    public_key = serialization.load_der_public_key(pub_raw, backend=default_backend())
+    pub_pem = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    key_path.write_bytes(key_pem)
-    key_path.chmod(0o600)
-    print(f"[✓] Private key saved: {key_path}")
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
 
-    # Save CSR
-    csr_path = output_dir / f"{cn}_csr.pem"
-    csr_pem = csr.public_bytes(serialization.Encoding.PEM)
-    csr_path.write_bytes(csr_pem)
-    print(f"[✓] CSR saved: {csr_path}")
-
-    # Create metadata
-    metadata = {
-        "cn": cn,
-        "organization": organization,
-        "department": department,
-        "country": country,
-        "hardware": {
-            "mac": mac,
-            "cpu": cpu,
-        },
-        "created_at": str(__import__("datetime").datetime.now().isoformat()),
-        "files": {
-            "private_key": str(key_path),
-            "csr": str(csr_path),
-        },
-    }
-    metadata_path = output_dir / f"{cn}_metadata.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2))
-    print(f"[✓] Metadata saved: {metadata_path}")
-
-    return {
-        "private_key": key_path,
-        "csr": csr_path,
-        "metadata": metadata_path,
-        "csr_pem": csr_pem.decode("utf-8"),
+    payload = {
+        "user": args.cn,
+        "role": args.role,
+        "department": args.department,
+        "challenge_id": ch_id,
+        "proof_string": data["csr_pem"], # La stringa firmata nativamente da Swift
+        "attestation_sig_b64": data["signature_b64"],
+        "public_key_pem": pub_pem,
+        "is_native_proof": True
     }
 
+    try:
+        r = requests.post(f"{args.server}/api/csr", json=payload)
+        r.raise_for_status()
+        print(f"\n[✓✓✓] ENROLLMENT SUCCESSFUL (HARDWARE-BOUND)!")
+        
+        cert_path = Path(args.output_dir) / f"{args.cn}.crt"
+        cert_path.parent.mkdir(parents=True, exist_ok=True)
+        cert_path.write_text(r.json()["certificate_pem"])
+        print(f"Certificate saved to: {cert_path}")
+    except Exception as e:
+        print(f"Enrollment failed: {e}")
+        if hasattr(e, 'response') and e.response:
+            print(f"Server error: {e.response.text}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate client CSR for PKI enrollment"
-    )
-    parser.add_argument("--cn", required=True, help="Common Name (username)")
-    parser.add_argument("--department", default="Cardiologia", help="Department/OU")
-    parser.add_argument("--organization", default="Ospedale-San-Raffaele", help="Organization")
-    parser.add_argument("--mac", help="MAC address (auto-detect if omitted)")
-    parser.add_argument("--cpu", help="CPU identifier (auto-detect if omitted)")
-    parser.add_argument("--output-dir", "-o", help="Output directory (default: current dir)")
-
-    args = parser.parse_args()
-
-    result = generate_client_csr(
-        cn=args.cn,
-        organization=args.organization,
-        department=args.department,
-        mac=args.mac,
-        cpu=args.cpu,
-        output_dir=args.output_dir,
-    )
-
-    print("\n" + "=" * 70)
-    print("CSR GENERATION COMPLETE")
-    print("=" * 70)
-    print(f"Private Key (KEEP SECURE!): {result['private_key']}")
-    print(f"CSR (send to server):       {result['csr']}")
-    print(f"Metadata:                   {result['metadata']}")
-    print("\nNext step: Send the CSR to the PKI server:")
-    print('  curl -X POST http://pki-server:8080/api/csr \\')
-    print('    -H "Content-Type: application/json" \\')
-    print('    -d "{')
-    print('      \\"csr\\": \\"' + result['csr_pem'][:50].replace('\n', '\\n') + '...\\",')
-    print('      \\"user\\": \\"' + args.cn + '\\",')
-    print('      \\"role\\": \\"doctor\\",')
-    print('      \\"department\\": \\"' + args.department + '\\"')
-    print('    }"')
-    print("=" * 70)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cn", required=True)
+    parser.add_argument("--role", default="doctor")
+    parser.add_argument("--department", default="Cardiologia")
+    parser.add_argument("--server", default="http://localhost:8080")
+    parser.add_argument("--output-dir", default="./certs/client")
+    enroll(parser.parse_args())
