@@ -99,24 +99,20 @@ class PKIService:
             
             # 1. Native Proof Verification (Swift approach)
             if proof_string and public_key_pem:
-                print(f"[*] Verifying Native Proof for user: {proof_string}")
-                pub_key = serialization.load_pem_public_key(public_key_pem.encode())
                 try:
-                    pub_key.verify(
-                        signature,
-                        proof_string.encode(),
-                        padding.PKCS1v15(),
-                        hashes.SHA256()
-                    )
-                    print(f"[✓] Native Hardware Proof verified successfully")
-                    self.challenges[challenge_id].used = True
-                    return True
-                except Exception as ve:
-                    print(f"[!] Signature verification failed: {ve}")
-                    # Log more details for debugging
-                    print(f"    - Signature length: {len(signature)}")
-                    print(f"    - Proof string: {proof_string}")
-                    return False
+                    pub_key = serialization.load_pem_public_key(public_key_pem.encode())
+                except ValueError:
+                    # Fallback for PKCS#1 format (BEGIN RSA PUBLIC KEY)
+                    pub_key = serialization.load_pem_rsa_public_key(public_key_pem.encode())
+                pub_key.verify(
+                    signature,
+                    proof_string.encode(),
+                    padding.PKCS1v15(),
+                    hashes.SHA256()
+                )
+                print(f"[✓] Native Hardware Proof verified: {proof_string}")
+                self.challenges[challenge_id].used = True
+                return True
 
             # 2. Try CSR verification (certtool fallback)
             try:

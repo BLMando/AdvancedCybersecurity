@@ -92,17 +92,22 @@ func generateNativeCSR() {
         exit(1)
     }
     
+    // 5. Get Public Key in PEM format
     let publicKey = SecKeyCopyPublicKey(key)!
     let pubKeyData = SecKeyCopyExternalRepresentation(publicKey, nil)! as Data
+    let pubKeyBase64 = pubKeyData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+    let pubKeyPEM = "-----BEGIN RSA PUBLIC KEY-----\n\(pubKeyBase64)\n-----END RSA PUBLIC KEY-----"
     
-    let result: [String: String] = [
-        "csr_pem": proofString, // The proof string
+    // 6. Output JSON result
+    let response: [String: String] = [
         "signature_b64": (signature as Data).base64EncodedString(),
         "pub_key_b64": pubKeyData.base64EncodedString(),
+        "pub_key_pem": pubKeyPEM,
+        "csr_pem": proofString,
         "is_native_proof": "true"
     ]
     
-    if let jsonData = try? JSONSerialization.data(withJSONObject: result),
+    if let jsonData = try? JSONSerialization.data(withJSONObject: response),
        let jsonString = String(data: jsonData, encoding: .utf8) {
         print(jsonString)
     }

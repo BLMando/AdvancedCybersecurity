@@ -44,7 +44,7 @@ def create_app(data_dir=None) -> Flask:
         proof_string = payload.get("proof_string")
         
         if not csr_pem and not is_hw and not proof_string:
-            return jsonify({"error": "CSR or Proof String required"}), 400
+            return jsonify({"error": "CSR required"}), 400
         
         try:
             # If it's a hardware CSR, csr_pem might be empty or same as signature
@@ -66,6 +66,24 @@ def create_app(data_dir=None) -> Flask:
             })
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
+
+    @app.post("/api/verify")
+    def api_verify_identity():
+        """Verify a hardware-bound identity proof."""
+        payload = request.get_json(silent=True) or {}
+        challenge_id = payload.get("challenge_id")
+        signature_b64 = payload.get("signature")
+        public_key_pem = payload.get("public_key")
+        proof_string = payload.get("proof_string")
+        
+        if service.verify_hardware_signature(challenge_id, signature_b64, public_key_pem, proof_string):
+            return jsonify({
+                "status": "authenticated",
+                "user": proof_string.split("|")[1] if proof_string else "unknown",
+                "message": "Zero Trust hardware identity verified"
+            })
+        else:
+            return jsonify({"error": "Identity verification failed"}), 401
 
     return app
 
