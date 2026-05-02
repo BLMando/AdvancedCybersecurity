@@ -168,8 +168,13 @@ class PKIService:
             pub_key = serialization.load_pem_rsa_public_key(public_key_pem.encode()) if "BEGIN RSA" in public_key_pem else serialization.load_pem_public_key(public_key_pem.encode())
             clean_user = user or "unknown"
             
-            # Costruiamo il Subject includendo MAC e CPU se presenti
+            # Costruiamo il Subject includendo tutti i metadati
             subject_attrs = [x509.NameAttribute(NameOID.COMMON_NAME, clean_user)]
+            
+            if kwargs.get("role"):
+                subject_attrs.append(x509.NameAttribute(NameOID.TITLE, kwargs["role"]))
+            if kwargs.get("department"):
+                subject_attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, kwargs["department"]))
             if kwargs.get("mac"):
                 subject_attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"MAC:{kwargs['mac']}"))
             if kwargs.get("cpu"):

@@ -38,11 +38,14 @@ func deepClean(label: String) {
 }
 
 func generateNativeCSR() {
-    // 1. Try to find existing key first
+    // 1. Try to find existing key first (Specific query)
     let query: [String: Any] = [
         kSecClass as String: kSecClassKey,
         kSecAttrLabel as String: label,
-        kSecReturnRef as String: true
+        kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+        kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
+        kSecReturnRef as String: true,
+        kSecReturnAttributes as String: true
     ]
     var item: CFTypeRef?
     var securityError: Unmanaged<CFError>?
@@ -50,8 +53,15 @@ func generateNativeCSR() {
     
     let status = SecItemCopyMatching(query as CFDictionary, &item)
     if status == errSecSuccess {
-        privateKey = (item as! SecKey)
-        print("Found existing hardware key in Keychain.", to: &StandardError.shared)
+        if let dict = item as? [String: Any], let keyVal = dict[kSecValueRef as String] {
+            let keyRef = (keyVal as! SecKey)
+            privateKey = keyRef
+            print("Found existing hardware key in Keychain.", to: &StandardError.shared)
+            if let attrs = SecKeyCopyAttributes(keyRef) as? [String: Any] {
+                let usage = attrs[kSecAttrCanSign as String] ?? "unknown"
+                print("Key Attributes -> CanSign: \(usage), Label: \(attrs[kSecAttrLabel as String] ?? "none")", to: &StandardError.shared)
+            }
+        }
     } else {
         print("Existing key not found. Creating new hardware-bound key...", to: &StandardError.shared)
         
@@ -82,13 +92,20 @@ func generateNativeCSR() {
     let proofString = "ZTA-CERT-BINDING|CN=\(cn)|TIME=\(timestamp)"
     let dataToSign = proofString.data(using: .utf8)!
     
-    // 3. Manual Hashing for Maximum Compatibility (CryptoKit)
-    let hashData = Data(SHA256.hash(data: dataToSign))
-    
-    guard let signature = SecKeyCreateSignature(key, .rsaSignatureDigestPKCS1v15SHA256, hashData as CFData, &securityError) else {
-        print("Existing key in Keychain is incompatible. Performing Deep Clean and Resetting...", to: &StandardError.shared)
-        deepClean(label: label)
-        print("[!] Old keys purged. Please run the script again to generate a fresh hardware-bound key.", to: &StandardError.shared)
+    // 3. Signing (Using Message algorithm instead of Digest for better compatibility)
+    guard let signature = SecKeyCreateSignature(key, .rsaSignatureMessagePKCS1v15SHA256, dataToSign as CFData, &securityError) else {
+        let error = securityError?.takeRetainedValue()
+        let code = error.map { CFErrorGetCode($0) } ?? 0
+        let errorMsg = error.map { "\($0)" } ?? "Unknown error"
+        
+        if code == -50 {
+            print("Detected incompatible legacy key (Error -50). Performing auto-reset...", to: &StandardError.shared)
+            deepClean(label: label)
+            print("[!] Legacy key removed. Please run the script again to enroll/authenticate with a fresh hardware key.", to: &StandardError.shared)
+        } else {
+            print("Error: Signature failed (Code \(code)): \(errorMsg)", to: &StandardError.shared)
+            print("[!] Hint: Check Keychain permissions or run with sudo if needed.", to: &StandardError.shared)
+        }
         exit(1)
     }
     

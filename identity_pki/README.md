@@ -1,26 +1,31 @@
 ## Setup
-dal root folder lanciare:
+Dal root folder lanciare:
 
+```bash
 docker build -f identity_pki/Dockerfile . -t identity-pki    
 docker run --rm -p 8080:8080 -v "$PWD/certs/identity_pki:/data/certs" identity-pki   
-
-
-# Legge MAC e CPU dal dispositivo reale
-python scripts/generate_client_csr.py --cn mario --department Cardiologia
-
-# Oppure con i valori manuali
-python scripts/generate_client_csr.py --cn mario --department Cardiologia --mac "AA:BB:CC:DD:EE:FF" --cpu "Intel i7"
-
-
-### Enrollment
-```bash
-python3 generate_client_csr.py --cn "paolo.roselli" --role doctor --department "Cardiologia"
-python3 generate_client_csr.py --cn "paolo.roselli" --mac "DE:AD:BE:EF:00:11" --cpu "Apple M2 Max"
 ```
 
-### Autenticazione
+# Enrollment (macOS & Windows)
+Lo script rileva automaticamente l'hardware (Keychain su Mac, TPM su Windows).
+
 ```bash
-python3 simulate_auth.py
+# Enrollment standard (rileva MAC e CPU automaticamente)
+python3 scripts/enroll.py --cn "paolo.roselli" --role "doctor" --department "Cardiologia"
+
+# Enrollment con metadati manuali completi
+python3 scripts/enroll.py --cn "paolo.roselli" --role "admin" --department "IT" --mac "DE:AD:BE:EF:00:11" --cpu "Apple M2 Max"
 ```
+
+### Autenticazione (macOS & Windows)
+```bash
+python3 scripts/authenticate.py
+```
+
+## Struttura Progetto
+- `scripts/enroll.py`: Registrazione identità hardware.
+- `scripts/authenticate.py`: Verifica identità hardware.
+- `scripts/macos/`: Helper nativo Swift per macOS.
+- `scripts/windows/`: Helper PowerShell per Windows (TPM).
 
 ---

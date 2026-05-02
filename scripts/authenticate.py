@@ -5,6 +5,7 @@ import json
 import base64
 import os
 import sys
+from pathlib import Path
 
 # ZTA Authentication Simulator (Lightweight - No dependencies)
 # This script demonstrates how a hardware-bound identity authenticates 
@@ -31,9 +32,22 @@ def main():
         return
 
     # 2. Sign Challenge via Hardware Helper
-    print(f"\n[*] Step 2: Signing Challenge via macOS Keychain (Hardware)...")
+    print(f"\n[*] Step 2: Signing Challenge via Hardware Keychain/TPM...")
+    import platform
+    current_os = platform.system()
+    
+    if current_os == "Darwin": # macOS
+        helper_path = Path(__file__).parent / "macos" / "hw_attestation_helper"
+        cmd = [str(helper_path), CN]
+    elif current_os == "Windows":
+        helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
+        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(helper_path), "-CN", CN]
+    else:
+        print(f"[!] OS {current_os} not supported.")
+        return
+
     try:
-        result = subprocess.run([HELPER_PATH, CN], capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"[!] Hardware signing failed:\n{result.stderr}")
             return

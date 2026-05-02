@@ -58,6 +58,8 @@ def create_app(data_dir=None) -> Flask:
                 is_hardware_csr=is_hw,
                 proof_string=payload.get("proof_string"),
                 user=payload.get("user"),
+                role=payload.get("role"),
+                department=payload.get("department"),
                 mac=payload.get("mac"),
                 cpu=payload.get("cpu")
             )

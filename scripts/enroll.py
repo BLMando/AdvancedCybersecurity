@@ -22,19 +22,29 @@ def enroll(args):
     print(f" ZTA PROFESSIONAL HARDWARE ENROLLMENT: {args.cn.upper()}")
     print(f"{'='*70}\n")
 
-    helper_path = Path(__file__).parent / "hw_attestation_helper"
-    if not helper_path.exists():
-        print(f"[!] Helper not found. Please compile it first.")
+    import platform
+    current_os = platform.system()
+    
+    if current_os == "Darwin": # macOS
+        helper_path = Path(__file__).parent / "macos" / "hw_attestation_helper"
+        cmd = [str(helper_path), args.cn]
+    elif current_os == "Windows":
+        helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
+        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(helper_path), "-CN", args.cn]
+    else:
+        print(f"[!] OS {current_os} not supported for hardware enrollment.")
+        return
+
+    if current_os == "Darwin" and not helper_path.exists():
+        print(f"[!] Helper not found at {helper_path}. Please compile it first.")
         return
 
     try:
-        res = subprocess.run([str(helper_path), args.cn], capture_output=True, text=True, check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
     except subprocess.CalledProcessError as e:
         print(f"[!] Hardware helper failed (exit {e.returncode}):")
         print(f"    {e.stderr or e.stdout}")
-        print(f"\n[!] Suggestion: Try to run the helper manually to see if it prompts for Keychain access:")
-        print(f"    {helper_path} {args.cn}")
         return
     except Exception as e:
         print(f"[!] Unexpected error during hardware access: {e}")
