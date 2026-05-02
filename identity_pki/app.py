@@ -80,11 +80,12 @@ def create_app(data_dir=None) -> Flask:
         public_key_pem = payload.get("public_key")
         proof_string = payload.get("proof_string")
         
-        if service.verify_hardware_signature(challenge_id, signature_b64, public_key_pem, proof_string):
+        identity = service.verify_hardware_signature(challenge_id, signature_b64, public_key_pem, proof_string)
+        if identity:
             return jsonify({
                 "status": "authenticated",
-                "user": proof_string.split("|")[1] if proof_string else "unknown",
-                "message": "Zero Trust hardware identity verified"
+                "message": "Zero Trust hardware identity verified",
+                "identity": identity
             })
         else:
             return jsonify({"error": "Identity verification failed"}), 401

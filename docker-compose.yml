@@ -17,6 +17,7 @@ services:
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
     volumes:
       - ./certs/identity_pki:/data/certs
+      - ./certs/client:/data/certs/client
     networks:
       - backend-net
 

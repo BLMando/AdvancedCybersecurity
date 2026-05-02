@@ -110,9 +110,50 @@ class PKIService:
                     padding.PKCS1v15(),
                     hashes.SHA256()
                 )
-                print(f"[✓] Native Hardware Proof verified: {proof_string}")
+                # Extract CN for identity lookup
+                user_cn = "unknown"
+                parts = proof_string.split("|")
+                for p in parts:
+                    if p.startswith("CN="):
+                        user_cn = p.split("=")[1].strip()
+
+                # 4. Identity Recognition: Lookup certificate to get Role and Department
+                role = "unknown"
+                dept = "unknown"
+                
+                # Search in /data/certs/client/ or fallback to /data/certs/
+                cert_path = os.path.join(self.cert_dir, "client", f"{user_cn}.crt")
+                if not os.path.exists(cert_path):
+                    cert_path = os.path.join(self.cert_dir, f"{user_cn}.crt")
+                
+                if os.path.exists(cert_path):
+                    print(f"[*] Found certificate at {cert_path}, loading attributes...")
+                    with open(cert_path, "rb") as f:
+                        cert = x509.load_pem_x509_certificate(f.read())
+                        print(f"[*] Cert Subject: {cert.subject}")
+                        
+                        # Get Role from TITLE
+                        titles = cert.subject.get_attributes_for_oid(NameOID.TITLE)
+                        if titles:
+                            role = titles[0].value
+                            
+                        # Get Department from OU (filtering out MAC/CPU)
+                        ous = cert.subject.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)
+                        for ou in ous:
+                            val = str(ou.value)
+                            if not val.startswith(("MAC:", "CPU:")):
+                                dept = val
+                                break
+                else:
+                    print(f"[!] Certificate for {user_cn} NOT FOUND at {cert_path}")
+
+                print(f"[✓] Hardware Proof verified for {user_cn} ({role} in {dept})")
                 self.challenges[challenge_id].used = True
-                return True
+                return {
+                    "user": user_cn,
+                    "role": role,
+                    "department": dept
+                }
 
             # 2. Try CSR verification (certtool fallback)
             try:
@@ -212,12 +253,11 @@ class PKIService:
             critical=False
         ).sign(self.ca_key, hashes.SHA256())
 
-        cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-        
-        # Save to disk
-        user_dir = os.path.join(self.issued_dir, clean_user.replace(".", "-"))
-        os.makedirs(user_dir, exist_ok=True)
-        with open(os.path.join(user_dir, "cert.crt"), "w") as f:
+        # Salva copia locale per identity lookup (Zero Trust Registry)
+        client_save_path = os.path.join(self.cert_dir, "client", f"{clean_user}.crt")
+        os.makedirs(os.path.dirname(client_save_path), exist_ok=True)
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+        with open(client_save_path, "wb") as f:
             f.write(cert_pem)
             
-        return cert_pem
+        return cert_pem.decode()
