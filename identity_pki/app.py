@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import base64
-from flask import Flask, abort, jsonify, render_template, request, send_from_directory
+from flask import Flask, abort, jsonify, render_template, render_template_string, request, send_from_directory
+from cryptography.hazmat.primitives import serialization, hashes
 from .pki import PKIService
 
 def create_app(data_dir=None) -> Flask:
@@ -15,9 +16,6 @@ def create_app(data_dir=None) -> Flask:
     cert_dir = data_dir or os.environ.get("ZTA_PKI_DATA_DIR", "/data/certs")
     service = PKIService(cert_dir=cert_dir)
     
-    @app.get("/")
-    def index():
-        return "ZTA PKI Server is running"
 
     @app.get("/health")
     def health():
@@ -89,6 +87,54 @@ def create_app(data_dir=None) -> Flask:
             })
         else:
             return jsonify({"error": "Identity verification failed"}), 401
+
+    @app.get("/")
+    def index():
+        """Serve the landing page."""
+        # Get CA fingerprint
+        import hashlib
+        ca_fingerprint = hashlib.sha256(service.ca_cert.public_bytes(serialization.Encoding.DER)).hexdigest()
+        
+        ca_info = {
+            "subject": service.ca_cert.subject.rfc4514_string(),
+            "fingerprint_sha256": ca_fingerprint,
+            "data_dir": service.cert_dir
+        }
+        
+        roles = {
+            "doctor": {"label": "Medico / Chirurgo"},
+            "nurse": {"label": "Infermiere / Personale Sanitario"},
+            "admin": {"label": "Amministrativo / IT"},
+            "external": {"label": "Consulente Esterno"}
+        }
+        
+        return render_template("index.html", ca=ca_info, roles=roles)
+
+    @app.get("/admin")
+    def admin_dashboard():
+        """Serve the admin dashboard."""
+        return render_template("admin.html")
+
+    @app.get("/api/admin/certificates")
+    def api_list_certificates():
+        """List all certificates."""
+        return jsonify(service.list_certificates())
+
+    @app.get("/ca/download/<filename>")
+    def download_ca_file(filename):
+        """Download the CA certificate."""
+        # Force filename to ca.crt regardless of what the template asks for
+        return send_from_directory(service.cert_dir, "ca.crt", as_attachment=True)
+
+    @app.post("/api/admin/revoke")
+    def api_revoke_certificate():
+        """Revoke a certificate."""
+        payload = request.get_json(silent=True) or {}
+        user_cn = payload.get("user")
+        if not user_cn:
+            return jsonify({"error": "User CN is required"}), 400
+        service.revoke_certificate(user_cn)
+        return jsonify({"status": "success", "message": f"User {user_cn} revoked"})
 
     return app
 

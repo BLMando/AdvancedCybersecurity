@@ -22,9 +22,12 @@ class PKIService:
         self.ca_key_path = os.path.join(cert_dir, "ca.key")
         self.ca_cert_path = os.path.join(cert_dir, "ca.crt")
         self.issued_dir = os.path.join(cert_dir, "issued")
+        self.revoked_dir = os.path.join(cert_dir, "revoked")
         self.challenges = {}  # challenge_id -> AttestationChallenge
         
         os.makedirs(self.issued_dir, exist_ok=True)
+        os.makedirs(self.revoked_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.cert_dir, "client"), exist_ok=True)
         self._ensure_ca()
 
     def _ensure_ca(self):
@@ -99,6 +102,17 @@ class PKIService:
             
             # 1. Native Proof Verification (Swift approach)
             if proof_string and public_key_pem:
+                # 0. Check for Revocation
+                parts = proof_string.split("|")
+                user_cn = "unknown"
+                for p in parts:
+                    if p.startswith("CN="):
+                        user_cn = p.split("=")[1].strip()
+                
+                if os.path.exists(os.path.join(self.revoked_dir, f"{user_cn}.rev")):
+                    print(f"[!] REJECTED: User {user_cn} has been REVOKED.")
+                    return None
+
                 try:
                     pub_key = serialization.load_pem_public_key(public_key_pem.encode())
                 except ValueError:
@@ -261,3 +275,23 @@ class PKIService:
             f.write(cert_pem)
             
         return cert_pem.decode()
+
+    def list_certificates(self):
+        """List all certificates in the registry."""
+        certs = []
+        client_dir = os.path.join(self.cert_dir, "client")
+        if os.path.exists(client_dir):
+            for filename in os.listdir(client_dir):
+                if filename.endswith(".crt"):
+                    user_cn = filename[:-4]
+                    status = "revoked" if os.path.exists(os.path.join(self.revoked_dir, f"{user_cn}.rev")) else "active"
+                    certs.append({"user": user_cn, "status": status})
+        return certs
+
+    def revoke_certificate(self, user_cn):
+        """Mark a certificate as revoked."""
+        revocation_file = os.path.join(self.revoked_dir, f"{user_cn}.rev")
+        with open(revocation_file, "w") as f:
+            f.write(f"Revoked at {datetime.now(timezone.utc)}")
+        print(f"[!] Certificate for {user_cn} has been revoked.")
+        return True

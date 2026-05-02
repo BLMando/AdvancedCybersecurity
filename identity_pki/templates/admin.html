@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZTA Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00f2fe;
+            --secondary: #4facfe;
+            --bg: #0f172a;
+            --card: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top right, #1e293b, #0f172a);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 1rem;
+        }
+        h1 { font-weight: 600; font-size: 1.5rem; letter-spacing: -0.025em; }
+        .badge {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #000;
+        }
+        .card {
+            background: var(--card);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th {
+            text-align: left;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: #94a3b8;
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .status-active { color: #4ade80; }
+        .status-revoked { color: #f87171; text-decoration: line-through; }
+        button {
+            background: rgba(248, 113, 113, 0.1);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #f87171;
+            color: white;
+        }
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Zero Trust Identity Registry</h1>
+            <span class="badge">Hardware Attestation CA</span>
+        </header>
+        
+        <div class="card">
+            <table id="certTable">
+                <thead>
+                    <tr>
+                        <th>User (Common Name)</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="3">Loading identities...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function loadCerts() {
+            const resp = await fetch('/api/admin/certificates');
+            const certs = await resp.json();
+            const tbody = document.querySelector('#certTable tbody');
+            tbody.innerHTML = certs.map(c => `
+                <tr>
+                    <td><strong>${c.user}</strong></td>
+                    <td><span class="status-${c.status}">${c.status.toUpperCase()}</span></td>
+                    <td>
+                        ${c.status === 'active' ? 
+                            `<button onclick="revoke('${c.user}')">Revoke Hardware Identity</button>` : 
+                            `<button disabled>Revoked</button>`}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function revoke(user) {
+            if (!confirm(`Are you sure you want to REVOKE hardware access for ${user}?`)) return;
+            const resp = await fetch('/api/admin/revoke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user })
+            });
+            if (resp.ok) loadCerts();
+        }
+
+        loadCerts();
+        setInterval(loadCerts, 5000);
+    </script>
+</body>
+</html>
