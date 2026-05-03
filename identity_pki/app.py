@@ -75,10 +75,16 @@ def create_app(data_dir=None) -> Flask:
         payload = request.get_json(silent=True) or {}
         challenge_id = payload.get("challenge_id")
         signature_b64 = payload.get("signature")
-        public_key_pem = payload.get("public_key")
+        public_key_pem = payload.get("public_key_pem")
         proof_string = payload.get("proof_string")
         
-        identity = service.verify_hardware_signature(challenge_id, signature_b64, public_key_pem, proof_string)
+        print(f"DEBUG app.py: Calling verify_proof with ch_id={challenge_id}")
+        identity = service.verify_proof(
+            challenge_id=challenge_id,
+            signature_b64=signature_b64,
+            public_key_pem=public_key_pem,
+            proof_string=proof_string
+        )
         if identity:
             return jsonify({
                 "status": "authenticated",

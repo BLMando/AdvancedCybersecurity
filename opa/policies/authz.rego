@@ -162,7 +162,8 @@ known_users := {
 	"giulia.bianchi", 
 	"luca.ferrari",
 	"admin",
-	"test.user"
+	"test.user",
+	"paolo.roselli"
 }
 
 is_internal_network if {
@@ -178,7 +179,8 @@ user_role_map := {
 	"giulia.bianchi": "auditor",
 	"luca.ferrari":   "receptionist",
 	"admin":         "admin",
-	"test.user":      "auditor"
+	"test.user":      "auditor",
+	"paolo.roselli":  "doctor"
 }
 
 current_role := role if {

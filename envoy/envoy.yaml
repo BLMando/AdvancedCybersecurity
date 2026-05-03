@@ -19,7 +19,8 @@ static_resources:
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
               common_tls_context:
-                # Envoy presents this certificate to the client.
+                # [LAB-ONLY] Envoy presents this certificate to the client.
+                # PRO-TIP: In production, use SDS (Secret Discovery Service) instead of local files.
                 tls_certificates:
                   - certificate_chain:
                       filename: /etc/certs/server/envoy.crt
@@ -27,8 +28,9 @@ static_resources:
                       filename: /etc/certs/server/envoy.key
                 validation_context:
                   # Trusted CA used to validate client certificates.
+                  # PRO-TIP: Use SDS to fetch the CA bundle dynamically.
                   trusted_ca:
-                    filename: /etc/certs/ca/hospital_ca.crt
+                    filename: /etc/certs/ca/ca.crt
               # Fail closed: the connection is rejected if the client does not
               # present a valid certificate.
               require_client_certificate: true

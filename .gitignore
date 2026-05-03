@@ -4,3 +4,4 @@ certs/
 .agents/
 .venv/
 .python-version
+docs/

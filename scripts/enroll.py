@@ -58,13 +58,21 @@ def enroll(args):
     print(f"[*] Submitting Enrollment (Zero Trust Proof of Possession)...")
     
     # Preariamo la chiave pubblica in formato PEM per il server
-    pub_raw = base64.b64decode(data["pub_key_b64"])
-    from cryptography.hazmat.backends import default_backend
-    public_key = serialization.load_der_public_key(pub_raw, backend=default_backend())
-    pub_pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
+    pub_pem = data.get("pub_key_pem")
+    if not pub_pem:
+        # Fallback se pub_key_pem manca, ma pub_key_b64 c'è
+        pub_raw = base64.b64decode(data["pub_key_b64"])
+        from cryptography.hazmat.backends import default_backend
+        try:
+            public_key = serialization.load_der_public_key(pub_raw, backend=default_backend())
+            pub_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode()
+        except:
+             # Se tutto fallisce, usiamo un placeholder o lanciamo errore
+             print("[!] Errore: Impossibile caricare la chiave pubblica dall'hardware.")
+             return
 
     # Rilevamento automatico se non forniti
     mac = args.mac
@@ -97,10 +105,24 @@ def enroll(args):
         print(f"\n[✓✓✓] ENROLLMENT SUCCESSFUL (HARDWARE-BOUND)!")
         print(f"[*] Identity verified with MAC: {mac} and CPU: {cpu}")
         
-        cert_path = Path(args.output_dir) / f"{args.cn}.crt"
-        cert_path.parent.mkdir(parents=True, exist_ok=True)
-        cert_path.write_text(r.json()["certificate_pem"])
-        print(f"Certificate saved to: {cert_path}")
+        cert_file = Path(args.output_dir) / f"{args.cn}.crt"
+        cert_file.parent.mkdir(parents=True, exist_ok=True)
+        cert_pem = r.json()["certificate_pem"]
+        cert_file.write_text(cert_pem)
+        print(f"Certificate saved to: {cert_file}")
+
+        # 4. Import Certificate into Keychain (macOS only)
+        if current_os == "Darwin":
+            print("[*] Importing certificate into Keychain to create Identity...")
+            try:
+                # Use security command to import the certificate
+                # We point it to the label of the private key so they link up
+                import_cmd = ["security", "import", str(cert_file), "-t", "cert", "-r", "trustRoot", "-c", "ZTA-HW-" + args.cn]
+                subprocess.run(import_cmd, capture_output=True)
+                print("[✓] Certificate imported and linked to hardware key.")
+            except Exception as e:
+                print(f"[!] Warning: Keychain import failed: {e}")
+
     except Exception as e:
         print(f"Enrollment failed: {e}")
         if hasattr(e, 'response') and e.response:

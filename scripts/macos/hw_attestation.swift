@@ -109,16 +109,38 @@ func generateNativeCSR() {
         exit(1)
     }
     
-    // 5. Get Public Key in PEM format
-    let publicKey = SecKeyCopyPublicKey(key)!
-    let pubKeyData = SecKeyCopyExternalRepresentation(publicKey, nil)! as Data
-    let pubKeyBase64 = pubKeyData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
-    let pubKeyPEM = "-----BEGIN RSA PUBLIC KEY-----\n\(pubKeyBase64)\n-----END RSA PUBLIC KEY-----"
+    // 5. Get Public Key in PEM format (Try searching Keychain first)
+    var pubKeyPEM = ""
+    var pubKeyBase64 = ""
+    
+    let pubSearchQuery: [String: Any] = [
+        kSecClass as String: kSecClassKey,
+        kSecAttrLabel as String: label,
+        kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
+        kSecReturnData as String: true
+    ]
+    
+    var pubItem: CFTypeRef?
+    let pubStatus = SecItemCopyMatching(pubSearchQuery as CFDictionary, &pubItem)
+    
+    if pubStatus == errSecSuccess, let pubData = pubItem as? Data {
+        pubKeyBase64 = pubData.base64EncodedString()
+        let formattedBase64 = pubData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        pubKeyPEM = "-----BEGIN RSA PUBLIC KEY-----\n\(formattedBase64)\n-----END RSA PUBLIC KEY-----"
+        print("[*] Public key retrieved directly from Keychain.", to: &StandardError.shared)
+    } else if let publicKey = SecKeyCopyPublicKey(key), let pubKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data? {
+        // Fallback to extraction if search fails
+        pubKeyBase64 = pubKeyData.base64EncodedString()
+        let formattedBase64 = pubKeyData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+        pubKeyPEM = "-----BEGIN RSA PUBLIC KEY-----\n\(formattedBase64)\n-----END RSA PUBLIC KEY-----"
+    } else {
+        print("Warning: Could not retrieve public key via search or extraction.", to: &StandardError.shared)
+    }
     
     // 6. Output JSON result
     let response: [String: String] = [
         "signature_b64": (signature as Data).base64EncodedString(),
-        "pub_key_b64": pubKeyData.base64EncodedString(),
+        "pub_key_b64": pubKeyBase64,
         "pub_key_pem": pubKeyPEM,
         "csr_pem": proofString,
         "is_native_proof": "true"
@@ -130,4 +152,77 @@ func generateNativeCSR() {
     }
 }
 
-generateNativeCSR()
+// 7. Optional: Perform mTLS Test
+func performMTLSTest(label: String, urlString: String) {
+    guard let url = URL(string: urlString) else {
+        print("Invalid URL")
+        return
+    }
+    
+    // Create a URLSession that uses the Keychain identity
+    let session = URLSession(configuration: .ephemeral, delegate: IdentityDelegate(label: label), delegateQueue: nil)
+    
+    let semaphore = DispatchSemaphore(value: 0)
+    print("[*] Starting mTLS Handshake via URLSession for identity: \(label)...", to: &StandardError.shared)
+    
+    let task = session.dataTask(with: url) { data, response, error in
+        if let error = error {
+            print("[!] mTLS Error: \(error.localizedDescription)", to: &StandardError.shared)
+        } else if let httpResponse = response as? HTTPURLResponse {
+            print("[✓] mTLS Handshake Successful! Status: \(httpResponse.statusCode)", to: &StandardError.shared)
+            if let data = data, let body = String(data: data, encoding: .utf8) {
+                print("[*] Response body preview: \(body.prefix(100))", to: &StandardError.shared)
+            }
+        }
+        semaphore.signal()
+    }
+    task.resume()
+    semaphore.wait()
+}
+
+// Delegate to provide the identity from Keychain
+class IdentityDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
+    let label: String
+    init(label: String) { self.label = label }
+    
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodClientCertificate {
+            // Find identity in Keychain
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassIdentity,
+                kSecAttrLabel as String: label,
+                kSecReturnRef as String: true
+            ]
+            
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            if status == errSecSuccess {
+                let identity = item as! SecIdentity
+                let credential = URLCredential(identity: identity, certificates: nil, persistence: .forSession)
+                completionHandler(.useCredential, credential)
+                return
+            }
+        }
+        
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            completionHandler(.useCredential, URLCredential(trust: challenge.protectionSpace.serverTrust!))
+            return
+        }
+        
+        completionHandler(.performDefaultHandling, nil)
+    }
+}
+
+// Main Logic
+if arguments.contains("--reset") {
+    print("[*] Performing deep clean for label: \(label)...", to: &StandardError.shared)
+    deepClean(label: label)
+    print("[✓] Keychain cleaned.", to: &StandardError.shared)
+    exit(0)
+}
+
+if arguments.contains("--test-url"), let index = arguments.firstIndex(of: "--test-url"), index + 1 < arguments.count {
+    performMTLSTest(label: label, urlString: arguments[index + 1])
+} else {
+    generateNativeCSR()
+}
