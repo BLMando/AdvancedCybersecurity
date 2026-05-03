@@ -30,7 +30,7 @@ def enroll(args):
         cmd = [str(helper_path), args.cn]
     elif current_os == "Windows":
         helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
-        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(helper_path), "-CN", args.cn]
+        cmd = ["powershell.exe", "-ExecutionPolicy", "RemoteSigned", "-File", str(helper_path), "-CN", args.cn]
     else:
         print(f"[!] OS {current_os} not supported for hardware enrollment.")
         return
@@ -40,7 +40,7 @@ def enroll(args):
         return
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=True)
         data = json.loads(res.stdout)
     except subprocess.CalledProcessError as e:
         print(f"[!] Hardware helper failed (exit {e.returncode}):")
@@ -52,7 +52,8 @@ def enroll(args):
 
     # Build the payload for the server
     print(f"[*] Fetching server challenge...")
-    resp = requests.get(f"{args.server}/api/challenge")
+    verify_tls = args.server_ca if args.server_ca else True
+    resp = requests.get(f"{args.server}/api/challenge", verify=verify_tls)
     ch_id = resp.json()["challenge_id"]
 
     print(f"[*] Submitting Enrollment (Zero Trust Proof of Possession)...")
@@ -100,7 +101,7 @@ def enroll(args):
     }
 
     try:
-        r = requests.post(f"{args.server}/api/csr", json=payload)
+        r = requests.post(f"{args.server}/api/csr", json=payload, verify=verify_tls)
         r.raise_for_status()
         print(f"\n[✓✓✓] ENROLLMENT SUCCESSFUL (HARDWARE-BOUND)!")
         print(f"[*] Identity verified with MAC: {mac} and CPU: {cpu}")
@@ -109,6 +110,7 @@ def enroll(args):
         cert_file.parent.mkdir(parents=True, exist_ok=True)
         cert_pem = r.json()["certificate_pem"]
         cert_file.write_text(cert_pem)
+        os.chmod(cert_file, 0o600)
         print(f"Certificate saved to: {cert_file}")
 
         # 4. Import Certificate into Keychain (macOS only)
@@ -134,6 +136,7 @@ if __name__ == "__main__":
     parser.add_argument("--role", default="doctor")
     parser.add_argument("--department", default="Cardiologia")
     parser.add_argument("--server", default="http://localhost:8080")
+    parser.add_argument("--server-ca", help="Path to CA bundle for HTTPS verification")
     parser.add_argument("--output-dir", default=str(Path(__file__).parent.parent / "certs" / "client"))
     parser.add_argument("--mac", help="Manually specify MAC address")
     parser.add_argument("--cpu", help="Manually specify CPU model")

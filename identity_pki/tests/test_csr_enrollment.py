@@ -18,9 +18,25 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from identity_pki.pki import PKIService
-from scripts.generate_client_csr import generate_client_csr
+
+
+def generate_csr(cn: str) -> tuple[str, bytes]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
+        .sign(key, hashes.SHA256())
+    )
+    csr_pem = csr.public_bytes(serialization.Encoding.PEM)
+    return csr_pem.decode("utf-8"), key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
 
 
 def test_csr_enrollment():
@@ -44,16 +60,11 @@ def test_csr_enrollment():
 
         # Step 1: Client generates CSR
         print("\n[2] Client generates CSR locally...")
-        result = generate_client_csr(
-            cn="dr_mario_rossi",
-            department="Cardiologia",
-            mac="00:1A:2B:3C:4D:5E",
-            cpu="Intel(R) Core(TM) i7-10700K",
-            output_dir=client_dir,
-        )
-        print(f"    ✓ Private key: {result['private_key']}")
-        print(f"    ✓ CSR: {result['csr']}")
-        csr_pem = result['csr_pem']
+        csr_pem, private_key_pem = generate_csr("dr_mario_rossi")
+        key_path = client_dir / "dr_mario_rossi.key"
+        key_path.write_bytes(private_key_pem)
+        print(f"    ✓ Private key: {key_path}")
+        print("    ✓ CSR generated")
 
         # Step 2: Server signs CSR
         print("\n[3] Server signs CSR...")
@@ -76,7 +87,7 @@ def test_csr_enrollment():
 
         # Check subject
         print(f"    Subject: {cert.subject.rfc4514_string()}")
-        assert "mario_rossi" in cert.subject.rfc4514_string().lower() or "dr" in cert.subject.rfc4514_string().lower()
+        assert "dr_mario_rossi" in cert.subject.rfc4514_string().lower()
 
         # Check SAN
         san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
@@ -109,11 +120,7 @@ def test_csr_enrollment():
         # Step 5: Test uniqueness check
         print("\n[6] Testing CN uniqueness enforcement...")
         try:
-            service.sign_csr(
-                csr_pem=csr_pem,
-                user="dr_mario_rossi",
-                role="doctor",
-            )
+            service.sign_csr(csr_pem=csr_pem, user="dr_mario_rossi", role="doctor")
             print("    ✗ ERROR: Should have rejected duplicate CN!")
             return False
         except ValueError as e:

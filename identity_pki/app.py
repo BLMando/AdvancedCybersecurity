@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-import os
 import base64
-from flask import Flask, abort, jsonify, render_template, render_template_string, request, send_from_directory
+import logging
+import os
+
+from flask import Flask, jsonify, render_template, request, send_from_directory
 from cryptography.hazmat.primitives import serialization, hashes
 from .pki import PKIService
+
+logger = logging.getLogger(__name__)
+
 
 def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -15,6 +20,9 @@ def create_app(data_dir=None) -> Flask:
     # Use /data/certs by default for persistence in Docker
     cert_dir = data_dir or os.environ.get("ZTA_PKI_DATA_DIR", "/data/certs")
     service = PKIService(cert_dir=cert_dir)
+
+    def error_response(message: str, code: int = 400):
+        return jsonify({"error": message, "code": code}), code
     
 
     @app.get("/health")
@@ -42,12 +50,16 @@ def create_app(data_dir=None) -> Flask:
         proof_string = payload.get("proof_string")
         
         if not csr_pem and not is_hw and not proof_string:
-            return jsonify({"error": "CSR required"}), 400
+            return error_response("CSR required", 400)
         
         try:
             # If it's a hardware CSR, csr_pem might be empty or same as signature
             effective_csr = csr_pem if not is_hw else base64.b64decode(signature_b64).decode()
             
+            user_cn = payload.get("user")
+            if user_cn:
+                service._validate_cn(user_cn)
+
             cert_pem = service.issue_hardware_bound_certificate(
                 csr_pem=effective_csr,
                 challenge_id=challenge_id,
@@ -67,7 +79,39 @@ def create_app(data_dir=None) -> Flask:
                 "certificate_pem": cert_pem,
             })
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return error_response(str(e), 400)
+
+    @app.post("/api/certificates")
+    def api_issue_certificate():
+        """Issue a certificate without hardware attestation (lab mode)."""
+        payload = request.get_json(silent=True) or {}
+        user_cn = payload.get("user")
+        if not user_cn:
+            return error_response("User CN is required", 400)
+
+        try:
+            bundle = service.issue_certificate(
+                user=user_cn,
+                role=payload.get("role"),
+                department=payload.get("department"),
+                hardware_mode=payload.get("hardware_mode", "manual"),
+                mac=payload.get("mac"),
+                cpu=payload.get("cpu"),
+            )
+        except ValueError as exc:
+            return error_response(str(exc), 400)
+
+        return jsonify(
+            {
+                "status": "created",
+                "certificate": {
+                    "user": user_cn,
+                    "path": str(bundle.paths.certificate),
+                    "serial": bundle.serial_number,
+                    "expires_at": bundle.expires_at.isoformat(),
+                },
+            }
+        )
 
     @app.post("/api/verify")
     def api_verify_identity():
@@ -78,7 +122,6 @@ def create_app(data_dir=None) -> Flask:
         public_key_pem = payload.get("public_key_pem")
         proof_string = payload.get("proof_string")
         
-        print(f"DEBUG app.py: Calling verify_proof with ch_id={challenge_id}")
         identity = service.verify_proof(
             challenge_id=challenge_id,
             signature_b64=signature_b64,
@@ -138,17 +181,25 @@ def create_app(data_dir=None) -> Flask:
         payload = request.get_json(silent=True) or {}
         user_cn = payload.get("user")
         if not user_cn:
-            return jsonify({"error": "User CN is required"}), 400
-        service.revoke_certificate(user_cn)
+            return error_response("User CN is required", 400)
+        try:
+            service.revoke_certificate(user_cn)
+        except ValueError as exc:
+            return error_response(str(exc), 400)
         return jsonify({"status": "success", "message": f"User {user_cn} revoked"})
 
     return app
 
 def main() -> None:
+    logging.basicConfig(
+        level=os.environ.get("ZTA_LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     app = create_app()
     host = os.environ.get("IDENTITY_APP_HOST", "0.0.0.0")
     port = int(os.environ.get("IDENTITY_APP_PORT", "8080"))
-    app.run(host=host, port=port, debug=True)
+    debug = os.environ.get("IDENTITY_APP_DEBUG", "false").lower() == "true"
+    app.run(host=host, port=port, debug=debug)
 
 if __name__ == "__main__":
     main()

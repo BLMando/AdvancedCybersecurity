@@ -1,12 +1,12 @@
 import argparse
-import urllib.request
-import urllib.parse
-import subprocess
 import json
-import base64
 import os
-import sys
 import platform
+import ssl
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 # ZTA Authentication Simulator (Enhanced with native mTLS support)
@@ -15,6 +15,8 @@ def main():
     parser.add_argument("--cn", default="paolo.roselli", help="Common Name of the identity")
     parser.add_argument("--pki-url", default="http://127.0.0.1:8080", help="PKI Server URL")
     parser.add_argument("--mtls-url", default="https://localhost:10000", help="Envoy mTLS Endpoint URL")
+    parser.add_argument("--pki-ca", help="Path to CA bundle for PKI HTTPS verification")
+    parser.add_argument("--cert-dir", default=str(Path(__file__).parent.parent / "certs" / "client"), help="Directory with enrolled certs")
     args = parser.parse_args()
 
     CN = args.cn
@@ -25,13 +27,24 @@ def main():
     print(f" ZTA MULTI-LAYER AUTHENTICATION: {CN.upper()}")
     print("="*70)
 
+    def open_url(url, data=None, headers=None, context=None):
+        request = urllib.request.Request(url, data=data, headers=headers or {})
+        return urllib.request.urlopen(request, context=context)
+
     # --- LAYER 1: PKI IDENTITY VERIFICATION ---
     print(f"\n[*] Layer 1: Verifying Identity at PKI Server...")
     
     # 1. Fetch Auth Challenge
     print(f"[*] Fetching challenge from {PKI_URL}...")
     try:
-        with urllib.request.urlopen(f"{PKI_URL}/api/challenge") as response:
+        pki_context = None
+        if PKI_URL.startswith("https://"):
+            if args.pki_ca:
+                pki_context = ssl.create_default_context(cafile=args.pki_ca)
+            else:
+                pki_context = ssl.create_default_context()
+
+        with open_url(f"{PKI_URL}/api/challenge", context=pki_context) as response:
             challenge_data = json.loads(response.read().decode())
             ch_id = challenge_data["challenge_id"]
             print(f"[✓] Received Challenge ID: {ch_id}")
@@ -46,14 +59,14 @@ def main():
         cmd = [str(helper_path), CN]
     elif current_os == "Windows":
         helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
-        cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(helper_path), "-CN", CN]
+        cmd = ["powershell.exe", "-ExecutionPolicy", "RemoteSigned", "-File", str(helper_path), "-CN", CN]
     else:
         print(f"[!] OS {current_os} not supported.")
         return
 
     print(f"[*] Signing challenge via hardware key...")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
             print(f"[!] Hardware signing failed:\n{result.stderr}")
             return
@@ -68,8 +81,8 @@ def main():
         
         # Verify at PKI
         data_json = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(f"{PKI_URL}/api/verify", data=data_json, headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req) as response:
+        req_headers = {"Content-Type": "application/json"}
+        with open_url(f"{PKI_URL}/api/verify", data=data_json, headers=req_headers, context=pki_context) as response:
             verify_res = json.loads(response.read().decode())
             print(f"[✓✓] PKI IDENTITY VERIFIED: Role={verify_res['identity']['role']}")
     except Exception as e:
@@ -80,12 +93,18 @@ def main():
     # --- LAYER 2: NATIVE mTLS HANDSHAKE (PERIMETER GATE) ---
     if current_os == "Darwin":
         print(f"\n[*] Layer 2: Performing Native mTLS Handshake at {MTLS_URL}...")
+        cert_path = Path(args.cert_dir) / f"{CN}.crt"
+        if not cert_path.exists():
+            print(f"[!] Enrolled certificate not found at {cert_path}.")
+            print("    Run enroll.py first to import the identity into Keychain.")
+            return
+
         mtls_cmd = [str(helper_path), CN, "--test-url", MTLS_URL]
         
         try:
             # We run this and redirect its output to show it to the user
             print(f"[*] Invoking native security framework via helper...")
-            mtls_proc = subprocess.run(mtls_cmd, capture_output=True, text=True)
+            mtls_proc = subprocess.run(mtls_cmd, capture_output=True, text=True, encoding="utf-8")
             
             # Print the helper's internal logs (sent to stderr)
             if mtls_proc.stderr:

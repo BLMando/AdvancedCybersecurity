@@ -63,6 +63,12 @@ class PKIServiceTests(unittest.TestCase):
                 self.assertEqual(payload["status"], "created")
                 self.assertEqual(payload["certificate"]["user"], "anna.verdi")
 
+    def test_invalid_cn_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = PKIService(data_dir=Path(temp_dir))
+            with self.assertRaises(ValueError):
+                service.issue_certificate(user="../evil")
+
 
 if __name__ == "__main__":
     unittest.main()
