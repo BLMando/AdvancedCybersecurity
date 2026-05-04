@@ -159,15 +159,19 @@ func performMTLSTest(label: String, urlString: String) {
         return
     }
     
-    // Create a URLSession that uses the Keychain identity
-    let session = URLSession(configuration: .ephemeral, delegate: IdentityDelegate(label: label), delegateQueue: nil)
-    
-    let semaphore = DispatchSemaphore(value: 0)
     print("[*] Starting mTLS Handshake via URLSession for identity: \(label)...", to: &StandardError.shared)
     
+    // Use a custom delegate for debugging and identity retrieval
+    let delegate = IdentityDelegate(label: label)
+    let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+    
+    let semaphore = DispatchSemaphore(value: 0)
     let task = session.dataTask(with: url) { data, response, error in
         if let error = error {
             print("[!] mTLS Error: \(error.localizedDescription)", to: &StandardError.shared)
+            if let nsError = error as NSError? {
+                print("    [DEBUG] Error Domain: \(nsError.domain), Code: \(nsError.code)", to: &StandardError.shared)
+            }
         } else if let httpResponse = response as? HTTPURLResponse {
             print("[✓] mTLS Handshake Successful! Status: \(httpResponse.statusCode)", to: &StandardError.shared)
             if let data = data, let body = String(data: data, encoding: .utf8) {
@@ -186,30 +190,50 @@ class IdentityDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     init(label: String) { self.label = label }
     
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodClientCertificate {
-            // Find identity in Keychain
+        let method = challenge.protectionSpace.authenticationMethod
+        print("    [DEBUG] Received Auth Challenge: \(method)", to: &StandardError.shared)
+        
+        if method == NSURLAuthenticationMethodClientCertificate {
+            print("    [*] Server requested client certificate. Searching Keychain...", to: &StandardError.shared)
+            
+            // Search strategy: try label first, then fallback to subject match
             let query: [String: Any] = [
                 kSecClass as String: kSecClassIdentity,
-                kSecAttrLabel as String: label,
-                kSecReturnRef as String: true
+                kSecReturnRef as String: true,
+                kSecMatchLimit as String: kSecMatchLimitAll
             ]
             
-            var item: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &item)
-            if status == errSecSuccess {
-                let identity = item as! SecIdentity
-                let credential = URLCredential(identity: identity, certificates: nil, persistence: .forSession)
-                completionHandler(.useCredential, credential)
-                return
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            
+            if status == errSecSuccess, let identities = result as? [SecIdentity] {
+                print("    [*] Found \(identities.count) identities in Keychain. Filtering...", to: &StandardError.shared)
+                
+                let targetCN = label.replacingOccurrences(of: "ZTA-HW-", with: "")
+                
+                for identity in identities {
+                    var cert: SecCertificate?
+                    SecIdentityCopyCertificate(identity, &cert)
+                    if let cert = cert, let subject = SecCertificateCopySubjectSummary(cert) as String? {
+                        print("    [DEBUG] Checking identity subject: \(subject)", to: &StandardError.shared)
+                        if subject.contains(targetCN) || subject.contains(label) {
+                            print("    [✓] Matching identity found! Providing for handshake.", to: &StandardError.shared)
+                            completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
+                            return
+                        }
+                    }
+                }
             }
-        }
-        
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            
+            print("    [!] WARNING: No matching identity found for \(label) in Keychain.", to: &StandardError.shared)
+            completionHandler(.performDefaultHandling, nil)
+            
+        } else if method == NSURLAuthenticationMethodServerTrust {
+            print("    [*] Server trust challenge. Accepting (Self-signed bypass for demo)...", to: &StandardError.shared)
             completionHandler(.useCredential, URLCredential(trust: challenge.protectionSpace.serverTrust!))
-            return
+        } else {
+            completionHandler(.performDefaultHandling, nil)
         }
-        
-        completionHandler(.performDefaultHandling, nil)
     }
 }
 
