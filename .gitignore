@@ -1,7 +1,11 @@
-certs/
 *.log
 .env
 .agents/
 .venv/
 .python-version
 docs/
+volumes/certs/client
+volumes/mongo/
+volumes/splunk
+volumes/nftables/
+volumes/snort

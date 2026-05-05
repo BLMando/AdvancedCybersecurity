@@ -16,8 +16,8 @@ services:
       ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
     volumes:
-      - ./certs/ca:/data/certs
-      - ./certs/client:/data/certs/client
+      - ./volumes/certs/ca:/data/certs
+      - ./volumes/certs/client:/data/certs/client
     networks:
       - backend-net
 
@@ -56,8 +56,8 @@ services:
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./certs/ca:/etc/certs/ca:ro
-      - ./certs/server:/etc/certs/server:ro
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
     networks:
       - frontend-net
       - backend-net
@@ -97,7 +97,7 @@ services:
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules:/etc/snort/rules:ro
-      - ./logs/snort:/var/log/snort
+      - ./volumes/snort/logs:/var/log/snort
     command:
       - |
         if ! snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort; then
@@ -116,7 +116,7 @@ services:
     network_mode: host
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
-      - ./logs/nftables:/var/log/nftables
+      - ./volumes/nftables/logs:/var/log/nftables
     command:
       - |
         apk add --no-cache nftables
@@ -130,11 +130,36 @@ services:
         fi
         tail -f /dev/null
 
+  splunk:
+    image: splunk/splunk:latest
+    container_name: splunk
+    # removed platform: linux/amd64 to use native arm64 on Apple Silicon
+    # nome utente: admin
+    environment:
+      - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
+      - SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com
+      - SPLUNK_PASSWORD=SplunkPassword123!
+      - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
+      - OPTIMISTIC_ABOUT_FILE_LOCKING=1
+    ports:
+      - "8000:8000"
+      - "8088:8088"
+      - "8089:8089"
+      - "9997:9997"
+    volumes:
+      - splunk-var:/opt/splunk/var
+      - splunk-etc:/opt/splunk/etc
+    restart: always
+
+volumes:
+  splunk-var:
+  splunk-etc:
+  mongdata:
+
 networks:
   frontend-net:
     driver: bridge
   backend-net:
     driver: bridge
 
-volumes:
-  mongdata:
+# Networks defined above
