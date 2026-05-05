@@ -20,7 +20,7 @@ import argparse
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -49,7 +49,7 @@ def det_uuid(namespace: str, key: str) -> str:
     return str(uuid.uuid5(ns, key))
 
 
-def parse_date(val: Any | None):
+def parse_date(val: Optional[Any]):
     """Parse ISO date string → timezone-aware datetime."""
     if not val or pd.isna(val):
         return None
