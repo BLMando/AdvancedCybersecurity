@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 import platform
@@ -8,6 +9,12 @@ import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+# Force UTF-8 output on Windows to avoid charmap errors with emoji
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ZTA Authentication Simulator (Enhanced with native mTLS support)
 def main():
@@ -66,16 +73,30 @@ def main():
 
     print(f"[*] Signing challenge via hardware key...")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             print(f"[!] Hardware signing failed:\n{result.stderr}")
             return
         
         sig_data = json.loads(result.stdout)
+
+        # Reconstruct public key PEM from modulus/exponent (new PS1 output format)
+        pub_pem = sig_data.get("pub_key_pem", "")
+        if not pub_pem and "modulus_b64" in sig_data and "exponent_b64" in sig_data:
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+            from cryptography.hazmat.primitives import serialization
+            modulus  = int.from_bytes(base64.b64decode(sig_data["modulus_b64"]),  byteorder="big")
+            exponent = int.from_bytes(base64.b64decode(sig_data["exponent_b64"]), byteorder="big")
+            public_key = RSAPublicNumbers(exponent, modulus).public_key()
+            pub_pem = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode()
+
         payload = {
             "challenge_id": ch_id,
             "signature": sig_data["signature_b64"],
-            "public_key_pem": sig_data.get("pub_key_pem", ""),
+            "public_key_pem": pub_pem,
             "proof_string": sig_data["csr_pem"]
         }
         

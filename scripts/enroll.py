@@ -7,6 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Force UTF-8 output on Windows to avoid charmap errors with emoji
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 # Try to import required libraries
 try:
     import requests
@@ -40,7 +46,7 @@ def enroll(args):
         return
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
         data = json.loads(res.stdout)
     except subprocess.CalledProcessError as e:
         print(f"[!] Hardware helper failed (exit {e.returncode}):")
@@ -61,19 +67,32 @@ def enroll(args):
     # Preariamo la chiave pubblica in formato PEM per il server
     pub_pem = data.get("pub_key_pem")
     if not pub_pem:
-        # Fallback se pub_key_pem manca, ma pub_key_b64 c'è
-        pub_raw = base64.b64decode(data["pub_key_b64"])
-        from cryptography.hazmat.backends import default_backend
-        try:
-            public_key = serialization.load_der_public_key(pub_raw, backend=default_backend())
+        if "modulus_b64" in data and "exponent_b64" in data:
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+            modulus = int.from_bytes(base64.b64decode(data["modulus_b64"]), byteorder="big")
+            exponent = int.from_bytes(base64.b64decode(data["exponent_b64"]), byteorder="big")
+            public_key = RSAPublicNumbers(exponent, modulus).public_key()
             pub_pem = public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             ).decode()
-        except:
-             # Se tutto fallisce, usiamo un placeholder o lanciamo errore
-             print("[!] Errore: Impossibile caricare la chiave pubblica dall'hardware.")
-             return
+        elif "pub_key_b64" in data:
+            # Fallback se pub_key_pem manca, ma pub_key_b64 c'è
+            pub_raw = base64.b64decode(data["pub_key_b64"])
+            from cryptography.hazmat.backends import default_backend
+            try:
+                public_key = serialization.load_der_public_key(pub_raw, backend=default_backend())
+                pub_pem = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode()
+            except:
+                 # Se tutto fallisce, usiamo un placeholder o lanciamo errore
+                 print("[!] Errore: Impossibile caricare la chiave pubblica dall'hardware.")
+                 return
+        else:
+            print("[!] Errore: Nessuna chiave pubblica restituita dall'hardware.")
+            return
 
     # Rilevamento automatico se non forniti
     mac = args.mac
@@ -125,6 +144,10 @@ def enroll(args):
             except Exception as e:
                 print(f"[!] Warning: Keychain import failed: {e}")
 
+    except requests.exceptions.HTTPError as e:
+        print(f"Enrollment failed (HTTP {e.response.status_code}): {e.response.text}")
+    except requests.exceptions.ConnectionError:
+        print("[!] Could not connect to the identity server. Is it running?")
     except Exception as e:
         print(f"Enrollment failed: {e}")
         if hasattr(e, 'response') and e.response:

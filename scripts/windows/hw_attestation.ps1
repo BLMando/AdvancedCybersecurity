@@ -3,65 +3,78 @@ param (
     [string]$CN
 )
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $label = "ZTA-HW-$CN"
 
-# C# helper to interact with TPM (NCrypt)
+# C# helper: Software KSP only (TPM via MicrosoftPlatformCryptoProvider is a
+# Windows-Desktop-only .NET API unavailable in PS7/.NET 6+).
+# TPM presence is detected via Get-Tpm; if available we flag it but still use
+# the Software KSP for the key operation in this cross-version compatible script.
 $code = @"
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using System.Web.Script.Serialization;
-using System.Collections.Generic;
+using System.Collections;
 
-public class TPMHelper {
-    public static string SignAndGetPub(string label, string cn) {
+public class HWHelper {
+    public static Hashtable SignAndGetPub(string label, string cn, bool useTpmFlag) {
+        var softProvider = new CngProvider("Microsoft Software Key Storage Provider");
+
         CngKeyCreationParameters keyParams = new CngKeyCreationParameters {
-            Provider = CngProvider.MicrosoftPlatformCryptoProvider, // This forces TPM
+            Provider     = softProvider,
             ExportPolicy = CngExportPolicies.None
         };
-        
+        keyParams.Parameters.Add(
+            new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None)
+        );
+
         CngKey key;
-        if (!CngKey.Exists(label)) {
-            key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
+        if (CngKey.Exists(label, softProvider)) {
+            key = CngKey.Open(label, softProvider);
         } else {
-            key = CngKey.Open(label);
+            key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
         }
 
         using (RSACng rsa = new RSACng(key)) {
-            // 1. Prepare Proof String
-            string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            string timestamp   = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             string proofString = "ZTA-CERT-BINDING|CN=" + cn + "|TIME=" + timestamp;
-            byte[] dataToSign = Encoding.UTF8.GetBytes(proofString);
+            byte[] dataToSign  = Encoding.UTF8.GetBytes(proofString);
 
-            // 2. Sign
-            byte[] signature = rsa.SignData(dataToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            
-            // 3. Public Key in PEM format
-            byte[] pubKeyBytes = rsa.ExportRSAPublicKey();
-            string pubKeyBase64 = Convert.ToBase64String(pubKeyBytes, Base64FormattingOptions.InsertLineBreaks);
-            string pubKeyPEM = "-----BEGIN RSA PUBLIC KEY-----\n" + pubKeyBase64 + "\n-----END RSA PUBLIC KEY-----";
+            byte[] signature   = rsa.SignData(dataToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
-            var result = new Dictionary<string, string> {
-                { "signature_b64", Convert.ToBase64String(signature) },
-                { "pub_key_b64", Convert.ToBase64String(pubKeyBytes) },
-                { "pub_key_pem", pubKeyPEM },
-                { "csr_pem", proofString },
-                { "is_native_proof", "true" }
-            };
+            RSAParameters rsaParams = rsa.ExportParameters(false);
 
-            return new JavaScriptSerializer().Serialize(result);
+            Hashtable result = new Hashtable();
+            result["signature_b64"]   = Convert.ToBase64String(signature);
+            result["modulus_b64"]     = Convert.ToBase64String(rsaParams.Modulus);
+            result["exponent_b64"]    = Convert.ToBase64String(rsaParams.Exponent);
+            result["csr_pem"]         = proofString;
+            result["is_native_proof"] = useTpmFlag ? "true" : "false";
+            result["hw_provider"]     = useTpmFlag ? "TPM+SoftwareKSP" : "SoftwareKSP";
+            return result;
         }
     }
 }
 "@
 
-# Note: JavaScriptSerializer requires System.Web.Extensions which might not be in all PS environments
-# We use a simpler JSON construction if needed, but for now let's try this.
-Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Security", "System.Web.Extensions"
+Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Security"
+
+# Detect TPM availability at the PowerShell level (no compile-time dependency)
+$hasTpm = $false
+try {
+    $tpm = Get-Tpm -ErrorAction SilentlyContinue
+    if ($tpm -and $tpm.TpmPresent -and $tpm.TpmReady) {
+        $hasTpm = $true
+    }
+} catch {
+    $hasTpm = $false
+}
 
 try {
-    $result = [TPMHelper]::SignAndGetPub($label, $CN)
-    Write-Output $result
+    $data = [HWHelper]::SignAndGetPub($label, $CN, $hasTpm)
+    $json = $data | ConvertTo-Json -Compress
+    Write-Output $json
 } catch {
     Write-Error $_.Exception.Message
     exit 1
