@@ -113,38 +113,39 @@ def main():
 
     # --- LAYER 2: NATIVE mTLS HANDSHAKE (PERIMETER GATE) ---
     if current_os == "Darwin":
-        print(f"\n[*] Layer 2: Performing Native mTLS Handshake at {MTLS_URL}...")
-        cert_path = Path(args.cert_dir) / f"{CN}.crt"
-        if not cert_path.exists():
-            print(f"[!] Enrolled certificate not found at {cert_path}.")
-            print("    Run enroll.py first to import the identity into Keychain.")
-            return
-
-        mtls_cmd = [str(helper_path), CN, "--test-url", MTLS_URL]
+        print(f"\n[*] Layer 2: Delegating Native mTLS Handshake to ZTA Agent...")
         
         try:
-            # We run this and redirect its output to show it to the user
-            print(f"[*] Invoking native security framework via helper...")
-            mtls_proc = subprocess.run(mtls_cmd, capture_output=True, text=True, encoding="utf-8")
+            payload = {
+                "common_name": CN,
+                "url": MTLS_URL
+            }
+            # Chiamata all'Agente Xcode sulla porta 9090
+            import requests
+            print(f"[*] Contacting ZTA Agent at localhost:9090 (Touch ID required)...")
+            resp = requests.post("http://localhost:9090/auth", json=payload, timeout=60)
             
-            # Print the helper's internal logs (sent to stderr)
-            if mtls_proc.stderr:
-                for line in mtls_proc.stderr.splitlines():
-                    if "[✓]" in line or "[*]" in line or "[!]" in line:
-                        print(f"    {line}")
-            
-            if mtls_proc.returncode == 0 and "[✓] mTLS Handshake Successful!" in mtls_proc.stderr:
-                print(f"\n" + "="*70)
-                print(" [✓✓✓] FULL ZERO TRUST AUTHENTICATION SUCCESSFUL!")
-                print(" Identity verified & Hardware mTLS perimeter cleared.")
-                print("="*70)
+            if resp.status_code == 200:
+                auth_data = resp.json()
+                print(f"\n    {auth_data.get('response', 'No response body')}")
+                
+                if "Status: 200" in auth_data.get('response', ''):
+                    print(f"\n" + "="*70)
+                    print(" [✓✓✓] FULL ZERO TRUST AUTHENTICATION SUCCESSFUL!")
+                    print(" Identity verified & Hardware mTLS perimeter cleared.")
+                    print("="*70)
+                else:
+                    print(f"\n[!] mTLS PERIMETER CHECK FAILED.")
+                    print(" Connection rejected or status not 200.")
             else:
-                print(f"\n[!] mTLS PERIMETER CHECK FAILED.")
-                print(" Connection rejected by Envoy Proxy.")
+                print(f"[!] ZTA Agent returned error: {resp.text}")
+                
+        except requests.exceptions.ConnectionError:
+            print("[!] ZTA Native Agent is NOT running. Please start the Xcode app first.")
         except Exception as e:
-            print(f"[!] Error during mTLS test: {e}")
+            print(f"[!] Error during mTLS test via Agent: {e}")
     else:
-        print("\n[*] mTLS Native testing currently only supported on macOS helper.")
+        print("\n[*] mTLS Native testing currently only supported on macOS.")
 
 if __name__ == "__main__":
     main()

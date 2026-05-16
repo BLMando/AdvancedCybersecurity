@@ -17,6 +17,7 @@ services:
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
     volumes:
       - ./volumes/certs/ca:/data/certs
+      - ./volumes/certs/server:/data/server
       - ./volumes/certs/client:/data/certs/client
     networks:
       - backend-net
@@ -53,6 +54,7 @@ services:
       - opa
     ports:
       - "10000:10000"
+      - "10001:10001"
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro

@@ -2,6 +2,7 @@ import base64
 import hashlib
 import logging
 import os
+import ipaddress
 import re
 import uuid
 from dataclasses import dataclass
@@ -66,6 +67,58 @@ class PKIService:
 
         self._ca_record: Optional[CARecord] = None
         self._ensure_ca()
+        self._ensure_envoy_certs()
+
+    def _ensure_envoy_certs(self) -> None:
+        """Automatically generate Envoy server certificates if missing."""
+        server_dir = self.cert_dir_path.parent / "server"
+        server_dir.mkdir(parents=True, exist_ok=True)
+        
+        cert_path = server_dir / "envoy.crt"
+        key_path = server_dir / "envoy.key"
+        
+        if cert_path.exists() and key_path.exists():
+            logger.info("Envoy server certificates already exist")
+            return
+
+        logger.info("Generating new Envoy server certificates")
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        
+        subject = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
+        ])
+        
+        now = datetime.now(timezone.utc)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self.ca_cert.subject)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + timedelta(days=365))
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.DNSName("envoy"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]),
+                critical=False,
+            )
+            .sign(self.ca_key, hashes.SHA256())
+        )
+        
+        key_path.write_bytes(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+        cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        logger.info("✓ Envoy server certificates generated successfully")
 
     @property
     def ca_common_name(self) -> str:
