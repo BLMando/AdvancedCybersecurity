@@ -1,4 +1,4 @@
-FROM openpolicyagent/opa:0.62.0-envoy
+FROM openpolicyagent/opa:latest-envoy
 
 EXPOSE 8181 9002
 
