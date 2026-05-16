@@ -9,3 +9,11 @@ volumes/mongo/
 volumes/splunk
 volumes/nftables/
 volumes/snort
+
+# Xcode & macOS
+.DS_Store
+build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
