@@ -11,7 +11,7 @@ from typing import Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 logger = logging.getLogger(__name__)
@@ -154,20 +154,21 @@ class PKIService:
 
     def verify_proof(self, challenge_id, signature_b64, public_key_pem=None, proof_string=None):
         """Verify a hardware-bound proof of possession."""
-        if challenge_id not in self.challenges:
-            logger.warning("Challenge %s not found", challenge_id)
-            return False
-            
+        print(f"\n[DEBUG] --- Inizio Verifica Proof ---")
+        print(f"[DEBUG] Challenge ID: {challenge_id}")
+        
         challenge = self.challenges[challenge_id]
         if challenge.used or datetime.now(timezone.utc) > challenge.expires_at:
+            print(f"[DEBUG] Challenge scaduta o già usata")
             logger.warning("Challenge %s invalid or expired", challenge_id)
             return False
 
         try:
             signature = base64.b64decode(signature_b64)
+            print(f"[DEBUG] Firma Base64 ricevuta: {signature_b64[:30]}...")
             
-            # 1. Native Proof Verification (Swift approach)
             if proof_string:
+                print(f"[DEBUG] Proof String ricevuto: [{proof_string}]")
                 # Extract CN for identity lookup
                 user_cn = self._extract_cn_from_proof(proof_string) or "unknown"
                 
@@ -210,13 +211,27 @@ class PKIService:
                     return None
 
                 try:
-                    pub_key.verify(
-                        signature,
-                        proof_string.encode(),
-                        padding.PKCS1v15(),
-                        hashes.SHA256()
-                    )
+                    print(f"[DEBUG] Tipo Public Key: {type(pub_key)}")
+                    if isinstance(pub_key, rsa.RSAPublicKey):
+                        pub_key.verify(
+                            signature,
+                            proof_string.encode(),
+                            padding.PKCS1v15(),
+                            hashes.SHA256()
+                        )
+                    elif isinstance(pub_key, ec.EllipticCurvePublicKey):
+                        print(f"[DEBUG] Eseguo verifica ECDSA SHA256...")
+                        pub_key.verify(
+                            signature,
+                            proof_string.encode(),
+                            ec.ECDSA(hashes.SHA256())
+                        )
+                    else:
+                        logger.warning("Unsupported key type for verification: %s", type(pub_key))
+                        return None
+                    print(f"[DEBUG] ✓ VERIFICA RIUSCITA!")
                 except Exception as ve:
+                    print(f"[DEBUG] ✗ VERIFICA FALLITA: {ve}")
                     logger.warning("Signature verification failed for %s: %s", user_cn, ve)
                     return None
 
@@ -243,12 +258,19 @@ class PKIService:
             # 3. Raw RSA verification (Standard nonce)
             if public_key_pem:
                 pub_key = serialization.load_pem_public_key(public_key_pem.encode())
-                pub_key.verify(
-                    signature,
-                    challenge.nonce,
-                    padding.PKCS1v15(),
-                    hashes.SHA256()
-                )
+                if isinstance(pub_key, rsa.RSAPublicKey):
+                    pub_key.verify(
+                        signature,
+                        challenge.nonce,
+                        padding.PKCS1v15(),
+                        hashes.SHA256()
+                    )
+                elif isinstance(pub_key, ec.EllipticCurvePublicKey):
+                    pub_key.verify(
+                        signature,
+                        challenge.nonce,
+                        ec.ECDSA(hashes.SHA256())
+                    )
                 logger.info("Raw signature verified")
                 self.challenges[challenge_id].used = True
                 return True

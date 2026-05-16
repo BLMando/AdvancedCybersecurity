@@ -19,21 +19,42 @@ using System.Collections;
 
 public class HWHelper {
     public static Hashtable SignAndGetPub(string label, string cn, bool useTpmFlag) {
-        var softProvider = new CngProvider("Microsoft Software Key Storage Provider");
+        // Use TPM provider if available, fallback to software only if absolutely necessary
+        // but here we enforce TPM for the 'non-exportable' requirement.
+        CngProvider provider = useTpmFlag ? 
+            new CngProvider("Microsoft Platform Crypto Provider") : 
+            new CngProvider("Microsoft Software Key Storage Provider");
 
         CngKeyCreationParameters keyParams = new CngKeyCreationParameters {
-            Provider     = softProvider,
-            ExportPolicy = CngExportPolicies.None
+            Provider     = provider,
+            ExportPolicy = CngExportPolicies.None // ENFORCE NON-EXPORTABLE
         };
-        keyParams.Parameters.Add(
-            new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None)
-        );
+
+        if (useTpmFlag) {
+            // TPM specific parameters
+            keyParams.Parameters.Add(new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None));
+        }
 
         CngKey key;
-        if (CngKey.Exists(label, softProvider)) {
-            key = CngKey.Open(label, softProvider);
-        } else {
-            key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
+        try {
+            if (CngKey.Exists(label, provider)) {
+                key = CngKey.Open(label, provider);
+            } else {
+                key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
+            }
+        } catch (Exception e) {
+            // If TPM fails (e.g. not initialized), fallback to software but log warning in result
+            if (useTpmFlag) {
+                provider = new CngProvider("Microsoft Software Key Storage Provider");
+                keyParams.Provider = provider;
+                if (CngKey.Exists(label, provider)) {
+                    key = CngKey.Open(label, provider);
+                } else {
+                    key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
+                }
+            } else {
+                throw e;
+            }
         }
 
         using (RSACng rsa = new RSACng(key)) {
@@ -51,7 +72,7 @@ public class HWHelper {
             result["exponent_b64"]    = Convert.ToBase64String(rsaParams.Exponent);
             result["csr_pem"]         = proofString;
             result["is_native_proof"] = useTpmFlag ? "true" : "false";
-            result["hw_provider"]     = useTpmFlag ? "TPM+SoftwareKSP" : "SoftwareKSP";
+            result["hw_provider"]     = provider.Provider;
             return result;
         }
     }

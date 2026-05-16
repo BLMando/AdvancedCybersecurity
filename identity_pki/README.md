@@ -29,3 +29,8 @@ python3 scripts/authenticate.py
 - `scripts/windows/`: Helper PowerShell per Windows (TPM).
 
 ---
+
+# Prossime modifiche:
+- [ ] Se utente non riconosciuto mandarlo avanti come guest
+- [ ] Aggiungere modelli statistici o addestramento per la parte degli attacchi
+- [ ] Aggiungere modelli di machine learning per valutare il comportamento anomalo --> disponibili in rete

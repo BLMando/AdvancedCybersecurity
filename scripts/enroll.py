@@ -32,6 +32,29 @@ def enroll(args):
     current_os = platform.system()
     
     if current_os == "Darwin": # macOS
+        print(f"[*] Detecting macOS: Attempting to connect to ZTA Native Agent...")
+        try:
+            payload = {
+                "common_name": args.cn,
+                "role": args.role,
+                "department": args.department
+            }
+            # Chiamata all'Agente Xcode
+            resp = requests.post("http://localhost:9090/enroll", json=payload, timeout=60)
+            if resp.status_code == 200:
+                data = resp.json()
+                print(f"\n[✓✓✓] NATIVE ENROLLMENT SUCCESSFUL!")
+                print(f"[*] Message: {data.get('message')}")
+                print(f"[*] Identity is now hardware-bound and secured in the SEP.")
+                return # Enrollment completato dall'agente
+            else:
+                print(f"[!] Native Agent returned error: {resp.text}")
+                print("[*] Falling back to CLI helper (legacy)...")
+        except requests.exceptions.ConnectionError:
+            print("[!] ZTA Native Agent is NOT running. Please start the Xcode app first.")
+            print("[*] Falling back to CLI helper (legacy)...")
+        
+        # Fallback al vecchio helper se l'agente non è attivo
         helper_path = Path(__file__).parent / "macos" / "hw_attestation_helper"
         cmd = [str(helper_path), args.cn]
     elif current_os == "Windows":
