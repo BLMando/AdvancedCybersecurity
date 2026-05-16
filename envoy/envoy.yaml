@@ -49,7 +49,7 @@ static_resources:
             # MongoDB. This is the policy gate of the system.
             - name: envoy.filters.network.ext_authz
               typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz
+                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz #Ext Authz --> explicit authorization
                 stat_prefix: opa_authz
                 transport_api_version: V3
                 include_peer_certificate: true
