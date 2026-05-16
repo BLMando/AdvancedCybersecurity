@@ -52,13 +52,17 @@ def create_app(data_dir=None) -> Flask:
         if not csr_pem and not is_hw and not proof_string:
             return error_response("CSR required", 400)
         
+        print(f"[DEBUG] CSR Payload ricevuto: {list(payload.keys())}")
+        print(f"[DEBUG] MAC: {payload.get('mac_address')}, CPU: {payload.get('cpu_id')}")
+        
         try:
             # If it's a hardware CSR, csr_pem might be empty or same as signature
             effective_csr = csr_pem if not is_hw else base64.b64decode(signature_b64).decode()
             
-            user_cn = payload.get("user")
-            if user_cn:
-                service._validate_cn(user_cn)
+            user_mac = payload.get("mac_address") or payload.get("mac")
+            user_cpu = payload.get("cpu_id") or payload.get("cpu")
+            
+            print(f"[DEBUG] Tentativo Enrollment per {payload.get('user')} con MAC={user_mac}, CPU={user_cpu}")
 
             cert_pem = service.issue_hardware_bound_certificate(
                 csr_pem=effective_csr,
@@ -70,8 +74,8 @@ def create_app(data_dir=None) -> Flask:
                 user=payload.get("user"),
                 role=payload.get("role"),
                 department=payload.get("department"),
-                mac=payload.get("mac"),
-                cpu=payload.get("cpu")
+                mac=user_mac,
+                cpu=user_cpu
             )
                 
             return jsonify({

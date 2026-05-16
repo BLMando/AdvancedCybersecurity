@@ -26,11 +26,15 @@ class PKIClient: NSObject, URLSessionDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
+        let hwInfo = HardwareManager.shared.getHardwareInfo()
         let body: [String: Any] = [
             "user": cn, "role": role, "department": department,
             "public_key_pem": pubKeyPEM, "attestation_sig_b64": signature.base64EncodedString(),
-            "proof_string": proofString, "challenge_id": challengeId
+            "proof_string": proofString, "challenge_id": challengeId,
+            "mac_address": hwInfo["mac"] ?? "unknown",
+            "cpu_id": hwInfo["cpu"] ?? "unknown"
         ]
+        print("[DEBUG] Payload Enrollment: \(body)")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (eData, eResp) = try await URLSession.shared.data(for: request)

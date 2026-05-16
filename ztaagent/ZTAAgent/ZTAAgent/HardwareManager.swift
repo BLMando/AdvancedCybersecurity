@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import CryptoKit
+import IOKit
 
 class HardwareManager {
     static let shared = HardwareManager()
@@ -10,6 +11,37 @@ class HardwareManager {
         case keyGenerationFailed(Error?)
         case keyNotFound
         case signingFailed(Error?)
+    }
+    
+    func getHardwareInfo() -> [String: String] {
+        var info = ["mac": "unknown", "cpu": "unknown"]
+        print("[DEBUG] Recupero info hardware...")
+        
+        // 1. Get Hardware UUID (Mac equivalent of stable ID)
+        let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        if platformExpert != 0 {
+            if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(platformExpert, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0) {
+                let uuid = (serialNumberAsCFString.takeRetainedValue() as? String) ?? "unknown"
+                info["mac"] = uuid
+                print("[DEBUG] UUID trovato: \(uuid)")
+            }
+            IOObjectRelease(platformExpert)
+        } else {
+            print("[!] Impossibile trovare IOPlatformExpertDevice")
+        }
+        
+        // 2. Get CPU Model
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        if size > 0 {
+            var brand = [CChar](repeating: 0, count: size)
+            sysctlbyname("machdep.cpu.brand_string", &brand, &size, nil, 0)
+            let cpu = String(cString: brand)
+            info["cpu"] = cpu
+            print("[DEBUG] CPU trovata: \(cpu)")
+        }
+        
+        return info
     }
     
     func generateHardwareKey(for cn: String) throws -> SecKey {
