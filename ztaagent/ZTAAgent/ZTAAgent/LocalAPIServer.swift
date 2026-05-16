@@ -48,6 +48,8 @@ class LocalAPIServer {
             self.handleEnroll(request: request, connection: connection)
         } else if method == "POST" && path.contains("/auth") {
             self.handleAuth(request: request, connection: connection)
+        } else if method == "POST" && path.contains("/sign") {
+            self.handleSign(request: request, connection: connection)
         } else {
             self.sendResponse(body: "{\"error\": \"Not Found\"}", status: "404 Not Found", connection: connection)
         }
@@ -69,6 +71,43 @@ class LocalAPIServer {
                 
                 let result = try await PKIClient.shared.enroll(cn: cn, role: role, department: dept)
                 let responseDict = ["status": "success", "message": result]
+                if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+                   let responseString = String(data: responseData, encoding: .utf8) {
+                    self.sendResponse(body: responseString, connection: connection)
+                }
+            } catch {
+                self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
+            }
+        }
+    }
+    
+    private func handleSign(request: String, connection: NWConnection) {
+        let components = request.components(separatedBy: "\r\n\r\n")
+        guard components.count > 1, let bodyData = components[1].data(using: .utf8) else {
+            self.sendResponse(body: "{\"error\": \"Invalid Body\"}", status: "400 Bad Request", connection: connection)
+            return
+        }
+        
+        Task {
+            do {
+                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
+                let cn = json?["common_name"] ?? "paolo.roselli"
+                guard let dataB64 = json?["data_b64"], let rawData = Data(base64Encoded: dataB64) else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing data_b64\"}", status: "400 Bad Request", connection: connection)
+                    return
+                }
+                
+                print("[*] Richiesta Firma Hardware per: \(cn)")
+                let signature = try await HardwareManager.shared.sign(data: rawData, cn: cn)
+                let pubKey = try await HardwareManager.shared.getPublicKeyDER(for: cn)
+                let pubKeyPEM = "-----BEGIN PUBLIC KEY-----\n\(pubKey.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n-----END PUBLIC KEY-----"
+                
+                let responseDict = [
+                    "status": "success",
+                    "signature_b64": signature.base64EncodedString(),
+                    "pub_key_pem": pubKeyPEM
+                ]
+                
                 if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                    let responseString = String(data: responseData, encoding: .utf8) {
                     self.sendResponse(body: responseString, connection: connection)

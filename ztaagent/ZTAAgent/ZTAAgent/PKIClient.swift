@@ -13,13 +13,13 @@ class PKIClient: NSObject, URLSessionDelegate {
         let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
         let challengeId = challengeJson["challenge_id"] as! String
         
-        _ = try HardwareManager.shared.generateHardwareKey(for: cn)
-        let pubKeyData = try HardwareManager.shared.getPublicKeyDER(for: cn)
+        _ = try await HardwareManager.shared.generateHardwareKey(for: cn)
+        let pubKeyData = try await HardwareManager.shared.getPublicKeyDER(for: cn)
         let pubKeyPEM = "-----BEGIN PUBLIC KEY-----\n\(pubKeyData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n-----END PUBLIC KEY-----"
         
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let proofString = "ZTA-CERT-BINDING|CN=\(cn)|TIME=\(timestamp)"
-        let signature = try HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn)
+        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn)
         
         let enrollUrl = URL(string: "\(serverUrl)/api/csr")!
         var request = URLRequest(url: enrollUrl)
@@ -41,7 +41,7 @@ class PKIClient: NSObject, URLSessionDelegate {
             guard let certPem = resJson["certificate_pem"] as? String else { return "Errore" }
             let cleanCert = certPem.replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "").replacingOccurrences(of: "-----END CERTIFICATE-----", with: "").replacingOccurrences(of: "\n", with: "")
             if let certData = Data(base64Encoded: cleanCert) {
-                try HardwareManager.shared.saveCertificate(cn: cn, certData: certData)
+                try await HardwareManager.shared.saveCertificate(cn: cn, certData: certData)
             }
             return "Enrollment completato!"
         }
@@ -73,9 +73,8 @@ class PKIClient: NSObject, URLSessionDelegate {
             print("[*] Challenge Server Trust ricevuta.")
             
             if let serverTrust = challenge.protectionSpace.serverTrust {
-                let count = SecTrustGetCertificateCount(serverTrust)
-                for i in 0..<count {
-                    if let cert = SecTrustGetCertificateAtIndex(serverTrust, i) {
+                if let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate] {
+                    for (i, cert) in chain.enumerated() {
                         let subject = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Unknown"
                         print("[DEBUG] Server Cert \(i) Subject: \(subject)")
                     }

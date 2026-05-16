@@ -59,45 +59,49 @@ def main():
         print(f"[!] Failed to fetch challenge: {e}")
         return
 
-    # 2. Sign Challenge via Hardware Helper
+    # 2. Sign Challenge via Hardware Key
     current_os = platform.system()
-    if current_os == "Darwin": # macOS
-        helper_path = Path(__file__).parent / "macos" / "hw_attestation_helper"
-        cmd = [str(helper_path), CN]
-    elif current_os == "Windows":
-        helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
-        cmd = ["powershell.exe", "-ExecutionPolicy", "RemoteSigned", "-File", str(helper_path), "-CN", CN]
-    else:
-        print(f"[!] OS {current_os} not supported.")
-        return
-
     print(f"[*] Signing challenge via hardware key...")
+    
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if result.returncode != 0:
-            print(f"[!] Hardware signing failed:\n{result.stderr}")
-            return
-        
-        sig_data = json.loads(result.stdout)
+        if current_os == "Darwin": # macOS Native Agent
+            import requests
+            payload = {
+                "common_name": CN,
+                "data_b64": base64.b64encode(ch_id.encode()).decode()
+            }
+            resp = requests.post("http://localhost:9090/sign", json=payload, timeout=30)
+            if resp.status_code != 200:
+                print(f"[!] ZTA Agent signing failed: {resp.text}")
+                return
+            sig_data = resp.json()
+            signature_b64 = sig_data["signature_b64"]
+            pub_pem = sig_data["pub_key_pem"]
+            proof_string = ch_id # For PKI verify
+        else:
+            # Fallback for other OS or legacy (Simplified for brevity)
+            if current_os == "Windows":
+                helper_path = Path(__file__).parent / "windows" / "hw_attestation.ps1"
+                cmd = ["powershell.exe", "-ExecutionPolicy", "RemoteSigned", "-File", str(helper_path), "-CN", CN]
+            else:
+                print(f"[!] OS {current_os} not supported.")
+                return
 
-        # Reconstruct public key PEM from modulus/exponent (new PS1 output format)
-        pub_pem = sig_data.get("pub_key_pem", "")
-        if not pub_pem and "modulus_b64" in sig_data and "exponent_b64" in sig_data:
-            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
-            from cryptography.hazmat.primitives import serialization
-            modulus  = int.from_bytes(base64.b64decode(sig_data["modulus_b64"]),  byteorder="big")
-            exponent = int.from_bytes(base64.b64decode(sig_data["exponent_b64"]), byteorder="big")
-            public_key = RSAPublicNumbers(exponent, modulus).public_key()
-            pub_pem = public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ).decode()
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if result.returncode != 0:
+                print(f"[!] Hardware signing failed:\n{result.stderr}")
+                return
+            
+            sig_data = json.loads(result.stdout)
+            signature_b64 = sig_data["signature_b64"]
+            pub_pem = sig_data.get("pub_key_pem", "")
+            proof_string = sig_data["csr_pem"]
 
         payload = {
             "challenge_id": ch_id,
-            "signature": sig_data["signature_b64"],
+            "signature": signature_b64,
             "public_key_pem": pub_pem,
-            "proof_string": sig_data["csr_pem"]
+            "proof_string": proof_string
         }
         
         # Verify at PKI
