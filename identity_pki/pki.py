@@ -223,7 +223,13 @@ class PKIService:
             if proof_string:
                 print(f"[DEBUG] Proof String ricevuto: [{proof_string}]")
                 # Extract CN for identity lookup
-                user_cn = self._extract_cn_from_proof(proof_string) or "unknown"
+                user_cn = self._extract_cn_from_proof(proof_string)
+                if not user_cn and public_key_pem:
+                    logger.info("CN not found in proof_string. Scanning issued certificates by public key...")
+                    user_cn = self._find_user_by_public_key(public_key_pem)
+                
+                if not user_cn:
+                    user_cn = "unknown"
                 
                 # 0. Check for Revocation
                 if os.path.exists(os.path.join(self.revoked_dir, f"{user_cn}.rev")):
@@ -354,6 +360,37 @@ class PKIService:
             logger.warning("Failed to load public key: %s", e)
             return None
 
+    def _find_user_by_public_key(self, public_key_pem: str) -> Optional[str]:
+        """Search all issued certificates for a matching public key."""
+        try:
+            target_key = self._load_public_key(public_key_pem)
+            if not target_key:
+                return None
+            target_bytes = target_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            
+            for user_dir in self.issued_dir.iterdir():
+                if user_dir.is_dir():
+                    cert_file = user_dir / "certificate.crt"
+                    if cert_file.exists():
+                        try:
+                            cert = x509.load_pem_x509_certificate(cert_file.read_bytes())
+                            cert_pub = cert.public_key()
+                            cert_pub_bytes = cert_pub.public_bytes(
+                                encoding=serialization.Encoding.PEM,
+                                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                            )
+                            if cert_pub_bytes == target_bytes:
+                                logger.info("Found matching user for public key: %s", user_dir.name)
+                                return user_dir.name
+                        except Exception as e:
+                            logger.debug("Failed parsing cert for %s: %s", user_dir.name, e)
+        except Exception as e:
+            logger.warning("Error searching user by public key: %s", e)
+        return None
+
     def _extract_cn_from_proof(self, proof_string: str) -> Optional[str]:
         for part in proof_string.split("|"):
             if part.startswith("CN="):
@@ -373,6 +410,7 @@ class PKIService:
 
     def _find_certificate_path(self, user_cn: str) -> Optional[Path]:
         candidate_paths = [
+            self.issued_dir / user_cn / "certificate.crt",
             self.client_dir / f"{user_cn}.crt",
             self.cert_dir_path / f"{user_cn}.crt",
         ]
