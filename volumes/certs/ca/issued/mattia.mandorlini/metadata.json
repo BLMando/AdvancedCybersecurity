@@ -1,0 +1,11 @@
+{
+  "department": "Cardiologia",
+  "enrollment_method": "hardware_proof",
+  "hardware": {
+    "cpu": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+    "mac": "00:50:56:C0:00:08"
+  },
+  "role": "doctor",
+  "timestamp": "2026-05-16T16:27:03.465637+00:00",
+  "user": "mattia.mandorlini"
+}
