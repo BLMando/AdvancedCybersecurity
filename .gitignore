@@ -4,11 +4,16 @@
 .venv/
 .python-version
 docs/
+plan/
 volumes/certs/client
+volumes/certs/ca/issued/**/private_key.pem
 volumes/mongo/
 volumes/splunk
 volumes/nftables/
 volumes/snort
+
+# Secret/private key material
+*.key
 
 # Xcode & macOS
 .DS_Store
@@ -17,3 +22,6 @@ DerivedData/
 *.xcodeproj/project.xcworkspace/
 *.xcodeproj/xcuserdata/
 *.xcuserstate
+
+__pycache__/
+*.pyc
