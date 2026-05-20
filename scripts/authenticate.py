@@ -148,8 +148,50 @@ def main():
             print("[!] ZTA Native Agent is NOT running. Please start the Xcode app first.")
         except Exception as e:
             print(f"[!] Error during mTLS test via Agent: {e}")
+            
+    elif current_os == "Windows":
+        print(f"\n[*] Layer 2: Executing Native mTLS Handshake via Windows Schannel/TPM...")
+        try:
+            # We locate the certificate by CN in the CurrentUser\My store
+            # and invoke the Envoy endpoint using .NET HttpClient with the client cert attached.
+            # We bypass SSL verification callback for local lab server certificates.
+            ps_cmd = [
+                "powershell.exe", "-ExecutionPolicy", "Bypass", "-Command",
+                f'$cert = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object {{ $_.Subject -like "*CN={CN}*" }} | Select-Object -First 1; '
+                f'if (-not $cert) {{ Write-Error "Certificate for CN={CN} not found in Certificate Store"; exit 1 }}; '
+                f'[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }}; '
+                f'$webClient = New-Object System.Net.Http.HttpClientHandler; '
+                f'$webClient.ClientCertificates.Add($cert); '
+                f'$client = New-Object System.Net.Http.HttpClient($webClient); '
+                f'try {{ '
+                f'  $resp = $client.GetStringAsync("{MTLS_URL}").GetAwaiter().GetResult(); '
+                f'  Write-Output "Status: 200, Data: $resp"; '
+                f'}} catch {{ '
+                f'  Write-Error $_.Exception.InnerException.Message; '
+                f'  exit 1; '
+                f'}}'
+            ]
+            
+            print(f"[*] Contacting Envoy at {MTLS_URL} using certificate from Windows Store...")
+            res = subprocess.run(ps_cmd, capture_output=True, text=True, errors="replace")
+            
+            if res.returncode == 0:
+                output = res.stdout.strip()
+                print(f"\n    {output}")
+                if "Status: 200" in output:
+                    print(f"\n" + "="*70)
+                    print(" [✓✓✓] FULL ZERO TRUST AUTHENTICATION SUCCESSFUL!")
+                    print(" Identity verified & Hardware mTLS perimeter cleared.")
+                    print("="*70)
+                else:
+                    print(f"\n[!] mTLS PERIMETER CHECK FAILED.")
+            else:
+                print(f"[!] mTLS Handshake failed:\n{res.stderr.strip() or res.stdout.strip()}")
+                
+        except Exception as e:
+            print(f"[!] Error during mTLS test via Windows: {e}")
     else:
-        print("\n[*] mTLS Native testing currently only supported on macOS.")
+        print(f"\n[*] mTLS Native testing currently not supported on {current_os}.")
 
 if __name__ == "__main__":
     main()

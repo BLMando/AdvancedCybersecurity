@@ -155,7 +155,7 @@ def enroll(args):
         os.chmod(cert_file, 0o600)
         print(f"Certificate saved to: {cert_file}")
 
-        # 4. Import Certificate into Keychain (macOS only)
+        # 4. Import Certificate into Keychain/Certificate Store
         if current_os == "Darwin":
             print("[*] Importing certificate into Keychain to create Identity...")
             try:
@@ -166,6 +166,28 @@ def enroll(args):
                 print("[✓] Certificate imported and linked to hardware key.")
             except Exception as e:
                 print(f"[!] Warning: Keychain import failed: {e}")
+        elif current_os == "Windows":
+            print("[*] Importing certificate into Windows Certificate Store...")
+            try:
+                # Use PowerShell to import certificate to CurrentUser\My and repair the store link with the TPM CNG key
+                abs_cert_path = cert_file.resolve()
+                ps_cmd = [
+                    "powershell.exe", "-ExecutionPolicy", "Bypass", "-Command",
+                    f'$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2("{abs_cert_path}"); '
+                    f'$store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "CurrentUser"); '
+                    f'$store.Open("ReadWrite"); '
+                    f'$store.Add($cert); '
+                    f'$store.Close(); '
+                    f'$thumb = $cert.Thumbprint; '
+                    f'certutil.exe -repairstore My $thumb'
+                ]
+                res = subprocess.run(ps_cmd, capture_output=True, text=True, errors="replace")
+                if res.returncode == 0:
+                    print("[✓] Certificate imported and linked to Windows TPM/KSP key store successfully.")
+                else:
+                    print(f"[!] Warning: Windows Certificate Store repair failed:\n{res.stderr or res.stdout}")
+            except Exception as e:
+                print(f"[!] Warning: Windows Certificate Store import failed: {e}")
 
     except requests.exceptions.HTTPError as e:
         print(f"Enrollment failed (HTTP {e.response.status_code}): {e.response.text}")
