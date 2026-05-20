@@ -10,5 +10,5 @@ dependencies = [
     "pandas>=3.0.2",
     "pymongo>=4.17.0",
     "requests>=2.33.1",
-    "dotenv>=0.9.9",
+    "python-dotenv>=1.0.1",
 ]

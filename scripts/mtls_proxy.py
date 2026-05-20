@@ -8,19 +8,32 @@ Usage:
 Then connect MongoDB Compass to: mongodb://root:example@localhost:27018/
 """
 
+import argparse
 import socket
 import ssl
 import sys
 import threading
 from pathlib import Path
 
+parser = argparse.ArgumentParser(description="mTLS TCP Proxy for MongoDB Compass")
+parser.add_argument("--insecure", action="store_true",
+                    help="Disable TLS certificate verification (lab use only)")
+parser.add_argument("--listen", type=int, default=27018,
+                    help="Local listen port (default: 27018)")
+parser.add_argument("--envoy-host", default="localhost",
+                    help="Envoy mTLS listener host (default: localhost)")
+parser.add_argument("--envoy-port", type=int, default=10000,
+                    help="Envoy mTLS listener port (default: 10000)")
+args = parser.parse_args()
+
 CERT = Path(__file__).resolve().parent.parent / "certs" / "client" / "mattia.mandorlini.crt"
 KEY = Path(__file__).resolve().parent.parent / "certs" / "client" / "mattia.mandorlini.key"
 CA = Path(__file__).resolve().parent.parent / "volumes" / "certs" / "ca" / "ca.crt"
-ENVOY_HOST = "localhost"
-ENVOY_PORT = 10000
-LOCAL_PORT = 27018
+ENVOY_HOST = args.envoy_host
+ENVOY_PORT = args.envoy_port
+LOCAL_PORT = args.listen
 BUFFER_SIZE = 65536
+INSECURE = args.insecure
 
 
 def pipe(src, dst, name=""):
@@ -49,7 +62,11 @@ def handle_client(client_sock, addr):
         ctx = ssl.create_default_context(cafile=str(CA))
         ctx.load_cert_chain(str(CERT), str(KEY))
         ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        if INSECURE:
+            print("    [!] WARNING: TLS verification disabled (--insecure)")
+            ctx.verify_mode = ssl.CERT_NONE
+        else:
+            ctx.verify_mode = ssl.CERT_REQUIRED
 
         envoy = socket.create_connection((ENVOY_HOST, ENVOY_PORT), timeout=10)
         tls = ctx.wrap_socket(envoy, server_hostname=ENVOY_HOST)

@@ -7,6 +7,7 @@ JSON-formatted event submission to Splunk HEC endpoint.
 
 import json
 import logging
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -24,23 +25,26 @@ class HEClient:
         self._buffer: list[dict] = []
         self._last_flush = time.time()
         self._flush_interval = 5.0
+        self._lock = threading.RLock()
 
     def send_event(self, event: dict, index: str = "main", sourcetype: str = "_json") -> bool:
-        self._buffer.append({
-            "event": event,
-            "index": index,
-            "sourcetype": sourcetype,
-        })
-        if len(self._buffer) >= self.batch_size or (time.time() - self._last_flush) >= self._flush_interval:
-            return self.flush()
+        with self._lock:
+            self._buffer.append({
+                "event": event,
+                "index": index,
+                "sourcetype": sourcetype,
+            })
+            if len(self._buffer) >= self.batch_size or (time.time() - self._last_flush) >= self._flush_interval:
+                return self.flush()
         return True
 
     def flush(self) -> bool:
-        if not self._buffer:
-            return True
-        self._last_flush = time.time()
-        payload = self._buffer[:]
-        self._buffer = []
+        with self._lock:
+            if not self._buffer:
+                return True
+            self._last_flush = time.time()
+            payload = self._buffer[:]
+            self._buffer = []
         return self._send_batch(payload)
 
     def _send_batch(self, events: list[dict]) -> bool:

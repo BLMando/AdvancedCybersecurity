@@ -280,11 +280,7 @@ query_has_field(field) if {
     query_doc[field]
 }
 
-is_empty_query if {
-    count(object.keys(query_doc)) == 0
-} else := true if {
-    query_doc == {}
-}
+is_empty_query := count(object.keys(query_doc)) == 0
 
 # clinical_records queries MUST contain patient_id field
 inspection_violation if {

@@ -13,6 +13,7 @@ Background:
   - Tails /var/log/envoy/access.log and forwards each JSON line to Splunk HEC
 """
 
+import atexit
 import gzip
 import json
 import logging
@@ -108,6 +109,7 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
                             except json.JSONDecodeError:
                                 logger.warning("Skipping invalid JSON line from Envoy log")
                         last_position = f.tell()
+                    hec_envoy.flush()
             else:
                 logger.debug("Envoy log file not yet available: %s", ENVOY_LOG_PATH)
         except Exception as e:
@@ -153,16 +155,12 @@ def handle_opa_decision_log():
         fields["decision_id"] = decision_id
         fields["opa_timestamp"] = timestamp
 
-        risk_str = "N/A"
         try:
-            risk_val = raw_input.get("risk_score", "N/A")
+            risk_val = raw_input.get("risk_score")
             if isinstance(risk_val, (int, float)):
-                risk_str = str(risk_val)
-            elif isinstance(risk_val, str) and risk_val:
-                risk_str = risk_val
+                fields["risk_score"] = risk_val
         except Exception:
             pass
-        fields["risk_score"] = risk_str
 
         hec_opa.send_event(fields, index="zta_opa", sourcetype="opa:decision")
 
@@ -184,8 +182,27 @@ def handle_envoy_log():
 
 
 _stop_event = threading.Event()
-_tailer = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
-_tailer.start()
+_TAILER_LOCK = Path("/tmp/envoy_tailer.lock")
+
+
+def _ensure_tailer():
+    """Start the Envoy log tailer once per host (avoids duplication under Gunicorn)."""
+    try:
+        _TAILER_LOCK.touch(exist_ok=False)
+        t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
+        t.start()
+        logger.info("Envoy log tailer started (lock acquired)")
+    except FileExistsError:
+        logger.debug("Envoy log tailer already running in another worker (lock exists)")
+    except Exception as e:
+        logger.error("Failed to start Envoy log tailer: %s", e)
+
+
+atexit.register(lambda: _TAILER_LOCK.unlink(missing_ok=True))
+
+# Start the tailer at import time — the file-level lock guarantees
+# only one Gunicorn worker actually starts the background thread.
+_ensure_tailer()
 
 
 def main():

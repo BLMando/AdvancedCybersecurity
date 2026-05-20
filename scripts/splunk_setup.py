@@ -31,12 +31,16 @@ def log(msg: str) -> None:
     print(f"[splunk-setup] {msg}", flush=True)
 
 
-# ─── Reusable SSL context (disable cert verification) ───────────────
+# ─── Reusable SSL context (verify TLS by default) ──────────────────
+_TLS_VERIFY = os.environ.get("SPLUNK_VERIFY_TLS", "true").lower() in ("true", "1", "yes")
+
+
 def _ssl_ctx():
     import ssl
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    if not _TLS_VERIFY:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 

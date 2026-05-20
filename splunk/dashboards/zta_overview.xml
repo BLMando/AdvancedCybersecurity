@@ -93,7 +93,7 @@
       <title>Top Motivi di Blocco</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
+          <query>index=zta_opa sourcetype="opa:decision" decision="DENY"
             | top limit=10 command
             | table command count percent</query>
           <earliest>$timerange.earliest$</earliest>

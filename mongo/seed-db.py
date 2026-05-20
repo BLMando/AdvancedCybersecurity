@@ -3,7 +3,7 @@
 seed-db.py — Reads healthcare_dataset.csv and populates the ZTA MongoDB.
 
 Usage:
-  python3 mongo/seed-db.py [--uri mongodb://zta_user:zta_password@localhost:10000/zta_db?authSource=admin]
+  python3 mongo/seed-db.py [--uri mongodb://zta_user:zta_password@localhost:27017/zta_db?authSource=admin]
                             [--csv path/to/healthcare_dataset.csv]
                             [--limit N]   # rows to import (default: all)
 
