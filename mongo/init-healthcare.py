@@ -8,17 +8,21 @@ Usage:
 """
 
 import argparse
-import sys
+from dotenv import load_dotenv
+import os
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
 
+load_dotenv()  # Load .env variables (e.g. MongoDB credentials)
 
+MONGO_URI = os.getenv(
+    "MONGODB_URI", "mongodb://zta_user:zta_password@localhost:27017")
 # ─── CLI args ─────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Init ZTA Healthcare DB")
 parser.add_argument(
     "--uri",
-    default="mongodb://admin:secret@localhost:27017",
-    help="MongoDB connection URI (default: mongodb://admin:secret@localhost:27017)",
+    default=MONGO_URI,
+    help="MongoDB connection URI (default: mongodb://zta_user:zta_password@localhost:27017)",
 )
 args = parser.parse_args()
 
