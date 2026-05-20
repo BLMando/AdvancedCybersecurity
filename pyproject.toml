@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "flask>=3.0,<4.0",
     "cryptography>=48.0.0",
     "pandas>=3.0.2",
     "pymongo>=4.17.0",
     "requests>=2.33.1",
+    "dotenv>=0.9.9",
 ]
