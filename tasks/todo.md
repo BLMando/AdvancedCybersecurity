@@ -16,11 +16,14 @@
     - [x] Enforce `CngExportPolicies.None`.
     - [x] Implement EC with RSA fallback.
 
-- [/] **Phase 4: Orchestration (enroll.py)**
+- [x] **Phase 4: Orchestration (enroll.py & authenticate.py)**
     - [x] Update `enroll.py` to handle EC public keys in the helper output.
     - [x] Ensure proper JSON parsing for new hardware metadata.
+    - [x] Add Windows-specific Certificate Store import and repair to `enroll.py`.
+    - [x] Add Windows-specific real mTLS handshake execution using Schannel and .NET HttpClient to `authenticate.py`.
 
 - [ ] **Phase 5: Verification**
     - [ ] Test enrollment on macOS.
     - [ ] Test enrollment on Windows.
+    - [ ] Verify mTLS handshake on Windows.
     - [ ] Verify non-exportability in OS Keychain/Certificate Manager.
