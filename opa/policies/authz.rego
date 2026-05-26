@@ -27,10 +27,35 @@ allow if {
 	not inspection_violation
 }
 
-# Risk is the sum of the three identity dimensions.
+# Risk is the sum of identity dimensions plus a dynamic boost obtained
+# from Splunk statistics for the current request context.
 risk_score := total_risk if {
+	total_risk := base_risk_score + splunk_risk_boost
+}
+
+base_risk_score := total_risk if {
 	total_risk := user_risk + device_risk + network_risk + collection_risk_boost
 }
+
+# OPA asks the forwarder for Splunk-backed statistics.
+# If stats are unavailable, fail soft with a zero boost.
+splunk_risk_boost := boost if {
+	resp := http.send({
+		"method": "post",
+		"url": "http://opa-splunk-forwarder:5000/api/stats",
+		"headers": {"Content-Type": "application/json"},
+		"body": {
+			"user": user_identity,
+			"network_ip": network_identity,
+			"device": device_identity,
+			"resource": collection_name,
+			"command": action_name
+		},
+		"timeout": 1000000000
+	})
+	resp.status_code == 200
+	boost := object.get(resp.body, "risk_boost", 0)
+} else := 0
 
 # Known users are trusted; unknown users add risk.
 user_risk := 0 if {

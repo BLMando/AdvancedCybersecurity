@@ -1,25 +1,21 @@
 """
-OPA-to-Splunk Log Forwarder
+Envoy-to-Splunk Forwarder + Stats API for OPA
 
-Receives OPA decision logs and Envoy access logs, transforms them
-to Splunk HEC format, and forwards to Splunk.
+Responsibilities:
+  1) Forward Envoy access logs to Splunk HEC.
+  2) Expose a lightweight stats endpoint that OPA can query to enrich
+     risk evaluation with recent activity from Splunk.
 
-Endpoints:
-  POST /v1/logs        - OPA decision logs (OPA's default decision_logs path)
-  POST /api/envoy-logs - Envoy access logs (manual push endpoint)
-  GET  /health         - Health check
-
-Background:
-  - Tails /var/log/envoy/access.log and forwards each JSON line to Splunk HEC
+OPA must not send decision logs to Splunk.
 """
 
 import atexit
-import gzip
 import json
 import logging
 import os
 import threading
-import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from flask import Flask, request, jsonify
@@ -30,12 +26,6 @@ logger = logging.getLogger("forwarder")
 
 app = Flask(__name__)
 
-hec_opa = HEClient(
-    host=os.environ.get("SPLUNK_HOST", "splunk"),
-    port=int(os.environ.get("SPLUNK_HEC_PORT", "8088")),
-    token=os.environ.get("SPLUNK_HEC_TOKEN_OPA", ""),
-    batch_size=int(os.environ.get("HEC_BATCH_SIZE", "100")),
-)
 hec_envoy = HEClient(
     host=os.environ.get("SPLUNK_HOST", "splunk"),
     port=int(os.environ.get("SPLUNK_HEC_PORT", "8088")),
@@ -44,29 +34,11 @@ hec_envoy = HEClient(
 )
 
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
-
-
-def extract_opa_fields(raw_input: dict) -> dict:
-    parsed = raw_input.get("parsed_body") or {}
-    attrs = raw_input.get("attributes") or {}
-    source = attrs.get("source") or {}
-
-    return {
-        "user": (
-            source.get("principal")
-            or parsed.get("user")
-            or "unknown"
-        ),
-        "software": parsed.get("device", "no-tpm"),
-        "device": parsed.get("device", "no-tpm"),
-        "network_ip": (
-            parsed.get("network_ip")
-            or (source.get("address") or {}).get("address")
-            or "0.0.0.0"
-        ),
-        "resource": parsed.get("collection", "unknown"),
-        "command": parsed.get("command", "unknown"),
-    }
+SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
+SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
+SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
+SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
+SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").lower() == "true"
 
 
 def extract_envoy_fields(log_entry: dict) -> dict:
@@ -77,7 +49,137 @@ def extract_envoy_fields(log_entry: dict) -> dict:
         "duration_ms": log_entry.get("duration", "0"),
         "bytes_sent": log_entry.get("bytes_sent", "0"),
         "bytes_received": log_entry.get("bytes_received", "0"),
+        "user": log_entry.get("user", "unknown"),
+        "device": log_entry.get("device", "no-tpm"),
+        "network_ip": log_entry.get("network_ip", "0.0.0.0"),
+        "resource": log_entry.get("resource", "unknown"),
+        "command": log_entry.get("command", "unknown"),
+        "decision": log_entry.get("decision", "unknown"),
+        "risk_score": log_entry.get("risk_score", "0"),
     }
+
+
+def _splunk_query_count(search: str) -> int:
+    """
+    Run a one-shot Splunk search and return the resulting count.
+    """
+    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
+    query = f"search {search} | stats count"
+    form = urllib.parse.urlencode(
+        {
+            "search": query,
+            "output_mode": "json",
+            "exec_mode": "oneshot",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        base_url,
+        data=form,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    if not SPLUNK_SEARCH_VERIFY_TLS:
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
+    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
+    https_handler = urllib.request.HTTPSHandler(context=ctx)
+    opener = urllib.request.build_opener(auth_handler, https_handler)
+
+    with opener.open(req, timeout=5) as resp:
+        raw = resp.read().decode("utf-8").strip()
+
+    # Splunk export endpoint may emit one JSON object per line.
+    count_val = 0
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        result = obj.get("result") or {}
+        if "count" in result:
+            try:
+                count_val = int(result["count"])
+            except Exception:
+                pass
+    return count_val
+
+
+def _build_stats_search(user: str, network_ip: str, device: str, resource: str, command: str) -> str:
+    """
+    Build constrained query scoped to Envoy index.
+    """
+    def esc(value: str) -> str:
+        return str(value or "unknown").replace('"', '\\"')
+
+    # We include all identity dimensions present in the request; this keeps
+    # the risk statistics context-specific.
+    return (
+        'index=zta_envoy earliest=-15m '
+        f'user="{esc(user)}" '
+        f'network_ip="{esc(network_ip)}" '
+        f'device="{esc(device)}" '
+        f'resource="{esc(resource)}" '
+        f'command="{esc(command)}"'
+    )
+
+
+@app.route("/api/stats", methods=["POST"])
+def handle_stats_query():
+    """
+    Called by OPA policy via http.send.
+    Input: {user, network_ip, device, resource, command}
+    Output: stats + derived risk boost.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid json"}), 400
+
+    user = str(body.get("user", "unknown"))
+    network_ip = str(body.get("network_ip", "0.0.0.0"))
+    device = str(body.get("device", "no-tpm"))
+    resource = str(body.get("resource", "unknown"))
+    command = str(body.get("command", "unknown"))
+
+    if not SPLUNK_PASSWORD:
+        logger.error("SPLUNK_PASSWORD is not configured; cannot query Splunk stats")
+        return jsonify({"error": "splunk credentials not configured"}), 500
+
+    try:
+        search = _build_stats_search(user, network_ip, device, resource, command)
+        event_count_15m = _splunk_query_count(search)
+    except Exception as e:
+        logger.error("Failed querying Splunk stats: %s", e)
+        return jsonify({"error": "splunk query failed"}), 502
+
+    # Simple risk boost model driven by observed recent frequency.
+    if event_count_15m >= 200:
+        risk_boost = 20
+    elif event_count_15m >= 100:
+        risk_boost = 10
+    elif event_count_15m >= 50:
+        risk_boost = 5
+    else:
+        risk_boost = 0
+
+    return jsonify(
+        {
+            "stats": {
+                "event_count_15m": event_count_15m,
+            },
+            "risk_boost": risk_boost,
+        }
+    ), 200
 
 
 def tail_envoy_logs(stop_event: threading.Event) -> None:
@@ -123,48 +225,6 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
-
-
-@app.route("/logs", methods=["POST"])
-@app.route("/v1/logs", methods=["POST"])
-@app.route("/api/logs", methods=["POST"])
-def handle_opa_decision_log():
-    raw = request.get_data()
-    if raw[:2] == b"\x1f\x8b":
-        try:
-            raw = gzip.decompress(raw)
-        except Exception as e:
-            logger.warning("Gzip decompression failed: %s", e)
-            return jsonify({"error": f"decompress failed: {e}"}), 400
-    try:
-        body = json.loads(raw.decode("utf-8"))
-    except Exception as e:
-        logger.warning("Invalid JSON from OPA: %s", e)
-        return jsonify({"error": f"invalid json: {e}"}), 400
-
-    entries = body if isinstance(body, list) else [body]
-    logger.debug("Processing %d OPA decision log(s)", len(entries))
-    for entry in entries:
-        raw_input = entry.get("input", {})
-        result = entry.get("result", False)
-        decision_id = entry.get("decision_id", "")
-        timestamp = entry.get("timestamp", "")
-
-        fields = extract_opa_fields(raw_input)
-        fields["decision"] = "ALLOW" if result is True else "DENY"
-        fields["decision_id"] = decision_id
-        fields["opa_timestamp"] = timestamp
-
-        try:
-            risk_val = raw_input.get("risk_score")
-            if isinstance(risk_val, (int, float)):
-                fields["risk_score"] = risk_val
-        except Exception:
-            pass
-
-        hec_opa.send_event(fields, index="zta_opa", sourcetype="opa:decision")
-
-    return jsonify({"status": "queued", "count": len(entries)}), 202
 
 
 @app.route("/api/envoy-logs", methods=["POST"])

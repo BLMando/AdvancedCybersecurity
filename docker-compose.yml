@@ -77,8 +77,10 @@ services:
     environment:
       SPLUNK_HOST: splunk
       SPLUNK_HEC_PORT: "8088"
-      SPLUNK_HEC_TOKEN_OPA: ${SPLUNK_HEC_TOKEN_OPA}
       SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
+      SPLUNK_MGMT_PORT: "8089"
+      SPLUNK_USERNAME: admin
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
@@ -106,11 +108,6 @@ services:
       - --server
       - --addr=0.0.0.0:8181
       - --set=plugins.envoy_ext_authz_grpc.addr=:9002
-      - --set=decision_logs.service=splunk_service
-      - --set=services.splunk_service.url=http://opa-splunk-forwarder:5000
-      - --set=decision_logs.reporting.min_delay_seconds=5
-      - --set=decision_logs.reporting.max_delay_seconds=10
-      - --set=decision_logs.gzip_level=0
       - --log-level=info
       - /policies
     networks:

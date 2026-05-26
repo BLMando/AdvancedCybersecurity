@@ -36,8 +36,8 @@
 6. **OPA** evaluates the policy (risk score, role, action), returns allow/deny
 7. If **allowed**, Envoy's **tcp_proxy** forwards data to **MongoDB** (`mongo:27017`)
 8. **MongoDB** responds, data flows back through Envoy → Proxy → Client
-9. **OPA** sends decision logs to **Forwarder** (`http://opa-splunk-forwarder:5000/logs`)
-10. **Forwarder** ships them to **Splunk HEC** (index `zta_opa`, `zta_envoy`)
+9. **OPA** asks **Forwarder** (`POST /api/stats`) for request-correlated statistics retrieved from Splunk
+10. **Envoy** access logs are shipped by **Forwarder** to **Splunk HEC** (index `zta_envoy`)
 
 ### Components
 
@@ -99,15 +99,22 @@ docker compose ps
 
 All services should show `Up`. The first startup of Splunk can take 2-5 minutes.
 
-### 3. Initialize Splunk HEC Tokens
+### 3. Initialize Splunk (index + dashboard)
 
 ```powershell
 python scripts/splunk_setup.py
 ```
 
-This creates HEC tokens for OPA and Envoy data inputs with UUID-based values and writes them to `.env`.
+This creates the `zta_envoy` index and imports/updates the ZTA dashboard (Simple XML `version="1.1"`).
 
-### 4. Restart the Forwarder (to pick up new tokens)
+Docker Splunk uses a self-signed certificate; the script disables TLS verification by default (`SPLUNK_VERIFY_TLS=false`). If you still see `CERTIFICATE_VERIFY_FAILED`, ensure you have not set `SPLUNK_VERIFY_TLS=true` in your environment.
+
+### 4. Create HEC token in Splunk Web
+
+Open **Settings → Data Inputs → HTTP Event Collector** and create a token for index `zta_envoy`.  
+Add the value to `.env` as `SPLUNK_HEC_TOKEN_ENVOY`.
+
+### 5. Restart the Forwarder (to pick up new token)
 
 ```powershell
 docker compose restart opa-splunk-forwarder
@@ -181,8 +188,8 @@ Connect with:
 ### Step 3: Verify in Splunk
 
 1. Open `http://localhost:8000` (admin / `SplunkPassword123!`)
-2. Search `index=zta_opa` to see OPA decisions
-3. Search `index=zta_envoy` to see Envoy access logs
+2. Search `index=zta_envoy` to see Envoy access logs and decisions
+3. Check `decision` and `risk_score` fields to inspect policy outcomes
 4. Open the "ZTA Overview" dashboard to see the pre-built visualizations
 
 ---
@@ -328,22 +335,21 @@ tcp_proxy (forwards to MongoDB cluster)
 
 File: `scripts/opa_splunk_forwarder/forwarder.py`
 
-The forwarder receives data from two sources:
+The forwarder serves two responsibilities:
 
 | Source | Endpoint | Splunk Index |
 |--------|----------|-------------|
-| OPA decision logs | `POST /logs`, `/v1/logs`, `/api/logs` | `zta_opa` |
+| OPA stats query | `POST /api/stats` | N/A (query-only) |
 | Envoy access logs | `POST /api/envoy-logs` | `zta_envoy` |
 | Envoy log file (tail) | Watches `/var/log/envoy/access.log` | `zta_envoy` |
 
 ### Known Issues & Fixes Applied
 
-1. **Missing `/logs` route**: OPA posts to `/logs` by default, not `/v1/logs`. Added the route.
-2. **Gzip decompression**: OPA always gzip-encodes even at `gzip_level=0`. Added gzip detection + decompression.
-3. **Array format**: OPA sends decision logs as `[{...}, {...}]` (array), not a single object. Added array iteration.
-4. **Null-safe field extraction**: `parsed.get()` fails when `parsed` is `None`. Added `parsed or {}` fallback.
-5. **Periodic flush**: Added 5-second periodic flush to HEC client so events don't get stuck in buffer.
-6. **SSL context**: Fixed `ssl.create_default_context()` (was incorrectly called as `urllib.request.create_default_context()`).
+1. **OPA decision logging removed**: OPA no longer pushes decision logs.
+2. **Stats endpoint added**: OPA now calls `/api/stats` to get Splunk-backed frequency statistics.
+3. **Risk context fields forwarded**: Envoy access logs now include `user`, `device`, `network_ip`, `resource`, `command`, `decision`, `risk_score`.
+4. **Periodic flush**: Added 5-second periodic flush to HEC client so events don't get stuck in buffer.
+5. **SSL context**: Fixed `ssl.create_default_context()` (was incorrectly called as `urllib.request.create_default_context()`).
 
 ---
 
@@ -402,8 +408,8 @@ docker compose restart opa
 | `MONGO_ROOT_PASSWORD` | MongoDB admin password | `zta_password` |
 | `MONGO_INITDB_DATABASE` | Initial database | `zta_db` |
 | `SPLUNK_PASSWORD` | Splunk admin password | `SplunkPassword123!` |
-| `SPLUNK_HEC_TOKEN_OPA` | HEC token for OPA events | (UUID, auto-generated) |
-| `SPLUNK_HEC_TOKEN_ENVOY` | HEC token for Envoy events | (UUID, auto-generated) |
+| `SPLUNK_HEC_TOKEN_ENVOY` | HEC token for Envoy events | (created in Splunk Web) |
+| `SPLUNK_PASSWORD` | Splunk admin password (for stats API query) | `SplunkPassword123!` |
 | `ZTA_PKI_ORGANIZATION` | PKI org name (optional) | |
 | `ZTA_PKI_CA_CN` | PKI CA common name (optional) | |
 
@@ -420,7 +426,7 @@ docker compose restart opa
 | `scripts/test_mtls_proxy.py` | Automated end-to-end test |
 | `scripts/opa_splunk_forwarder/forwarder.py` | Log forwarder service |
 | `scripts/opa_splunk_forwarder/heclient.py` | Splunk HEC client library |
-| `scripts/splunk_setup.py` | HEC token initialization |
+| `scripts/splunk_setup.py` | Splunk index + dashboard bootstrap |
 | `scripts/generate_test_data.py` | Synthetic data generator |
 | `identity_pki/pki.py` | PKI certificate service |
 | `identity_pki/app.py` | PKI HTTP API |

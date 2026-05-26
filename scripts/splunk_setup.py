@@ -2,19 +2,21 @@
 Splunk Zero Trust Architecture Setup Script
 
 Configures Splunk for ZTA integration:
-  1. Creates HEC tokens for OPA and Envoy
-  2. Creates indexes: zta_opa, zta_envoy
-  3. Imports ZTA monitoring dashboard
-  4. Validates connectivity and configuration
+  1. Creates index: zta_envoy
+  2. Imports/updates ZTA monitoring dashboard (Simple XML version 1.1)
+
+HEC tokens must be created manually in Splunk Web:
+  Settings → Data Inputs → HTTP Event Collector
 
 Usage:
   python scripts/splunk_setup.py
 
 Environment:
-  SPLUNK_HOST       : Splunk management host (default: localhost)
-  SPLUNK_MGMT_PORT  : Splunk REST API port (default: 8089)
-  SPLUNK_USERNAME   : Admin username (default: admin)
-  SPLUNK_PASSWORD   : Admin password (default: SplunkPassword123!)
+  SPLUNK_HOST         : Splunk management host (default: localhost)
+  SPLUNK_MGMT_PORT    : Splunk REST API port (default: 8089)
+  SPLUNK_USERNAME     : Admin username (default: admin)
+  SPLUNK_PASSWORD     : Admin password (default: SplunkPassword123!)
+  SPLUNK_VERIFY_TLS   : Verify Splunk HTTPS cert (default: false for Docker/lab)
 """
 
 import os
@@ -31,8 +33,8 @@ def log(msg: str) -> None:
     print(f"[splunk-setup] {msg}", flush=True)
 
 
-# ─── Reusable SSL context (verify TLS by default) ──────────────────
-_TLS_VERIFY = os.environ.get("SPLUNK_VERIFY_TLS", "true").lower() in ("true", "1", "yes")
+# Docker Splunk uses a self-signed cert; disable verification in lab by default.
+_TLS_VERIFY = os.environ.get("SPLUNK_VERIFY_TLS", "false").lower() in ("true", "1", "yes")
 
 
 def _ssl_ctx():
@@ -130,48 +132,6 @@ def create_index(session_key: str, host: str, port: int, index_name: str) -> Non
         log(f"WARNING: Could not create index '{index_name}' (HTTP {status})")
 
 
-def _api_url(host: str, port: int, path: str) -> str:
-    """Build a URL for the Splunk REST API."""
-    return f"https://{host}:{port}{path}"
-
-
-def create_hec_token(session_key: str, host: str, port: int, token_name: str,
-                     indexes: list[str]) -> str:
-    """Create an HEC token and return its value."""
-    import uuid
-    token_value = str(uuid.uuid4())
-    log(f"Creating HEC token: {token_name} (indexes={indexes})...")
-
-    data = urllib.parse.urlencode({
-        "name": token_name,
-        "index": indexes[0],
-        "token": token_value,
-        "useAck": "0",
-        "disabled": "0",
-    }).encode()
-    status, _ = splunk_request(session_key, "POST",
-                                  _api_url(host, port, "/services/data/inputs/http"),
-                                  data)
-    if status == 201:
-        log(f"Token '{token_name}' created: {token_value}")
-        return token_value
-    elif status == 409:
-        log(f"Token '{token_name}' already exists, deleting and recreating...")
-        splunk_request(session_key, "DELETE",
-                       _api_url(host, port, f"/services/data/inputs/http/{token_name}"))
-        status2, _ = splunk_request(session_key, "POST",
-                                    _api_url(host, port, "/services/data/inputs/http"),
-                                    data)
-        if status2 == 201:
-            log(f"Token '{token_name}' recreated: {token_value}")
-            return token_value
-        log(f"WARNING: Could not recreate token '{token_name}' (HTTP {status2})")
-        return f"<{token_name}_error>"
-    else:
-        log(f"WARNING: Could not create token '{token_name}' (HTTP {status})")
-        return f"<{token_name}_error>"
-
-
 def import_dashboard(session_key: str, host: str, port: int,
                      dashboard_path: str, dashboard_name: str = "zta_overview") -> None:
     log(f"Importing dashboard: {dashboard_name}...")
@@ -180,21 +140,40 @@ def import_dashboard(session_key: str, host: str, port: int,
         log(f"Dashboard file not found: {dashboard_path}")
         return
     dashboard_xml = dashboard_file.read_text(encoding="utf-8")
+    if 'version="1.1"' not in dashboard_xml:
+        log("WARNING: Dashboard XML is missing version=\"1.1\" on root <dashboard> node.")
+
     data = urllib.parse.urlencode({
         "name": dashboard_name,
         "eai:data": dashboard_xml,
     }).encode()
-    status, _ = splunk_request(
-        session_key, "POST",
-        _url(host, port, "/servicesNS/admin/search/data/ui/views"),
-        data,
-    )
+
+    views_url = _url(host, port, "/servicesNS/admin/search/data/ui/views")
+    status, _ = splunk_request(session_key, "POST", views_url, data)
+
     if status in (200, 201):
         log(f"Dashboard '{dashboard_name}' imported successfully.")
-    elif status == 409:
-        log(f"Dashboard '{dashboard_name}' already exists.")
-    else:
-        log(f"WARNING: Dashboard import returned status {status}")
+        return
+
+    if status == 409:
+        log(f"Dashboard '{dashboard_name}' already exists, updating...")
+        update_url = _url(host, port, f"/servicesNS/admin/search/data/ui/views/{dashboard_name}")
+        # Splunk REST API updates views via POST, not PUT.
+        status2, _ = splunk_request(session_key, "POST", update_url, data)
+        if status2 in (200, 201):
+            log(f"Dashboard '{dashboard_name}' updated successfully.")
+            return
+
+        log(f"POST update failed (HTTP {status2}), recreating dashboard...")
+        splunk_request(session_key, "DELETE", update_url)
+        status3, _ = splunk_request(session_key, "POST", views_url, data)
+        if status3 in (200, 201):
+            log(f"Dashboard '{dashboard_name}' recreated successfully.")
+        else:
+            log(f"WARNING: Dashboard recreate returned status {status3}")
+        return
+
+    log(f"WARNING: Dashboard import returned status {status}")
 
 
 # ─── Main ──────────────────────────────────────────────────────────
@@ -205,14 +184,15 @@ def main():
     username = os.environ.get("SPLUNK_USERNAME", "admin")
     password = os.environ.get("SPLUNK_PASSWORD", "SplunkPassword123!")
 
+    if _TLS_VERIFY:
+        log("TLS certificate verification enabled (SPLUNK_VERIFY_TLS=true).")
+    else:
+        log("TLS certificate verification disabled (lab/Docker Splunk). Set SPLUNK_VERIFY_TLS=true in production.")
+
     wait_for_splunk(host, port)
     session_key = splunk_login(host, port, username, password)
 
-    create_index(session_key, host, port, "zta_opa")
     create_index(session_key, host, port, "zta_envoy")
-
-    opa_token = create_hec_token(session_key, host, port, "zta_opa_token", ["zta_opa"])
-    envoy_token = create_hec_token(session_key, host, port, "zta_envoy_token", ["zta_envoy"])
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "splunk" / "dashboards"
     dashboard_file = dashboard_dir / "zta_overview.xml"
@@ -225,12 +205,8 @@ def main():
     log("=" * 60)
     log("SPLUNK SETUP COMPLETE")
     log("=" * 60)
-    log(f"OPA HEC Token   : {opa_token}")
-    log(f"Envoy HEC Token : {envoy_token}")
-    log("")
-    log("Add these to your .env file:")
-    log(f'  SPLUNK_HEC_TOKEN_OPA="{opa_token}"')
-    log(f'  SPLUNK_HEC_TOKEN_ENVOY="{envoy_token}"')
+    log("HEC token: create manually in Splunk Web (HTTP Event Collector)")
+    log("  index=zta_envoy, then set SPLUNK_HEC_TOKEN_ENVOY in .env")
     log("=" * 60)
 
 
