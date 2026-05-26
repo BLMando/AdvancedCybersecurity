@@ -1,0 +1,174 @@
+<dashboard version="1.1">
+  <label>ZTA - Zero Trust Architecture Overview</label>
+  <description>Real-time monitoring of Envoy access logs and policy decisions (index zta_envoy)</description>
+  <fieldset submitButton="false">
+    <input type="time" token="timerange">
+      <label>Time Range</label>
+      <default>
+        <earliest>-30m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>Decisioni in Tempo Reale (allow/deny)</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | timechart span=1m count by decision
+            | sort _time</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Stato Decisioni (ultimi 5 min)</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | stats count by decision</query>
+          <earliest>-5m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Distribuzione Risk Score</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | eval risk_num = tonumber(risk_score)
+            | eval risk_bucket = case(
+                risk_num &lt;= 15, "0-15 (Low)",
+                risk_num &lt;= 30, "16-30 (Medium)",
+                risk_num &lt;= 45, "31-45 (High)",
+                1=1, "46+ (Critical)"
+              )
+            | stats count by risk_bucket</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Risk Score Medio per Utente</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | eval risk_num = tonumber(risk_score)
+            | stats avg(risk_num) as avg_risk by user
+            | sort -avg_risk
+            | head 10</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">horizontal_bar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Top Utenti Bloccati</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
+            | top limit=10 user
+            | table user count percent</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top Motivi di Blocco</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
+            | top limit=10 command
+            | table command count percent</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Collection Access Heatmap (Utente x Collection)</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | stats count by user, resource
+            | sort -count
+            | head 50</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">heatmap</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Distribuzione Comandi MongoDB</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | stats count by command
+            | sort -count</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Decisioni per Device Type</title>
+      <chart>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | eval device_type = if(device="no-tpm", "No TPM (Software)", "Hardware-Bound")
+            | stats count by device_type decision
+            | table device_type decision count</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Eventi Recenti</title>
+      <table>
+        <search>
+          <query>index=zta_envoy sourcetype="envoy:access"
+            | sort -_time
+            | head 25
+            | table _time user resource command decision risk_score device network_ip</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>

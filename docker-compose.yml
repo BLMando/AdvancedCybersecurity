@@ -60,8 +60,33 @@ services:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - envoy-logs:/var/log/envoy
     networks:
       - frontend-net
+      - backend-net
+
+  # ── OPA Splunk Forwarder (Sidecar) ─────────────────
+  opa-splunk-forwarder:
+    build:
+      context: ./scripts/opa_splunk_forwarder
+      dockerfile: Dockerfile
+    container_name: opa-splunk-forwarder
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      SPLUNK_HOST: splunk
+      SPLUNK_HEC_PORT: "8088"
+      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
+      SPLUNK_MGMT_PORT: "8089"
+      SPLUNK_USERNAME: admin
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
+      HEC_BATCH_SIZE: "100"
+    volumes:
+      - envoy-logs:/var/log/envoy:ro
+    depends_on:
+      - splunk
+    networks:
       - backend-net
 
   # ── OPA (PDP) ──────────────────────────────────────
@@ -71,6 +96,8 @@ services:
       dockerfile: Dockerfile
     container_name: opa
     restart: unless-stopped
+    depends_on:
+      - opa-splunk-forwarder
     ports:
       - "127.0.0.1:8181:8181"
       - "127.0.0.1:9002:9002"
@@ -151,12 +178,15 @@ services:
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
+    networks:
+      - backend-net
     restart: always
 
 volumes:
   splunk-var:
   splunk-etc:
   mongdata:
+  envoy-logs:
 
 networks:
   frontend-net:

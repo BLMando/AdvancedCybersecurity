@@ -24,12 +24,38 @@ allow if {
 	action_allowed
 	role_action_allowed
 	not hard_deny
+	not inspection_violation
 }
 
-# Risk is the sum of the three identity dimensions.
+# Risk is the sum of identity dimensions plus a dynamic boost obtained
+# from Splunk statistics for the current request context.
 risk_score := total_risk if {
+	total_risk := base_risk_score + splunk_risk_boost
+}
+
+base_risk_score := total_risk if {
 	total_risk := user_risk + device_risk + network_risk + collection_risk_boost
 }
+
+# OPA asks the forwarder for Splunk-backed statistics.
+# If stats are unavailable, fail soft with a zero boost.
+splunk_risk_boost := boost if {
+	resp := http.send({
+		"method": "post",
+		"url": "http://opa-splunk-forwarder:5000/api/stats",
+		"headers": {"Content-Type": "application/json"},
+		"body": {
+			"user": user_identity,
+			"network_ip": network_identity,
+			"device": device_identity,
+			"resource": collection_name,
+			"command": action_name
+		},
+		"timeout": 1000000000
+	})
+	resp.status_code == 200
+	boost := object.get(resp.body, "risk_boost", 0)
+} else := 0
 
 # Known users are trusted; unknown users add risk.
 user_risk := 0 if {
@@ -77,6 +103,22 @@ action_allowed if {
 
 valid_action if {
 	action_name in {"find", "insert", "update", "delete", "aggregate"}
+}
+
+# MongoDB handshake / auth / admin commands — always allowed
+allow if {
+	action_name in {"hello", "isMaster", "saslStart", "saslContinue", "buildinfo", "buildInfo"}
+}
+
+allow if {
+	action_name in {"ping", "getLog", "getCmdLineOpts", "serverStatus"}
+}
+
+# When mongo_proxy can't decode the wire protocol (e.g. OP_MSG), the
+# parsed_body is empty and action_name becomes "unknown". Allow these
+# connections — they're initial handshakes from modern MongoDB drivers.
+allow if {
+	action_name == "unknown"
 }
 
 is_destructive_operation if {
@@ -148,7 +190,7 @@ network_identity := ip if {
 # write-oriented or destructive.
 action_name := cmd if {
 	cmd := input.parsed_body.command
-	cmd in ["find", "insert", "update", "delete", "drop"]
+	cmd != ""
 } else := "unknown"
 
 collection_name := coll if {
@@ -242,6 +284,55 @@ role_action_denied if {
 	not action_name in allowed_cmds
 }
 
+# ─── Content Inspection (L7 Firewall) ───────────────────────────────────────
+# Validates MongoDB query content for sensitive collections.
+# Runs after the RBAC check to enforce query-level constraints.
+
+query_raw := q if {
+    q := object.get(input.parsed_body, "query", "")
+} else := "{}"
+
+# Try to parse as JSON if it's a string; otherwise use as-is
+query_doc := parsed if {
+    json.is_valid(query_raw)
+    parsed := json.unmarshal(query_raw)
+} else := parsed if {
+    object.keys(query_raw)
+    parsed := query_raw
+} else := {}
+
+query_has_field(field) if {
+    query_doc[field]
+}
+
+is_empty_query := count(object.keys(query_doc)) == 0
+
+# clinical_records queries MUST contain patient_id field
+inspection_violation if {
+    collection_name == "clinical_records"
+    action_name in {"find", "update"}
+    not query_has_field("patient_id")
+}
+
+# billing queries MUST NOT use JavaScript operators
+inspection_violation if {
+    collection_name == "billing"
+    query_has_field("$where")
+}
+
+inspection_violation if {
+    collection_name == "billing"
+    query_has_field("$function")
+}
+
+# patients queries must not be empty for non-admin roles
+inspection_violation if {
+    collection_name == "patients"
+    current_role != "admin"
+    action_name == "find"
+    is_empty_query
+}
+
 # ─── Hard-Deny Rules (from healthcare_rls.rego) ──────────────────────────────
 
 hard_deny if {
@@ -279,6 +370,10 @@ deny if {
 
 deny if {
 	hard_deny
+}
+
+deny if {
+	inspection_violation
 }
 
 # ─── Response Headers ─────────────────────────────────────────────────────────────
@@ -339,12 +434,14 @@ test_destructive_denied if {
 
 test_doctor_clinical_find if {
 	allow with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
 		"parsed_body": {
 			"user": "mario.rossi",
 			"device": "device-laptop-001",
 			"network_ip": "172.20.0.5",
 			"command": "find",
-			"collection": "clinical_records"
+			"collection": "clinical_records",
+			"query": "{\"patient_id\": \"P001\"}"
 		}
 	}
 }
@@ -417,6 +514,78 @@ test_receptionist_no_clinical if {
 			"network_ip": "172.20.0.5",
 			"command": "find",
 			"collection": "clinical_records"
+		}
+	}
+}
+
+# ─── Content Inspection Tests ─────────────────────────────────────────
+
+test_clinical_no_patient_id_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records",
+			"query": "{}"
+		}
+	}
+}
+
+test_clinical_with_patient_id_allowed if {
+	allow with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records",
+			"query": "{\"patient_id\": \"P001\"}"
+		}
+	}
+}
+
+test_billing_where_operator_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "anna.verdi"}},
+		"parsed_body": {
+			"user": "anna.verdi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "billing",
+			"query": "{\"$where\": \"this.amount > 1000\"}"
+		}
+	}
+}
+
+test_patients_empty_query_denied_receptionist if {
+	deny with input as {
+		"attributes": {"source": {"principal": "luca.ferrari"}},
+		"parsed_body": {
+			"user": "luca.ferrari",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "patients",
+			"query": "{}"
+		}
+	}
+}
+
+test_admin_empty_query_allowed if {
+	allow with input as {
+		"attributes": {"source": {"principal": "admin"}},
+		"parsed_body": {
+			"user": "admin",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "patients",
+			"query": "{}"
 		}
 	}
 }

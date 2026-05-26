@@ -1,0 +1,14 @@
+SPUNK TOKEN FROM UI
+
+
+http://localhost:8000/en-US/manager/launcher/http-eventcollector
+
+
+
+ENVOY lua filter as l7 firewall
+
+
+OPA QUERY STATS FROM SPLUNK DO NOT SEND DATA
+
+
+ENVOY SEND ACCESS LOG
