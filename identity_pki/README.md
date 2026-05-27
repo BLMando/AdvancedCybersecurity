@@ -34,3 +34,10 @@ python3 scripts/authenticate.py
 - [ ] Se utente non riconosciuto mandarlo avanti come guest
 - [ ] Aggiungere modelli statistici o addestramento per la parte degli attacchi
 - [ ] Aggiungere modelli di machine learning per valutare il comportamento anomalo --> disponibili in rete
+- [ ] aggiungere firewall di livello 7 per filtro su payload a mongodb
+- [ ] mTLS proxy che manda richieste ad envoy --> vediamo se fare SPA o riga di comando --> 
+    1. apri app
+    2. check login
+    3. manda query tramite proxy che integra il certificato
+    4. visualizza risposta
+- [ ] OPA non comunica con SPLUNK ma envoy scrive log e fa query --> OPA fa solo decisione
