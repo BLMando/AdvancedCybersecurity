@@ -41,6 +41,15 @@ services:
     networks:
       - backend-net
 
+  # ── Envoy Log Init (Correzione Permessi Volume) ────
+  envoy-log-init:
+    image: alpine:latest
+    container_name: envoy-log-init
+    user: "root"
+    volumes:
+      - envoy-logs:/var/log/envoy
+    command: chown -R 101:101 /var/log/envoy
+
   # ── Envoy Proxy (PEP) ─────────────────────────────
   envoy:
     build:
@@ -49,9 +58,14 @@ services:
     container_name: envoy
     restart: unless-stopped
     depends_on:
-      - mongo
-      - identity-pki
-      - opa
+      envoy-log-init:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_started
+      identity-pki:
+        condition: service_started
+      opa:
+        condition: service_started
     ports:
       - "10000:10000"
       - "10001:10001"
@@ -64,6 +78,11 @@ services:
     networks:
       - frontend-net
       - backend-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
 
   # ── OPA Splunk Forwarder (Sidecar) ─────────────────
   opa-splunk-forwarder:

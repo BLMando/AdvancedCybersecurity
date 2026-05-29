@@ -41,3 +41,5 @@ python3 scripts/authenticate.py
     3. manda query tramite proxy che integra il certificato
     4. visualizza risposta
 - [ ] OPA non comunica con SPLUNK ma envoy scrive log e fa query --> OPA fa solo decisione
+fare anche autenticazione con utenti di mongodb per ACL
+provare a fare autenticazioni sbagliate e vedere come si comporta
