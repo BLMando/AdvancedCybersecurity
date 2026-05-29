@@ -19,6 +19,7 @@ services:
       - ./volumes/certs/ca:/data/certs
       - ./volumes/certs/server:/data/server
       - ./volumes/certs/client:/data/certs/client
+      - ./shared:/app/shared:ro
     networks:
       - backend-net
 
@@ -38,6 +39,8 @@ services:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
     volumes:
       - mongdata:/data/db
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
     networks:
       - backend-net
 
@@ -110,6 +113,7 @@ services:
 
   # ── OPA (PDP) ──────────────────────────────────────
   opa:
+    platform: linux/amd64
     build:
       context: ./opa
       dockerfile: Dockerfile

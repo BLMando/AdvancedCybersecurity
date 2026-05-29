@@ -80,7 +80,7 @@ CA_CERT = (
 )
 
 # Fallback: directory con cert già presenti su disco (mattia.mandorlini o simili)
-CERT_DIR = PROJECT_ROOT / "certs" / "client"
+CERT_DIR = PROJECT_ROOT / "volumes" / "certs" / "client"
 
 # Database MongoDB
 MONGO_DB = os.environ.get("ZTA_MONGO_DB", "zta_db")
@@ -89,16 +89,24 @@ MONGO_DB = os.environ.get("ZTA_MONGO_DB", "zta_db")
 
 # La password di ogni utente ZTA è definita in init-healthcare.py
 # Questi sono gli utenti creati dallo script di inizializzazione.
-CN_TO_MONGO = {
-    "mario.rossi":     {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
-    "anna.verdi":      {"user": "anna.verdi",       "password": "AnnaVerdi2024!",    "role": "billing_staff"},
-    "giulia.bianchi":  {"user": "giulia.bianchi",   "password": "GiuliaBianchi2024!", "role": "auditor"},
-    "luca.ferrari":    {"user": "luca.ferrari",     "password": "LucaFerrari2024!",   "role": "receptionist"},
-    "admin":           {"user": "admin",            "password": "secret",            "role": "admin"},
-    # Alias per test
-    "paolo.roselli":   {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
-    "mattia.mandorlini": {"user": "admin",          "password": "secret",            "role": "admin"},
-}
+# Helper to retrieve user role dynamically from client certificate on disk
+def get_user_role(cn: str) -> str:
+    """Legge il ruolo direttamente dal certificato client dell'utente."""
+    cert_path = CERT_DIR / f"{cn}.crt"
+    if not cert_path.exists():
+        # Fallback per CN speciali senza cert emesso
+        if cn == "admin" or cn == "mattia.mandorlini":
+            return "admin"
+        return "unknown"
+    try:
+        from cryptography import x509
+        cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        titles = cert.subject.get_attributes_for_oid(x509.NameOID.TITLE)
+        if titles:
+            return titles[0].value
+    except Exception:
+        pass
+    return "unknown"
 
 # Collezioni disponibili nel DB healthcare
 COLLECTIONS = ["patients", "providers", "admissions", "clinical_records", "billing"]
@@ -238,37 +246,25 @@ def get_cert_bundle(cn: str, force_file: bool = False) -> CertBundle:
 def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> MongoClient:
     """
     Costruisce un MongoClient che si connette a Envoy via mTLS.
-
-    Schema URI:
-        mongodb://<user>:<pass>@<envoy_host>:<envoy_port>/<db>?authSource=admin&tls=true&...
-
-    Se la chiave privata non è disponibile (cert-only da Secure Enclave),
-    usa solo il cert per il TLS handshake (richiede supporto lato Envoy
-    con client auth facoltativa, ma in questo lab è required).
-    In produzione, la firma avviene via URLCredential all'interno dell'agent.
+    Utilizza l'autenticazione X.509 delegata senza password.
     """
-    mongo_info = CN_TO_MONGO.get(cn)
-    if not mongo_info:
-        warn(f"CN '{cn}' non mappato. Uso credenziali admin di default.")
-        mongo_info = {"user": "admin", "password": "secret", "role": "admin"}
+    import urllib.parse
+    ENVOY_SUBJECT_DN = "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"
+    encoded_subject = urllib.parse.quote_plus(ENVOY_SUBJECT_DN)
+    role = get_user_role(cn)
 
-    user = mongo_info["user"]
-    password = mongo_info["password"]
-    role = mongo_info["role"]
-
-    info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} come {user} (ruolo: {role})")
+    info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} (ruolo: {role})")
 
     # Configurazione TLS
     tls_params: dict = {
         "tls": True,
         "tlsCAFile": str(CA_CERT) if CA_CERT.exists() else None,
         "tlsAllowInvalidCertificates": insecure or not CA_CERT.exists(),
-        "tlsAllowInvalidHostnames": True,  # lab: Envoy usa hostname 'envoy' internamente
+        "tlsAllowInvalidHostnames": True,
     }
 
     # Se abbiamo anche la chiave privata, usa mTLS completo
     if bundle.key_path:
-        # pymongo >= 4.x accetta tlsCertificateKeyFile (PEM con cert+key concatenati)
         combined_pem = os.path.join(
             os.path.dirname(bundle.cert_path), f"{cn}_combined.pem"
         )
@@ -279,26 +275,24 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
                 out.write(k.read())
         tls_params["tlsCertificateKeyFile"] = combined_pem
         ok("mTLS completo: cert + chiave privata")
-    elif bundle.cert_path and bundle.source == "secure_enclave":
-        # Solo cert dal Secure Enclave: non possiamo estrarre la chiave.
-        # pymongo non supporta SecIdentity natively → usiamo solo cert pubblico.
-        # L'autenticazione client avverrà tramite username/password MongoDB.
-        warn("Chiave privata nel Secure Enclave (non esportabile): mTLS parziale")
-        warn("L'accesso MongoDB viene autenticato tramite username/password + TLS server-side")
+    elif bundle.cert_path:
         tls_params["tlsCertificateKeyFile"] = bundle.cert_path
     else:
-        warn("Nessuna chiave privata: connessione TLS senza client certificate")
+        warn("Nessun certificato client: connessione TLS semplice")
 
     # Rimuovi None values
     tls_params = {k: v for k, v in tls_params.items() if v is not None}
 
-    auth_db = "admin" if user == "admin" else MONGO_DB
     uri = (
-        f"mongodb://{user}:{password}@{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}"
-        f"?authSource={auth_db}&directConnection=true"
+        f"mongodb://{encoded_subject}@{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}"
+        f"?authMechanism=MONGODB-X509&authSource=%24external&directConnection=true"
     )
 
     client = MongoClient(uri, serverSelectionTimeoutMS=5000, **tls_params)
+    mongo_info = {
+        "user": ENVOY_SUBJECT_DN,
+        "role": role
+    }
     return client, mongo_info
 
 
@@ -406,22 +400,22 @@ class ZTAMongoConnection:
                 self.proxy_session = ZTAProxySession(self.cn)
                 self.proxy_session.__enter__()
 
-                mongo_info = CN_TO_MONGO.get(self.cn)
-                if not mongo_info:
-                    warn(f"CN '{self.cn}' non mappato. Uso credenziali admin di default.")
-                    mongo_info = {"user": "admin", "password": "secret", "role": "admin"}
+                import urllib.parse
+                ENVOY_SUBJECT_DN = "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"
+                encoded_subject = urllib.parse.quote_plus(ENVOY_SUBJECT_DN)
+                role = get_user_role(self.cn)
 
-                user = mongo_info["user"]
-                password = mongo_info["password"]
+                info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} (ruolo: {role})...")
 
-                info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} come {user}...")
-
-                auth_db = "admin" if user == "admin" else MONGO_DB
                 uri = (
-                    f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
-                    f"?authSource={auth_db}&directConnection=true"
+                    f"mongodb://{encoded_subject}@localhost:{self.proxy_session.port}/{MONGO_DB}"
+                    f"?authMechanism=MONGODB-X509&authSource=%24external&directConnection=true"
                 )
                 self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
+                mongo_info = {
+                    "user": ENVOY_SUBJECT_DN,
+                    "role": role
+                }
                 return self.client, mongo_info
             except Exception as e:
                 warn(f"Errore connessione tramite ZTA Agent ({e}). Fallback su connessione diretta con file...")
@@ -455,8 +449,7 @@ def get_read_collection_name(collection_name: str, cn: str) -> str:
     Traduce il nome della collection fisica nella view RLS corrispondente
     in base al ruolo dell'utente (CN), per rispettare i permessi di MongoDB RBAC.
     """
-    mongo_info = CN_TO_MONGO.get(cn, {})
-    role = mongo_info.get("role", "unknown")
+    role = get_user_role(cn)
 
     if role == "admin":
         return collection_name
@@ -497,8 +490,8 @@ def get_read_collection_name(collection_name: str, cn: str) -> str:
 
 def cmd_whoami(args, cn: str):
     """Mostra identità, ruolo e permessi."""
-    mongo_info = CN_TO_MONGO.get(cn, {})
-    role = mongo_info.get("role", "unknown")
+    role = get_user_role(cn)
+    mongo_info = {"user": "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"}
 
     print()
     print(f"{BOLD}{'═' * 70}{RESET}")
@@ -730,8 +723,7 @@ def cmd_aggregate(args, cn: str):
 
 def cmd_repl(args, cn: str):
     """REPL interattivo per eseguire query MongoDB."""
-    mongo_info = CN_TO_MONGO.get(cn, {})
-    role = mongo_info.get("role", "unknown")
+    role = get_user_role(cn)
 
     print()
     print(f"{BOLD}{'═' * 70}{RESET}")

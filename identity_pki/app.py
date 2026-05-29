@@ -5,10 +5,22 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import sys
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from cryptography.hazmat.primitives import serialization, hashes
 from .pki import PKIService
+
+# Load ZTA roles
+try:
+    from shared.zta_roles import ZTA_ROLES, VALID_ROLE_NAMES
+except ImportError:
+    try:
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+        from shared.zta_roles import ZTA_ROLES, VALID_ROLE_NAMES
+    except ImportError:
+        ZTA_ROLES = {}
+        VALID_ROLE_NAMES = []
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +63,10 @@ def create_app(data_dir=None) -> Flask:
         
         if not csr_pem and not is_hw and not proof_string:
             return error_response("CSR required", 400)
+
+        role = payload.get("role")
+        if role and role not in VALID_ROLE_NAMES:
+            return error_response(f"Role '{role}' is invalid. Valid roles are: {VALID_ROLE_NAMES}", 400)
         
         print(f"[DEBUG] CSR Payload ricevuto: {list(payload.keys())}")
         print(f"[DEBUG] MAC: {payload.get('mac_address')}, CPU: {payload.get('cpu_id')}")
@@ -92,6 +108,10 @@ def create_app(data_dir=None) -> Flask:
         user_cn = payload.get("user")
         if not user_cn:
             return error_response("User CN is required", 400)
+
+        role = payload.get("role")
+        if role and role not in VALID_ROLE_NAMES:
+            return error_response(f"Role '{role}' is invalid. Valid roles are: {VALID_ROLE_NAMES}", 400)
 
         try:
             bundle = service.issue_certificate(
@@ -141,6 +161,14 @@ def create_app(data_dir=None) -> Flask:
         else:
             return jsonify({"error": "Identity verification failed"}), 401
 
+    @app.get("/api/roles")
+    def api_get_roles():
+        """Get the valid roles and their mappings."""
+        return jsonify({
+            "roles": ZTA_ROLES,
+            "valid_names": VALID_ROLE_NAMES
+        })
+
     @app.get("/")
     def index():
         """Serve the landing page."""
@@ -154,12 +182,7 @@ def create_app(data_dir=None) -> Flask:
             "data_dir": service.cert_dir
         }
         
-        roles = {
-            "doctor": {"label": "Medico / Chirurgo"},
-            "nurse": {"label": "Infermiere / Personale Sanitario"},
-            "admin": {"label": "Amministrativo / IT"},
-            "external": {"label": "Consulente Esterno"}
-        }
+        roles = {k: {"label": v["display_name"]} for k, v in ZTA_ROLES.items()}
         
         return render_template("index.html", ca=ca_info, roles=roles)
 

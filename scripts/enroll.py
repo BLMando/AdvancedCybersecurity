@@ -23,10 +23,30 @@ except ImportError:
     print("[!] Missing libraries. Install them with: pip install requests cryptography")
     sys.exit(1)
 
+def fetch_valid_roles(server_url: str) -> list[str]:
+    """Scarica la lista dei ruoli validi dal PKI server prima dell'enrollment."""
+    try:
+        resp = requests.get(f"{server_url}/api/roles", timeout=5)
+        resp.raise_for_status()
+        return resp.json()["valid_names"]
+    except Exception as e:
+        # Fallback offline: lista statica (aggiornata manualmente)
+        print(f"[*] Impossibile connettersi al PKI server per validare i ruoli ({e}). Uso fallback offline.")
+        return ["doctor", "billing_staff", "auditor", "receptionist", "admin"]
+
 def enroll(args):
     print(f"\n{'='*70}")
     print(f" ZTA PROFESSIONAL HARDWARE ENROLLMENT: {args.cn.upper()}")
     print(f"{'='*70}\n")
+
+    # Step 0: Valida il ruolo prima di procedere
+    valid_roles = fetch_valid_roles(args.server)
+    if args.role not in valid_roles:
+        print(f"[✗] Ruolo '{args.role}' non riconosciuto dal PKI server.")
+        print(f"[*] Ruoli disponibili: {', '.join(valid_roles)}")
+        return
+
+    print(f"[✓] Ruolo '{args.role}' validato.")
 
     import platform
     current_os = platform.system()

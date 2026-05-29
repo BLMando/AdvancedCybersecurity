@@ -243,7 +243,27 @@ user_role_map := {
 	"paolo.roselli":  "doctor"
 }
 
+# Helper to extract the Title field (OID 2.5.4.12) from Subject Names or directly
+get_cert_title(cert) := val if {
+	titles := object.get(cert.Subject, "Title", [])
+	val := titles[0]
+	val != ""
+} else := val if {
+	names := object.get(cert.Subject, "Names", [])
+	name := names[_]
+	name.Type == [2, 5, 4, 12]
+	val := name.Value
+	val != ""
+}
+
 current_role := role if {
+	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem != ""
+	certs := crypto.x509.parse_certificates(cert_pem)
+	cert := certs[0]
+	role := get_cert_title(cert)
+	role != ""
+} else := role if {
 	role := user_role_map[user_identity]
 } else := "unknown"
 

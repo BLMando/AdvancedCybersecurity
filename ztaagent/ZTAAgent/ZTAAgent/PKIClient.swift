@@ -5,6 +5,8 @@ class PKIClient: NSObject, URLSessionDelegate {
     static let shared = PKIClient()
     private let serverUrl = "http://127.0.0.1:8080"
     private let envoyUrl = "https://localhost:10001"
+    private var activeCNs: [URLSession: String] = [:]
+    private let activeCNsLock = NSLock()
     
     func enroll(cn: String, role: String, department: String) async throws -> String {
         // ... (metodo enroll già implementato e funzionante)
@@ -56,6 +58,16 @@ class PKIClient: NSObject, URLSessionDelegate {
         // Usiamo un URLSession con delegato per gestire mTLS
         let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
         
+        activeCNsLock.lock()
+        activeCNs[session] = cn
+        activeCNsLock.unlock()
+        
+        defer {
+            activeCNsLock.lock()
+            activeCNs.removeValue(forKey: session)
+            activeCNsLock.unlock()
+        }
+        
         // Puntiamo a una risorsa protetta dietro Envoy
         // Aggiungiamo un timestamp per evitare cache
         let url = URL(string: "\(envoyUrl)/api/resource?t=\(Date().timeIntervalSince1970)")!
@@ -91,7 +103,11 @@ class PKIClient: NSObject, URLSessionDelegate {
         
         // 2. Gestione Client Certificate (mTLS)
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodClientCertificate {
-            print("[*] Envoy ha richiesto il certificato client (mTLS). Cerco l'identità hardware...")
+            activeCNsLock.lock()
+            let expectedCN = activeCNs[session] ?? "paolo.roselli"
+            activeCNsLock.unlock()
+            
+            print("[*] Envoy ha richiesto il certificato client (mTLS). Cerco l'identità hardware per \(expectedCN)...")
             
             // 1. Cerchiamo il CERTIFICATO nel Keychain
             let query: [String: Any] = [
@@ -119,7 +135,7 @@ class PKIClient: NSObject, URLSessionDelegate {
                     let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Senza nome"
                     print("[DEBUG] Esamino certificato: '\(summary)'")
                     
-                    if summary == "paolo.roselli" {
+                    if summary == expectedCN {
                         print("[✓] Certificato ZTA trovato! Cerco di creare l'identità (link alla chiave privata)...")
                         
                         // Chiediamo al sistema di trovare la chiave privata associata

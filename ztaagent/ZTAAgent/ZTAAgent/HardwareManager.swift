@@ -48,6 +48,19 @@ class HardwareManager {
         let label = "com.zta.identity.\(cn)"
         let tag = label.data(using: .utf8)!
         
+        // Se la chiave esiste già nel SE, la restituiamo (idempotente su re-enrollment)
+        let existsQuery: [String: Any] = [
+            kSecClass as String: kSecClassKey,
+            kSecAttrApplicationTag as String: tag,
+            kSecReturnRef as String: true
+        ]
+        var existingItem: CFTypeRef?
+        if SecItemCopyMatching(existsQuery as CFDictionary, &existingItem) == errSecSuccess,
+           let existing = existingItem as! SecKey? {
+            print("[✓] Chiave SE già esistente per \(cn), riutilizzo.")
+            return existing
+        }
+        
         let access = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
@@ -122,46 +135,41 @@ class HardwareManager {
     }
     
     func saveCertificate(cn: String, certData: Data) throws {
-        let label = "com.zta.certificate.\(cn)"
+        // Scriviamo il certificato DER su un file temporaneo, poi usiamo
+        // 'security import' che lega automaticamente il cert alla chiave SE
+        // tramite confronto della chiave pubblica (stesso meccanismo di enroll.py).
+        let tmpFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zta_cert_\(cn).cer")
         
-        // 1. Recuperiamo la chiave pubblica per calcolarne l'hash (Subject Key Identifier)
-        let keyLabel = "com.zta.identity.\(cn)"
-        let tag = keyLabel.data(using: .utf8)!
-        let queryKey: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag,
-            kSecReturnRef as String: true
-        ]
+        try certData.write(to: tmpFile)
+        defer { try? FileManager.default.removeItem(at: tmpFile) }
         
-        var item: CFTypeRef?
-        let statusKey = SecItemCopyMatching(queryKey as CFDictionary, &item)
-        guard statusKey == errSecSuccess, let privateKey = item as! SecKey?,
-              let publicKey = SecKeyCopyPublicKey(privateKey),
-              let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, nil) else {
-            print("[!] Impossibile trovare la chiave pubblica per il link.")
-            return
-        }
+        // security import lega cert ↔ chiave SE per fingerprint della chiave pubblica
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["import", tmpFile.path, "-t", "cert", "-k",
+                             FileManager.default.homeDirectoryForCurrentUser
+                                 .appendingPathComponent("Library/Keychains/login.keychain-db").path]
         
-        // Calcoliamo l'hash SHA1 della chiave pubblica (standard macOS per il link identity)
-        let publicKeyHash = Insecure.SHA1.hash(data: publicKeyData as Data)
-        let hashData = Data(publicKeyHash)
-
-        // 2. Salviamo il certificato con il riferimento all'hash della chiave
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassCertificate,
-            kSecAttrLabel as String: label,
-            kSecValueData as String: certData,
-            kSecAttrApplicationLabel as String: hashData, // LINK CRUCIALE
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
         
-        SecItemDelete(query as CFDictionary)
-        let status = SecItemAdd(query as CFDictionary, nil)
+        try process.run()
+        process.waitUntilExit()
         
-        if status == errSecSuccess {
-            print("[✓] Certificato salvato e collegato alla chiave hardware.")
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        
+        if process.terminationStatus == 0 {
+            print("[✓] Certificato per \(cn) importato nel Keychain e collegato alla chiave SE.")
         } else {
-            print("[!] Errore salvataggio certificato: \(status)")
+            // errSecDuplicateItem (-25299) = il cert è già nel Keychain, non è un errore
+            if output.contains("already exists") || output.contains("duplicate") {
+                print("[✓] Certificato per \(cn) già presente nel Keychain (duplicato ignorato).")
+            } else {
+                print("[!] Errore 'security import' per \(cn) (status \(process.terminationStatus)): \(output)")
+            }
         }
     }
 }
+

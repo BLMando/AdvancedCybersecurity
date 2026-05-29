@@ -145,6 +145,19 @@ static_resources:
                     socket_address:
                       address: mongo
                       port_value: 27017
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain:
+                  filename: /etc/certs/server/envoy.crt
+                private_key:
+                  filename: /etc/certs/server/envoy.key
+            validation_context:
+              trusted_ca:
+                filename: /etc/certs/ca/ca.crt
 
     - name: opa_cluster
       connect_timeout: 2s

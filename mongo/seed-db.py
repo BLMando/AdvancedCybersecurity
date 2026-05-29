@@ -84,7 +84,13 @@ print(f"  {total_rows:,} rows loaded")
 # ─── Connect ────────────────────────────────────────────────────────────────
 print(f"Connecting to {args.uri} …", flush=True)
 client: MongoClient[dict[str, Any]] = MongoClient(
-    args.uri, serverSelectionTimeoutMS=5000)
+    args.uri,
+    tls=True,
+    tlsCertificateKeyFile="volumes/certs/server/mongo.pem",
+    tlsCAFile="volumes/certs/ca/ca.crt",
+    tlsAllowInvalidCertificates=True,
+    serverSelectionTimeoutMS=5000
+)
 try:
     client.admin.command("ping")
 except Exception as e:
