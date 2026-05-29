@@ -222,7 +222,7 @@ def get_cert_bundle(cn: str, force_file: bool = False) -> CertBundle:
     if force_file:
         return CertBundle.from_file(cn)
 
-    if platform.system() == "Darwin":
+    if platform.system() in ("Darwin", "Windows"):
         try:
             return CertBundle.from_zta_agent(cn)
         except Exception as e:
@@ -302,6 +302,16 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     return client, mongo_info
 
 
+def is_agent_running() -> bool:
+    """Verifica se il ZTA Agent è in ascolto sulla porta 9090."""
+    import socket
+    try:
+        with socket.create_connection(("localhost", 9090), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 class ZTAProxySession:
     """Gestisce il ciclo di vita del tunnel locale delegato al ZTA Agent."""
 
@@ -333,7 +343,7 @@ class ZTAProxySession:
         except urllib.error.URLError as e:
             raise ConnectionError(
                 f"ZTA Agent non raggiungibile su {ZTA_AGENT_URL}: {e}\n"
-                "Assicurati che l'app ZTAAgent sia in esecuzione su macOS."
+                "Assicurati che l'agente ZTA sia attivo."
             )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -362,45 +372,82 @@ class ZTAMongoConnection:
         self.proxy_session = None
         self.bundle = None
         self.client = None
+        self.agent_process = None
 
     def __enter__(self):
-        # Utilizza il proxy agent se siamo su macOS e non forziamo file
-        use_agent_proxy = (platform.system() == "Darwin" and not self.args.file)
+        # Utilizza il proxy agent se siamo su macOS o Windows e non forziamo file
+        use_agent_proxy = (platform.system() in ("Darwin", "Windows") and not self.args.file)
 
         if use_agent_proxy:
-            self.proxy_session = ZTAProxySession(self.cn)
-            self.proxy_session.__enter__()
+            # Se l'agente non è in esecuzione ed è Windows, proviamo ad avviarlo on-demand
+            if not is_agent_running() and platform.system() == "Windows":
+                tpm_service_path = PROJECT_ROOT / "scripts" / "windows" / "tpm_agent_service.ps1"
+                if tpm_service_path.exists():
+                    info("ZTA Agent non attivo. Avvio automatico tpm_agent_service.ps1 in background...")
+                    import subprocess
+                    cmd = ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(tpm_service_path)]
+                    try:
+                        self.agent_process = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                        )
+                        # Attendi che il server HTTP locale diventi pronto
+                        for _ in range(15):
+                            time.sleep(0.3)
+                            if is_agent_running():
+                                ok("ZTA Agent Windows avviato con successo.")
+                                break
+                    except Exception as e:
+                        warn(f"Impossibile avviare automaticamente l'agente Windows: {e}")
 
-            mongo_info = CN_TO_MONGO.get(self.cn)
-            if not mongo_info:
-                warn(f"CN '{self.cn}' non mappato. Uso credenziali admin di default.")
-                mongo_info = {"user": "admin", "password": "secret", "role": "admin"}
+            try:
+                self.proxy_session = ZTAProxySession(self.cn)
+                self.proxy_session.__enter__()
 
-            user = mongo_info["user"]
-            password = mongo_info["password"]
+                mongo_info = CN_TO_MONGO.get(self.cn)
+                if not mongo_info:
+                    warn(f"CN '{self.cn}' non mappato. Uso credenziali admin di default.")
+                    mongo_info = {"user": "admin", "password": "secret", "role": "admin"}
 
-            info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} come {user}...")
+                user = mongo_info["user"]
+                password = mongo_info["password"]
 
-            auth_db = "admin" if user == "admin" else MONGO_DB
-            uri = (
-                f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
-                f"?authSource={auth_db}&directConnection=true"
-            )
-            self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
-            return self.client, mongo_info
-        else:
-            # Fallback a connessione diretta mTLS (es. Linux o con flag --file)
-            self.bundle = get_cert_bundle(self.cn, force_file=True)
-            self.client, mongo_info = build_mongo_client(self.cn, self.bundle, insecure=self.args.insecure)
-            return self.client, mongo_info
+                info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} come {user}...")
+
+                auth_db = "admin" if user == "admin" else MONGO_DB
+                uri = (
+                    f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
+                    f"?authSource={auth_db}&directConnection=true"
+                )
+                self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
+                return self.client, mongo_info
+            except Exception as e:
+                warn(f"Errore connessione tramite ZTA Agent ({e}). Fallback su connessione diretta con file...")
+                self.proxy_session = None
+
+        # Fallback a connessione diretta mTLS (es. Linux, o macOS/Windows senza agent running, o con flag --file)
+        self.bundle = get_cert_bundle(self.cn, force_file=True)
+        self.client, mongo_info = build_mongo_client(self.cn, self.bundle, insecure=self.args.insecure)
+        return self.client, mongo_info
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        import subprocess
         if self.client:
             self.client.close()
         if self.proxy_session:
             self.proxy_session.__exit__(exc_type, exc_val, exc_tb)
         if self.bundle:
             self.bundle.cleanup()
+        if self.agent_process:
+            info("Arresto automatico del servizio ZTA Agent Windows...")
+            self.agent_process.terminate()
+            try:
+                self.agent_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.agent_process.kill()
+            ok("ZTA Agent Windows arrestato.")
 
 
 def get_read_collection_name(collection_name: str, cn: str) -> str:
