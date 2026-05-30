@@ -100,6 +100,9 @@ def create_app(data_dir=None) -> Flask:
             })
         except ValueError as e:
             return error_response(str(e), 400)
+        except Exception as e:
+            logger.exception("Enrollment failed with unexpected error")
+            return jsonify({"error": f"Internal server error: {e}"}), 500
 
     @app.post("/api/certificates")
     def api_issue_certificate():

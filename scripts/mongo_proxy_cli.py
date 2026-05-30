@@ -95,7 +95,7 @@ def get_user_role(cn: str) -> str:
     cert_path = CERT_DIR / f"{cn}.crt"
     if not cert_path.exists():
         # Fallback per CN speciali senza cert emesso
-        if cn == "admin" or cn == "mattia.mandorlini":
+        if cn == "admin" or cn == "mattia.mandorlini" or cn == "mattia.mando":
             return "admin"
         return "unknown"
     try:
@@ -107,6 +107,18 @@ def get_user_role(cn: str) -> str:
     except Exception:
         pass
     return "unknown"
+
+# Mappa CN → MongoDB credentials per autenticazione SCRAM (fallback quando la chiave privata non è disponibile)
+CN_TO_MONGO = {
+    "mario.rossi":       {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
+    "anna.verdi":        {"user": "anna.verdi",       "password": "AnnaVerdi2024!",    "role": "billing_staff"},
+    "giulia.bianchi":    {"user": "giulia.bianchi",   "password": "GiuliaBianchi2024!", "role": "auditor"},
+    "luca.ferrari":      {"user": "luca.ferrari",     "password": "LucaFerrari2024!",   "role": "receptionist"},
+    "admin":             {"user": "admin",            "password": "secret",            "role": "admin"},
+    "paolo.roselli":     {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
+    "mattia.mandorlini": {"user": "admin",            "password": "secret",            "role": "admin"},
+    "mattia.mando":      {"user": "admin",            "password": "secret",            "role": "admin"},
+}
 
 # Collezioni disponibili nel DB healthcare
 COLLECTIONS = ["patients", "providers", "admissions", "clinical_records", "billing"]
@@ -206,9 +218,21 @@ class CertBundle:
         with open(cert_path, "w") as f:
             f.write(cert_pem)
 
-        bundle = cls(cert_path=cert_path, key_path=None, source="secure_enclave")
+        # Cerca la chiave privata su disco (lab mode, file-based)
+        key_path = None
+        for ext in (".key", ".pem"):
+            candidate = CERT_DIR / f"{cn}{ext}"
+            if candidate.exists():
+                key_path = str(candidate)
+                break
+
+        source = "secure_enclave" if key_path is None else "file"
+        bundle = cls(cert_path=cert_path, key_path=key_path, source=source)
         bundle._tmpdir = tmpdir
-        ok(f"Certificato estratto dal Secure Enclave ({cn})")
+        if key_path:
+            ok(f"Certificato da agent + chiave da file ({cn})")
+        else:
+            ok(f"Certificato estratto dal Secure Enclave ({cn})")
         return bundle
 
     def cleanup(self):
@@ -246,16 +270,16 @@ def get_cert_bundle(cn: str, force_file: bool = False) -> CertBundle:
 def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> MongoClient:
     """
     Costruisce un MongoClient che si connette a Envoy via mTLS.
-    Utilizza l'autenticazione X.509 delegata senza password.
+
+    Il certificato client serve per l'handshake TLS con Envoy (richiede client cert).
+    L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali predefinite (CN_TO_MONGO),
+    perché l'utente X.509 in $external è solo per CN=envoy (proxy identity).
     """
-    import urllib.parse
-    ENVOY_SUBJECT_DN = "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"
-    encoded_subject = urllib.parse.quote_plus(ENVOY_SUBJECT_DN)
+    mongo_cred = CN_TO_MONGO.get(cn, CN_TO_MONGO.get("admin"))
     role = get_user_role(cn)
 
     info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} (ruolo: {role})")
 
-    # Configurazione TLS
     tls_params: dict = {
         "tls": True,
         "tlsCAFile": str(CA_CERT) if CA_CERT.exists() else None,
@@ -263,7 +287,6 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
         "tlsAllowInvalidHostnames": True,
     }
 
-    # Se abbiamo anche la chiave privata, usa mTLS completo
     if bundle.key_path:
         combined_pem = os.path.join(
             os.path.dirname(bundle.cert_path), f"{cn}_combined.pem"
@@ -275,24 +298,19 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
                 out.write(k.read())
         tls_params["tlsCertificateKeyFile"] = combined_pem
         ok("mTLS completo: cert + chiave privata")
-    elif bundle.cert_path:
-        tls_params["tlsCertificateKeyFile"] = bundle.cert_path
     else:
-        warn("Nessun certificato client: connessione TLS semplice")
+        warn("Chiave privata non disponibile su disco — autenticazione SCRAM senza client cert")
 
-    # Rimuovi None values
     tls_params = {k: v for k, v in tls_params.items() if v is not None}
-
+    user = mongo_cred["user"]
+    password = mongo_cred["password"]
     uri = (
-        f"mongodb://{encoded_subject}@{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}"
-        f"?authMechanism=MONGODB-X509&authSource=%24external&directConnection=true"
+        f"mongodb://{user}:{password}@{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}"
+        f"?authSource={MONGO_DB}&directConnection=true"
     )
+    mongo_info = {"user": user, "role": role}
 
     client = MongoClient(uri, serverSelectionTimeoutMS=5000, **tls_params)
-    mongo_info = {
-        "user": ENVOY_SUBJECT_DN,
-        "role": role
-    }
     return client, mongo_info
 
 
@@ -334,6 +352,16 @@ class ZTAProxySession:
                     return self
                 else:
                     raise ValueError(data.get("message", "Errore sconosciuto avvio proxy"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            try:
+                msg = json.loads(body).get("error", body)
+            except Exception:
+                msg = body
+            raise ConnectionError(
+                f"ZTA Agent ha restituito errore HTTP {e.code}: {msg}\n"
+                "Assicurati che l'agente ZTA sia attivo e che il certificato dell'utente sia presente (--file per bypassare l'agent)."
+            )
         except urllib.error.URLError as e:
             raise ConnectionError(
                 f"ZTA Agent non raggiungibile su {ZTA_AGENT_URL}: {e}\n"
@@ -400,20 +428,20 @@ class ZTAMongoConnection:
                 self.proxy_session = ZTAProxySession(self.cn)
                 self.proxy_session.__enter__()
 
-                import urllib.parse
-                ENVOY_SUBJECT_DN = "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"
-                encoded_subject = urllib.parse.quote_plus(ENVOY_SUBJECT_DN)
+                mongo_cred = CN_TO_MONGO.get(self.cn, CN_TO_MONGO.get("admin"))
                 role = get_user_role(self.cn)
 
                 info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} (ruolo: {role})...")
 
+                user = mongo_cred["user"]
+                password = mongo_cred["password"]
                 uri = (
-                    f"mongodb://{encoded_subject}@localhost:{self.proxy_session.port}/{MONGO_DB}"
-                    f"?authMechanism=MONGODB-X509&authSource=%24external&directConnection=true"
+                    f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
+                    f"?authSource={MONGO_DB}&directConnection=true"
                 )
                 self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
                 mongo_info = {
-                    "user": ENVOY_SUBJECT_DN,
+                    "user": user,
                     "role": role
                 }
                 return self.client, mongo_info
@@ -491,7 +519,8 @@ def get_read_collection_name(collection_name: str, cn: str) -> str:
 def cmd_whoami(args, cn: str):
     """Mostra identità, ruolo e permessi."""
     role = get_user_role(cn)
-    mongo_info = {"user": "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT"}
+    mongo_cred = CN_TO_MONGO.get(cn, CN_TO_MONGO.get("admin"))
+    mongo_info = {"user": mongo_cred["user"], "role": role}
 
     print()
     print(f"{BOLD}{'═' * 70}{RESET}")

@@ -263,8 +263,13 @@ class PKIService:
         """Verify a hardware-bound proof of possession."""
         print(f"\n[DEBUG] --- Inizio Verifica Proof ---")
         print(f"[DEBUG] Challenge ID: {challenge_id}")
-        
-        challenge = self.challenges[challenge_id]
+
+        try:
+            challenge = self.challenges[challenge_id]
+        except KeyError:
+            logger.warning("Challenge %s not found (expired or never issued)", challenge_id)
+            return False
+
         if challenge.used or datetime.now(timezone.utc) > challenge.expires_at:
             print(f"[DEBUG] Challenge scaduta o già usata")
             logger.warning("Challenge %s invalid or expired", challenge_id)

@@ -15,6 +15,9 @@ param (
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# Path relativo alla directory dei certificati client (condivisa col container PKI)
+$CERT_DIR = [System.IO.Path]::GetFullPath((Join-Path (Split-Path $PSCommandPath -Parent) "..\..\volumes\certs\client"))
+
 # Dizionario thread-safe delle sessioni proxy attive: session_token (string) -> Listener state (hashtable)
 $script:Sessions = [System.Collections.Concurrent.ConcurrentDictionary[string, hashtable]]::new()
 
@@ -36,6 +39,25 @@ function Get-PublicKeyPem ($cert) {
         return $pubKeyPem
     }
     return $null
+}
+
+# Helper per caricare certificato + chiave privata da file (fallback lab mode)
+function Get-FileCertWithKey ($cn) {
+    $crtPath = Join-Path $CERT_DIR "$cn.crt"
+    $keyPath = Join-Path $CERT_DIR "$cn.key"
+    if (-not (Test-Path $crtPath) -or -not (Test-Path $keyPath)) {
+        return $null
+    }
+    $combinedPem = (Get-Content $crtPath -Raw) + "`n" + (Get-Content $keyPath -Raw)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($combinedPem)
+    try {
+        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+        $cert.Import($bytes, $null, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
+        return $cert
+    } catch {
+        Write-Host "    [WARN] Impossibile caricare cert+key da file per CN=$cn : $_" -ForegroundColor Yellow
+        return $null
+    }
 }
 
 # Helper per pipe bidirezionale asincrona dei dati TCP
@@ -64,7 +86,21 @@ function Start-ProxySession ($cn, $ttlSeconds) {
     # 1. Trova il certificato nel Windows Store
     $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
     if (-not $cert) {
-        throw "Certificato non trovato nel Windows Certificate Store per CN=$cn"
+        Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
+        $cert = Get-FileCertWithKey $cn
+        if (-not $cert) {
+            throw "Certificato non trovato né in Windows Store né su disco per CN=$cn"
+        }
+        Write-Host "[API] Cert caricato da file per CN=$cn" -ForegroundColor Green
+    } elseif (-not $cert.HasPrivateKey) {
+        Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
+        $fileCert = Get-FileCertWithKey $cn
+        if ($fileCert) {
+            $cert = $fileCert
+            Write-Host "[API] Cert+key caricati da file per CN=$cn" -ForegroundColor Green
+        } else {
+            Write-Host "[API] Fallback file non disponibile per CN=$cn. Uso store cert senza private key (potrebbe fallire)." -ForegroundColor Yellow
+        }
     }
 
     # 2. Crea un listener TCP su una porta dinamica (porta 0)
@@ -212,6 +248,10 @@ function Start-HttpServer {
                         $cn = $jsonBody.common_name
                         Write-Host "[API] Ricevuto /cert per CN=$cn" -ForegroundColor Gray
                         $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                        if (-not $cert) {
+                            Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
+                            $cert = Get-FileCertWithKey $cn
+                        }
                         if ($cert) {
                             $responseObj = @{
                                 cert_pem = Get-CertPem $cert
@@ -227,12 +267,18 @@ function Start-HttpServer {
                         $ttl = if ($jsonBody.ttl_seconds) { $jsonBody.ttl_seconds } else { 900 }
                         Write-Host "[API] Ricevuto /proxy/start per CN=$cn, TTL=$ttl" -ForegroundColor Gray
                         
-                        $proxyInfo = Start-ProxySession $cn $ttl
-                        $responseObj = @{
-                            status = "success"
-                            port = $proxyInfo.port
-                            session_token = $proxyInfo.session_token
-                            expires_at = (Get-Date).AddSeconds($ttl).ToString("o")
+                        try {
+                            $proxyInfo = Start-ProxySession $cn $ttl
+                            $responseObj = @{
+                                status = "success"
+                                port = $proxyInfo.port
+                                session_token = $proxyInfo.session_token
+                                expires_at = (Get-Date).AddSeconds($ttl).ToString("o")
+                            }
+                        } catch {
+                            $statusCode = 404
+                            $responseObj = @{ error = $_.Exception.Message }
+                            Write-Host "[API] /proxy/start fallito per CN=$cn : $_" -ForegroundColor Yellow
                         }
                     }
                     elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/proxy/stop") {

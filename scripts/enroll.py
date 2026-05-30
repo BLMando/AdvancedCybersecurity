@@ -199,11 +199,15 @@ def enroll(args):
                     f'$store.Add($cert); '
                     f'$store.Close(); '
                     f'$thumb = $cert.Thumbprint; '
-                    f'certutil.exe -repairstore My $thumb'
+                    f'certutil.exe -user -repairstore My $thumb'
                 ]
                 res = subprocess.run(ps_cmd, capture_output=True, text=True, errors="replace")
                 if res.returncode == 0:
                     print("[✓] Certificate imported and linked to Windows TPM/KSP key store successfully.")
+                elif "privilegi" in res.stderr or "elevated" in res.stderr.lower():
+                    print("[!] Nota: per collegare il certificato alla chiave TPM servono privilegi di amministratore.")
+                    print(f"[*] Esegui manualmente in una shell come Administrator:")
+                    print(f"    certutil.exe -user -repairstore My {abs_cert_path}")
                 else:
                     print(f"[!] Warning: Windows Certificate Store repair failed:\n{res.stderr or res.stdout}")
             except Exception as e:
