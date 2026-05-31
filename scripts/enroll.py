@@ -44,7 +44,7 @@ def enroll(args):
     if args.role not in valid_roles:
         print(f"[✗] Ruolo '{args.role}' non riconosciuto dal PKI server.")
         print(f"[*] Ruoli disponibili: {', '.join(valid_roles)}")
-        return
+        sys.exit(1)
 
     print(f"[✓] Ruolo '{args.role}' validato.")
 
