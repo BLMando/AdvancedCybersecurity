@@ -275,7 +275,9 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali predefinite (CN_TO_MONGO),
     perché l'utente X.509 in $external è solo per CN=envoy (proxy identity).
     """
-    mongo_cred = CN_TO_MONGO.get(cn, CN_TO_MONGO.get("admin"))
+    mongo_cred = CN_TO_MONGO.get(cn)
+    if mongo_cred is None:
+        raise ValueError(f"No MongoDB credentials configured for CN={cn}")
     role = get_user_role(cn)
 
     info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} (ruolo: {role})")
