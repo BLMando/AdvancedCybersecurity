@@ -25,7 +25,7 @@ $script:Sessions = [System.Collections.Concurrent.ConcurrentDictionary[string, h
 function Get-CertPem ($cert) {
     $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
     $certB64 = [Convert]::ToBase64String($certBytes, [Base64FormattingOptions]::InsertLineBreaks)
-    return "-----BEGIN CERTIFICATE-----\n$certB64\n-----END CERTIFICATE-----"
+    return "-----BEGIN CERTIFICATE-----`n$certB64`n-----END CERTIFICATE-----"
 }
 
 # Helper per estrarre la chiave pubblica PEM dal certificato
