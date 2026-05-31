@@ -303,8 +303,8 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     Costruisce un MongoClient che si connette a Envoy via mTLS.
 
     Il certificato client serve per l'handshake TLS con Envoy (richiede client cert).
-    L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali predefinite (CN_TO_MONGO),
-    perché l'utente X.509 in $external è solo per CN=envoy (proxy identity).
+    L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali caricate
+    da ZTA_MONGO_CREDENTIALS_JSON (sorgente esterna protetta).
     """
     mongo_cred = get_mongo_credentials(cn)
     role = get_user_role(cn)
@@ -550,8 +550,7 @@ def get_read_collection_name(collection_name: str, cn: str) -> str:
 def cmd_whoami(args, cn: str):
     """Mostra identità, ruolo e permessi."""
     role = get_user_role(cn)
-    mongo_cred = get_mongo_credentials(cn, allow_admin_fallback=True, required=False)
-    mongo_info = {"user": mongo_cred["user"] if mongo_cred else "N/A", "role": role}
+    mongo_info = {"user": cn, "role": role}
 
     print()
     print(f"{BOLD}{'═' * 70}{RESET}")
