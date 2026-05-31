@@ -249,8 +249,7 @@ class MongoProxyManager {
             return [
                 "common_name": session.cn,
                 "port": session.port,
-                "expires_at": ISO8601DateFormatter().string(from: session.expiresAt),
-                "session_token": session.sessionToken
+                "expires_at": ISO8601DateFormatter().string(from: session.expiresAt)
             ]
         }
     }
