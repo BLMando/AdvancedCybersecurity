@@ -17,6 +17,7 @@ param (
 
 # Path relativo alla directory dei certificati client (condivisa col container PKI)
 $CERT_DIR = [System.IO.Path]::GetFullPath((Join-Path (Split-Path $PSCommandPath -Parent) "..\..\volumes\certs\client"))
+$ENVOY_CERT_PATH = [System.IO.Path]::GetFullPath((Join-Path (Split-Path $PSCommandPath -Parent) "..\..\volumes\certs\server\envoy.crt"))
 
 # Dizionario thread-safe delle sessioni proxy attive: session_token (string) -> Listener state (hashtable)
 $script:Sessions = [System.Collections.Concurrent.ConcurrentDictionary[string, hashtable]]::new()
@@ -157,7 +158,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                 
                 $connPs = [System.Management.Automation.PowerShell]::Create()
                 $null = $connPs.AddScript({
-                    param($localSock, $cn, $cert, $envoyHost, $envoyPort)
+                    param($localSock, $cn, $cert, $envoyHost, $envoyPort, $pinnedEnvoyCertPath)
                     $logFile = Join-Path $env:TEMP "zta_proxy_debug.log"
                     $envoyClient = $null
                     $sslStream = $null
@@ -169,7 +170,20 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                         
                         $validationCallback = [System.Net.Security.RemoteCertificateValidationCallback] {
                             param($sender, $certificate, $chain, $sslPolicyErrors)
-                            return $true
+                            if ($certificate -eq $null -or -not (Test-Path $pinnedEnvoyCertPath)) {
+                                return $false
+                            }
+                            try {
+                                $presentedCert = if ($certificate -is [System.Security.Cryptography.X509Certificates.X509Certificate2]) {
+                                    $certificate
+                                } else {
+                                    [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate)
+                                }
+                                $pinnedCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pinnedEnvoyCertPath)
+                                return $presentedCert.Thumbprint -eq $pinnedCert.Thumbprint
+                            } catch {
+                                return $false
+                            }
                         }
                         
                         $sslStream = [System.Net.Security.SslStream]::new(
@@ -207,7 +221,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                         if ($sslStream) { $sslStream.Close() }
                         if ($envoyClient) { $envoyClient.Close() }
                     }
-                }).AddArgument($capturedClient).AddArgument($cn).AddArgument($certObj).AddArgument($envoyHost).AddArgument($envoyPort) | Out-Null
+                }).AddArgument($capturedClient).AddArgument($cn).AddArgument($certObj).AddArgument($envoyHost).AddArgument($envoyPort).AddArgument($ENVOY_CERT_PATH) | Out-Null
                 $connPs.BeginInvoke() | Out-Null
             }
         } catch {
