@@ -116,8 +116,19 @@ function Start-ProxySession ($cn, $ttlSeconds) {
         Listener = $listener
         CTS = $cts
         ExpiresAt = (Get-Date).AddSeconds($ttlSeconds)
+        ExpiryTimer = $null
     }
     $script:Sessions.TryAdd($sessionToken, $sessionState) | Out-Null
+    $expiryTimer = [System.Threading.Timer]::new(
+        [System.Threading.TimerCallback]{
+            param($state)
+            Stop-ProxySession $state | Out-Null
+        },
+        $sessionToken,
+        [TimeSpan]::FromSeconds($ttlSeconds),
+        [System.Threading.Timeout]::InfiniteTimeSpan
+    )
+    $sessionState.ExpiryTimer = $expiryTimer
     
     # Salva listener e cts nell'AppDomain per accesso cross-runspace
     $adKey = "ZTA_PROXY_$sessionToken"
@@ -219,6 +230,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
 function Stop-ProxySession ($sessionToken) {
     if ($script:Sessions.ContainsKey($sessionToken)) {
         $state = $script:Sessions[$sessionToken]
+        if ($state.ExpiryTimer) { $state.ExpiryTimer.Dispose() }
         $state.CTS.Cancel()
         $state.Listener.Stop()
         $script:Sessions.TryRemove($sessionToken, [ref]$null) | Out-Null
