@@ -147,7 +147,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                 $connPs = [System.Management.Automation.PowerShell]::Create()
                 $null = $connPs.AddScript({
                     param($localSock, $cn, $cert, $envoyHost, $envoyPort)
-                    $logFile = "C:\Users\matti\Desktop\UNI\AdvancedCybersecurity\proxy_debug.log"
+                    $logFile = Join-Path $env:TEMP "zta_proxy_debug.log"
                     $envoyClient = $null
                     $sslStream = $null
                     try {
