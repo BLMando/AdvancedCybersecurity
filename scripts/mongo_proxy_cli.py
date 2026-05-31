@@ -108,17 +108,48 @@ def get_user_role(cn: str) -> str:
         pass
     return "unknown"
 
-# Mappa CN → MongoDB credentials per autenticazione SCRAM (fallback quando la chiave privata non è disponibile)
-CN_TO_MONGO = {
-    "mario.rossi":       {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
-    "anna.verdi":        {"user": "anna.verdi",       "password": "AnnaVerdi2024!",    "role": "billing_staff"},
-    "giulia.bianchi":    {"user": "giulia.bianchi",   "password": "GiuliaBianchi2024!", "role": "auditor"},
-    "luca.ferrari":      {"user": "luca.ferrari",     "password": "LucaFerrari2024!",   "role": "receptionist"},
-    "admin":             {"user": "admin",            "password": "secret",            "role": "admin"},
-    "paolo.roselli":     {"user": "mario.rossi",      "password": "MarioRossi2024!",   "role": "doctor"},
-    "mattia.mandorlini": {"user": "admin",            "password": "secret",            "role": "admin"},
-    "mattia.mando":      {"user": "admin",            "password": "secret",            "role": "admin"},
-}
+# Credenziali MongoDB SCRAM caricate da una sorgente esterna protetta.
+# Formato atteso in ZTA_MONGO_CREDENTIALS_JSON:
+# {
+#   "mario.rossi": {"user": "mario.rossi", "password": "..."},
+#   "admin": {"user": "admin", "password": "..."}
+# }
+def get_mongo_credentials(
+    cn: str,
+    *,
+    allow_admin_fallback: bool = False,
+    required: bool = True,
+) -> Optional[dict]:
+    raw = os.environ.get("ZTA_MONGO_CREDENTIALS_JSON", "{}")
+    try:
+        credentials = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Invalid ZTA_MONGO_CREDENTIALS_JSON format") from exc
+
+    if not isinstance(credentials, dict):
+        raise ValueError("ZTA_MONGO_CREDENTIALS_JSON must be a JSON object")
+
+    mongo_cred = credentials.get(cn)
+    if allow_admin_fallback and mongo_cred is None:
+        mongo_cred = credentials.get("admin")
+
+    if mongo_cred is None:
+        if required:
+            raise ValueError(
+                f"No MongoDB credentials configured for CN={cn}. "
+                "Set ZTA_MONGO_CREDENTIALS_JSON from a protected source."
+            )
+        return None
+
+    if not isinstance(mongo_cred, dict):
+        raise ValueError(f"Invalid credential entry for CN={cn}")
+
+    user = mongo_cred.get("user")
+    password = mongo_cred.get("password")
+    if not isinstance(user, str) or not isinstance(password, str):
+        raise ValueError(f"Credential entry for CN={cn} must include string user/password")
+
+    return {"user": user, "password": password}
 
 # Collezioni disponibili nel DB healthcare
 COLLECTIONS = ["patients", "providers", "admissions", "clinical_records", "billing"]
@@ -275,9 +306,7 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali predefinite (CN_TO_MONGO),
     perché l'utente X.509 in $external è solo per CN=envoy (proxy identity).
     """
-    mongo_cred = CN_TO_MONGO.get(cn)
-    if mongo_cred is None:
-        raise ValueError(f"No MongoDB credentials configured for CN={cn}")
+    mongo_cred = get_mongo_credentials(cn)
     role = get_user_role(cn)
 
     info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} (ruolo: {role})")
@@ -430,7 +459,7 @@ class ZTAMongoConnection:
                 self.proxy_session = ZTAProxySession(self.cn)
                 self.proxy_session.__enter__()
 
-                mongo_cred = CN_TO_MONGO.get(self.cn, CN_TO_MONGO.get("admin"))
+                mongo_cred = get_mongo_credentials(self.cn, allow_admin_fallback=True)
                 role = get_user_role(self.cn)
 
                 info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} (ruolo: {role})...")
@@ -521,8 +550,8 @@ def get_read_collection_name(collection_name: str, cn: str) -> str:
 def cmd_whoami(args, cn: str):
     """Mostra identità, ruolo e permessi."""
     role = get_user_role(cn)
-    mongo_cred = CN_TO_MONGO.get(cn, CN_TO_MONGO.get("admin"))
-    mongo_info = {"user": mongo_cred["user"], "role": role}
+    mongo_cred = get_mongo_credentials(cn, allow_admin_fallback=True, required=False)
+    mongo_info = {"user": mongo_cred["user"] if mongo_cred else "N/A", "role": role}
 
     print()
     print(f"{BOLD}{'═' * 70}{RESET}")
