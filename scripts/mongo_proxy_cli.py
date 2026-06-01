@@ -58,6 +58,12 @@ except ImportError:
     print("[!] pymongo non installato. Esegui: uv add pymongo")
     sys.exit(1)
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ─── Configurazione default ──────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -306,7 +312,7 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     L'autenticazione MongoDB usa SCRAM-SHA-256 con credenziali caricate
     da ZTA_MONGO_CREDENTIALS_JSON (sorgente esterna protetta).
     """
-    mongo_cred = get_mongo_credentials(cn)
+    mongo_cred = get_mongo_credentials(cn, allow_admin_fallback=True)
     role = get_user_role(cn)
 
     info(f"Connessione a Envoy {ENVOY_HOST}:{ENVOY_PORT} (ruolo: {role})")
@@ -335,9 +341,10 @@ def build_mongo_client(cn: str, bundle: CertBundle, insecure: bool = False) -> M
     tls_params = {k: v for k, v in tls_params.items() if v is not None}
     user = mongo_cred["user"]
     password = mongo_cred["password"]
+    auth_source = "admin" if user == "admin" else MONGO_DB
     uri = (
         f"mongodb://{user}:{password}@{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}"
-        f"?authSource={MONGO_DB}&directConnection=true"
+        f"?authSource={auth_source}&directConnection=true"
     )
     mongo_info = {"user": user, "role": role}
 
@@ -466,9 +473,10 @@ class ZTAMongoConnection:
 
                 user = mongo_cred["user"]
                 password = mongo_cred["password"]
+                auth_source = "admin" if user == "admin" else MONGO_DB
                 uri = (
                     f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
-                    f"?authSource={MONGO_DB}&directConnection=true"
+                    f"?authSource={auth_source}&directConnection=true"
                 )
                 self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
                 mongo_info = {

@@ -23,7 +23,7 @@ class MongoProxySession {
         let localPort = NWEndpoint.Port(rawValue: self.port)!
         // Bind parameters on localhost loopback ONLY to prevent external clients from connecting to our local plain socket
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address("127.0.0.1")!), port: localPort)
+        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address("127.0.0.1")!), port: .any)
         
         listener = try NWListener(using: parameters, on: localPort)
         
