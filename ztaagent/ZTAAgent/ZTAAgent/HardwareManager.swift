@@ -6,11 +6,41 @@ import IOKit
 class HardwareManager {
     static let shared = HardwareManager()
     
-    enum HardwareError: Error {
+    enum HardwareError: Error, CustomNSError, LocalizedError {
         case secureEnclaveNotAvailable
         case keyGenerationFailed(Error?)
         case keyNotFound
         case signingFailed(Error?)
+        
+        static var errorDomain: String { return "com.zta.HardwareError" }
+        
+        var errorCode: Int {
+            switch self {
+            case .secureEnclaveNotAvailable: return 1001
+            case .keyGenerationFailed: return 1002
+            case .keyNotFound: return 1003
+            case .signingFailed: return 1004
+            }
+        }
+        
+        var errorDescription: String? {
+            switch self {
+            case .secureEnclaveNotAvailable:
+                return "Secure Enclave not available on this device"
+            case .keyGenerationFailed(let underlying):
+                if let u = underlying {
+                    return "Key generation failed: \(u.localizedDescription)"
+                }
+                return "Key generation failed (unknown reason)"
+            case .keyNotFound:
+                return "Hardware key not found in Secure Enclave"
+            case .signingFailed(let underlying):
+                if let u = underlying {
+                    return "Hardware signing failed: \(u.localizedDescription)"
+                }
+                return "Hardware signing failed"
+            }
+        }
     }
     
     func getHardwareInfo() -> [String: String] {
@@ -82,7 +112,11 @@ class HardwareManager {
         
         var error: Unmanaged<CFError>?
         guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw HardwareError.keyGenerationFailed(error?.takeRetainedValue())
+            let err = error?.takeRetainedValue()
+            if let e = err {
+                print("[!] SecKeyCreateRandomKey failed: \(e)")
+            }
+            throw HardwareError.keyGenerationFailed(err)
         }
         return privateKey
     }

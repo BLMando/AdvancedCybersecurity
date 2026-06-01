@@ -153,9 +153,12 @@
           <form id="query-form" class="form-grid">
             <label style="grid-column: span 2;">
               <span>Seleziona Identità Client (CN)</span>
-              <select id="query-user" required>
-                <option value="" disabled selected>Caricamento certificati...</option>
-              </select>
+              <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
+                <select id="query-user" required style="flex-grow: 1; min-width: 200px;">
+                  <option value="" disabled selected>Caricamento certificati...</option>
+                </select>
+                <span id="hardware-badge" style="display: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85em; font-weight: bold; white-space: nowrap;"></span>
+              </div>
               <small>Mostra gli utenti registrati con certificati attivi in volumes/certs/client/</small>
             </label>
 
@@ -237,11 +240,15 @@
         const response = await fetch('/api/admin/certificates');
         const data = await response.json();
         
+        // Store certs in global variable
+        window.activeCertificates = data;
+        
         // Clear previous options
-        select.innerHTML = '';
+        select.innerHTML = '<option value="" disabled selected>Seleziona un utente...</option>';
         
         if (!data || data.length === 0) {
           select.innerHTML = '<option value="" disabled>Nessun certificato attivo trovato</option>';
+          document.getElementById('hardware-badge').style.display = 'none';
           return;
         }
         
@@ -249,14 +256,43 @@
         data.forEach(cert => {
           const opt = document.createElement('option');
           opt.value = cert.user;
-          opt.textContent = `${cert.user} (${cert.role} - Serial: ${cert.serial_number})`;
+          opt.textContent = `${cert.user} (${cert.role} - ${cert.is_hardware ? 'Hardware 🛡️' : 'Software 🧪'})`;
           select.appendChild(opt);
         });
+        
+        // Reset badge
+        document.getElementById('hardware-badge').style.display = 'none';
       } catch (err) {
         select.innerHTML = '<option value="" disabled>Errore caricamento certificati</option>';
+        document.getElementById('hardware-badge').style.display = 'none';
         console.error('Failed to load certificates:', err);
       }
     }
+
+    // Update badge on CN select change
+    document.getElementById('query-user').addEventListener('change', (e) => {
+      const selectedCN = e.target.value;
+      const badge = document.getElementById('hardware-badge');
+      if (window.activeCertificates) {
+        const cert = window.activeCertificates.find(c => c.user === selectedCN);
+        if (cert) {
+          badge.style.display = 'inline-block';
+          if (cert.is_hardware) {
+            badge.textContent = '🛡️ Hardware Bound (Secure Enclave/TPM)';
+            badge.style.background = 'rgba(0, 200, 100, 0.2)';
+            badge.style.color = '#5affb0';
+            badge.style.border = '1px solid rgba(0, 200, 100, 0.3)';
+          } else {
+            badge.textContent = '🧪 Software Cert (Lab Mode)';
+            badge.style.background = 'rgba(0, 150, 255, 0.2)';
+            badge.style.color = '#5ad0ff';
+            badge.style.border = '1px solid rgba(0, 150, 255, 0.3)';
+          }
+          return;
+        }
+      }
+      badge.style.display = 'none';
+    });
 
     // Dynamic Filter Hints based on chosen collection
     document.getElementById('query-collection').addEventListener('change', (e) => {
@@ -503,14 +539,45 @@
         return;
       }
       
+      let proxyToken = null;
       try {
         submitBtn.disabled = true;
-        submitBtn.textContent = '⏳ Esecuzione query in corso...';
+        
+        // Check if selected CN is hardware bound
+        const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+        const isHardware = cert ? cert.is_hardware : false;
+        
+        let queryPayload = { user, collection, filter, limit };
+        
+        if (isHardware) {
+          submitBtn.textContent = '⏳ Richiesta Touch ID / Windows Hello...';
+          try {
+            const agentResponse = await fetch('http://localhost:9090/proxy/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
+            });
+            
+            const agentData = await agentResponse.json();
+            if (!agentResponse.ok) {
+              throw new Error(agentData.error || 'Autenticazione hardware fallita.');
+            }
+            
+            queryPayload.local_proxy_port = agentData.port;
+            proxyToken = agentData.session_token;
+            
+            submitBtn.textContent = '⏳ Esecuzione query via hardware mTLS...';
+          } catch (agentErr) {
+            throw new Error(`Impossibile comunicare con l'Agente ZTA locale (porta 9090): ${agentErr.message}`);
+          }
+        } else {
+          submitBtn.textContent = '⏳ Esecuzione query in corso...';
+        }
         
         const response = await fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user, collection, filter, limit })
+          body: JSON.stringify(queryPayload)
         });
         
         const data = await response.json();
@@ -544,6 +611,18 @@
         errBox.textContent = `❌ Errore: ${err.message}`;
         errBox.style.display = 'block';
       } finally {
+        if (proxyToken) {
+          // Stop proxy session immediately
+          try {
+            await fetch('http://localhost:9090/proxy/stop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: proxyToken })
+            });
+          } catch (stopErr) {
+            console.error('Failed to stop proxy session:', stopErr);
+          }
+        }
         submitBtn.disabled = false;
         submitBtn.textContent = 'Invia Query mTLS';
       }

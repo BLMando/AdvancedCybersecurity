@@ -34,3 +34,41 @@
   - `[x]` Confirm OPA field-level masking (auditor sees `billing_amount_approx`, `insurance_masked`).
   - `[x]` Confirm role-level view routing (`v_clinical_doctor`, `v_clinical_auditor`, `v_billing_auditor`).
 
+- `[x]` **Phase 7: Web Console Local ZTA Agent Proxy Integration**
+  - `[x]` Update `docker-compose.yml` to resolve `host.docker.internal` for the `identity-pki` service.
+  - `[x]` Update backend `identity_pki/pki.py` (`list_certificates`) to extract user role and `is_hardware` state.
+  - `[x]` Update backend `identity_pki/app.py` (`/api/query`) to accept `local_proxy_port` and bypass private key presence validation for hardware users.
+  - `[x]` Update front-end `identity_pki/templates/index.html` with hardware badges, biometrics trigger calling `/proxy/start`, and immediate teardown via `/proxy/stop`.
+  - `[x]` Perform end-to-end validation of hardware-enrolled query flow and software fallback.
+
+## Verification Evidence (Phase 7)
+
+### 1. Active Certificates API
+Calling `GET /api/admin/certificates` returns:
+```json
+[
+  {"is_hardware":false,"role":"billing_staff","status":"active","user":"test.user.two"},
+  {"is_hardware":true,"role":"auditor","status":"active","user":"test_auditor"},
+  {"is_hardware":false,"role":"doctor","status":"active","user":"test.user"},
+  {"is_hardware":true,"role":"doctor","status":"active","user":"paolo.roselli"}
+]
+```
+
+### 2. Biometric-Enforced Local Proxy Flow (User `paolo.roselli`)
+1. **Initialize Local Loopback Port (TouchID Prompted):**
+   ```bash
+   curl -s -X POST -H "Content-Type: application/json" -d '{"common_name": "paolo.roselli", "ttl_seconds": 60}' http://localhost:9090/proxy/start
+   # Returns: {"status":"success","port":27021,"session_token":"4701FF17-2014-45B2-B2E7-7E7635114C24"}
+   ```
+2. **Execute Query via PKI Backend to Local Proxy:**
+   ```bash
+   curl -s -X POST -H "Content-Type: application/json" -d '{"user": "paolo.roselli", "collection": "clinical_records", "filter": "{\"patient_id\": \"4f781fb9-ce9f-5313-913d-7ec2be6047fa\"}", "limit": 1, "local_proxy_port": 27021}' http://localhost:8080/api/query
+   # Returns: 200 OK with clinical data. RLS routed to 'v_clinical_doctor'
+   ```
+3. **De-allocate Port:**
+   ```bash
+   curl -s -X POST -H "Content-Type: application/json" -d '{"session_token": "4701FF17-2014-45B2-B2E7-7E7635114C24"}' http://localhost:9090/proxy/stop
+   # Returns: {"status":"success","message":"Session stopped"}
+   ```
+
+

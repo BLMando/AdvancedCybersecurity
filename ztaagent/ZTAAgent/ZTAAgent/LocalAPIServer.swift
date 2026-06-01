@@ -84,6 +84,7 @@ class LocalAPIServer {
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } catch {
+                print("[!] Error during enrollment: \(error)")
                 self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
             }
         }

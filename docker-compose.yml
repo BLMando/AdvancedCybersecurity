@@ -25,6 +25,8 @@ services:
       - ./shared:/app/shared:ro
     networks:
       - backend-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── MongoDB ────────────────────────────────────────
   mongo:

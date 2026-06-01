@@ -280,6 +280,8 @@ def create_app(data_dir=None) -> Flask:
         except json.JSONDecodeError as e:
             return error_response(f"Invalid JSON filter: {e}", 400)
 
+        local_proxy_port = payload.get("local_proxy_port")
+
         # Path to client certificate and key in container
         cert_path = os.path.join(service.cert_dir, "client", f"{user_cn}.crt")
         key_path = os.path.join(service.cert_dir, "client", f"{user_cn}.key")
@@ -290,25 +292,28 @@ def create_app(data_dir=None) -> Flask:
         if not os.path.exists(key_path):
             key_path = os.path.join(service.cert_dir, "issued", user_cn, "private_key.pem")
 
-        if not os.path.exists(cert_path) or not os.path.exists(key_path):
-            if os.path.exists(cert_path) and not os.path.exists(key_path):
-                return error_response(
-                    f"User '{user_cn}' is hardware-enrolled. The private key remains secure in the client device's Secure Enclave "
-                    f"and is not available on the server. To query via this Web Console, re-enroll the user in Lab Mode (using /api/certificates) "
-                    f"so that the server generates and holds the key, or execute queries using the CLI tool (`scripts/mongo_proxy_cli.py`) on your host machine.",
-                    403
-                )
+        if not os.path.exists(cert_path):
             return error_response(f"Credentials not found for user '{user_cn}'. Enroll the user first.", 404)
 
-        combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
-        try:
-            with open(combined_pem_path, "w") as out:
-                with open(cert_path) as c:
-                    out.write(c.read())
-                with open(key_path) as k:
-                    out.write(k.read())
-        except Exception as e:
-            return error_response(f"Failed to prepare combined PEM: {e}", 500)
+        if not local_proxy_port and not os.path.exists(key_path):
+            return error_response(
+                f"User '{user_cn}' is hardware-enrolled. The private key remains secure in the client device's Secure Enclave "
+                f"and is not available on the server. To query via this Web Console, re-enroll the user in Lab Mode (using /api/certificates) "
+                f"so that the server generates and holds the key, or execute queries using the CLI tool (`scripts/mongo_proxy_cli.py`) on your host machine.",
+                403
+            )
+
+        combined_pem_path = None
+        if not local_proxy_port:
+            combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
+            try:
+                with open(combined_pem_path, "w") as out:
+                    with open(cert_path) as c:
+                        out.write(c.read())
+                    with open(key_path) as k:
+                        out.write(k.read())
+            except Exception as e:
+                return error_response(f"Failed to prepare combined PEM: {e}", 500)
 
         # Get role to perform RLS view translation
         role = "unknown"
@@ -381,15 +386,22 @@ def create_app(data_dir=None) -> Flask:
         ca_path = os.path.join(service.cert_dir, "ca.crt")
 
         try:
-            # Connect to Envoy proxy inside the docker network
-            client = MongoClient(
-                f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
-                tls=True,
-                tlsCertificateKeyFile=combined_pem_path,
-                tlsCAFile=ca_path,
-                tlsAllowInvalidCertificates=True,
-                serverSelectionTimeoutMS=4000
-            )
+            if local_proxy_port:
+                # Connect via the host's local proxy port
+                client = MongoClient(
+                    f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
+                    serverSelectionTimeoutMS=8000
+                )
+            else:
+                # Connect to Envoy proxy inside the docker network
+                client = MongoClient(
+                    f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
+                    tls=True,
+                    tlsCertificateKeyFile=combined_pem_path,
+                    tlsCAFile=ca_path,
+                    tlsAllowInvalidCertificates=True,
+                    serverSelectionTimeoutMS=4000
+                )
             db = client[mongo_db_name]
             cursor = db[view_name].find(query_filter).limit(limit)
             
