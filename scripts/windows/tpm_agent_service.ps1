@@ -305,6 +305,90 @@ function Start-HttpServer {
                         $responseObj = @{ error = "Certificato non trovato per CN=$cn" }
                     }
                 }
+                elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/enroll") {
+                    $cn = $jsonBody.common_name
+                    $role = $jsonBody.role
+                    $dept = $jsonBody.department
+                    Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept" -ForegroundColor Gray
+                    
+                    try {
+                        # 1. Recupera challenge dal server PKI
+                        $challengeUrl = "http://localhost:8080/api/challenge"
+                        $challengeResp = Invoke-RestMethod -Uri $challengeUrl -Method Get -TimeoutSec 10
+                        $challengeId = $challengeResp.challenge_id
+                        
+                        # 2. Genera chiave nel TPM ed esegui la firma di attestazione
+                        $hwScript = Join-Path (Split-Path $PSCommandPath -Parent) "hw_attestation.ps1"
+                        $res = & $hwScript -CN $cn
+                        $hwData = ConvertFrom-Json $res
+                        
+                        # Rileva MAC e CPU
+                        $mac = ""
+                        try {
+                            $mac = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1).MacAddress
+                        } catch {}
+                        if (-not $mac) { $mac = "00:11:22:33:44:55" }
+                        
+                        $cpu = "Windows-PC"
+                        try {
+                            $cpu = (Get-CimInstance Win32_Processor).Name.Trim()
+                        } catch {}
+                        
+                        # Costruisci PEM della chiave pubblica
+                        $rsa = [System.Security.Cryptography.RSA]::Create()
+                        $rsaParams = [System.Security.Cryptography.RSAParameters]::new()
+                        $rsaParams.Modulus = [Convert]::FromBase64String($hwData.modulus_b64)
+                        $rsaParams.Exponent = [Convert]::FromBase64String($hwData.exponent_b64)
+                        $rsa.ImportParameters($rsaParams)
+                        $pubKeyPem = $rsa.ExportSubjectPublicKeyInfoPem()
+                        
+                        # 3. Richiedi firma del certificato al server PKI
+                        $enrollUrl = "http://localhost:8080/api/csr"
+                        $enrollPayload = @{
+                            user = $cn
+                            role = $role
+                            department = $dept
+                            challenge_id = $challengeId
+                            proof_string = $hwData.csr_pem
+                            attestation_sig_b64 = $hwData.signature_b64
+                            public_key_pem = $pubKeyPem
+                            is_hardware_csr = $true
+                            mac = $mac
+                            cpu = $cpu
+                        }
+                        
+                        $enrollResp = Invoke-RestMethod -Uri $enrollUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $enrollPayload -Compress) -TimeoutSec 30
+                        $certPem = $enrollResp.certificate_pem
+                        
+                        # 4. Importa certificato nel Windows Certificate Store
+                        $certBytes = [System.Text.Encoding]::UTF8.GetBytes($certPem)
+                        $certObj = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+                        $certObj.Import($certBytes, $null, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet)
+                        
+                        $store = New-Object System.Security.Cryptography.X509Store("My", "CurrentUser")
+                        $store.Open("ReadWrite")
+                        $store.Add($certObj)
+                        $store.Close()
+                        
+                        # Associa la chiave privata tramite certutil -repairstore
+                        $thumb = $certObj.Thumbprint
+                        & certutil.exe -user -repairstore My $thumb | Out-Null
+                        
+                        # Scrivi copia del cert nella cartella condivisa client/
+                        $certOutPath = Join-Path $CERT_DIR "$cn.crt"
+                        [System.IO.File]::WriteAllText($certOutPath, $certPem)
+                        
+                        $responseObj = @{
+                            status = "success"
+                            message = "Enrollment completato!"
+                        }
+                        Write-Host "[API] /enroll completato con successo per CN=$cn" -ForegroundColor Green
+                    } catch {
+                        $statusCode = 500
+                        $responseObj = @{ status = "error"; message = $_.Exception.Message }
+                        Write-Host "[API] /enroll fallito per CN=$cn : $_" -ForegroundColor Red
+                    }
+                }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/proxy/start") {
                     $cn = $jsonBody.common_name
                     $ttl = if ($jsonBody.ttl_seconds) { $jsonBody.ttl_seconds } else { 900 }

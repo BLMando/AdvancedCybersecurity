@@ -87,8 +87,11 @@
               <input type="text" id="hardware_cpu" placeholder="Intel(R) Core(TM) i7-10700K">
             </label>
 
-            <div class="actions" style="grid-column: span 2;">
-              <button type="submit" id="submit-btn">Firma CSR & Provisioning</button>
+            <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button type="submit" id="submit-btn" style="flex: 1; min-width: 200px;">Firma CSR & Provisioning</button>
+                <button type="button" id="auto-enroll-btn" class="ghost-link" style="flex: 1; min-width: 200px;">⚡ Auto-Enroll (Local Agent)</button>
+              </div>
               <p style="margin-top: 10px;">
                 <strong>Enrollment:</strong> La chiave privata rimane al sicuro nel tuo dispositivo, il server firma solo il CSR e crea automaticamente l'utente nel DB MongoDB.
               </p>
@@ -415,6 +418,63 @@
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Firma CSR & Provisioning';
+      }
+    });
+
+    // Handle Auto-Enroll via Local Agent
+    document.getElementById('auto-enroll-btn').addEventListener('click', async () => {
+      const user = document.getElementById('user').value.trim();
+      const role = document.getElementById('role').value;
+      const department = document.getElementById('department').value.trim();
+
+      const errorBox = document.getElementById('error-box');
+      const successBox = document.getElementById('success-box');
+      const autoBtn = document.getElementById('auto-enroll-btn');
+      const submitBtn = document.getElementById('submit-btn');
+
+      errorBox.style.display = 'none';
+      successBox.style.display = 'none';
+
+      if (!user) {
+        errorBox.textContent = '❌ Inserisci l\'Utente (CN)';
+        errorBox.style.display = 'block';
+        return;
+      }
+
+      try {
+        autoBtn.disabled = true;
+        submitBtn.disabled = true;
+        autoBtn.textContent = '⏳ Enrollment in corso...';
+
+        const response = await fetch('http://localhost:9090/enroll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            common_name: user,
+            role: role,
+            department: department
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.message || 'L\'agente locale ha restituito un errore');
+        }
+
+        successBox.textContent = `✓ Enrollment Hardware Completato! Il certificato per ${user} è stato generato e salvato nel Keychain/Certificate Store di sistema.`;
+        successBox.style.display = 'block';
+
+        // Disabilita form
+        document.getElementById('csr-form').style.opacity = '0.5';
+        document.getElementById('csr-form').style.pointerEvents = 'none';
+      } catch (error) {
+        errorBox.textContent = `❌ Errore Local Agent: ${error.message}. Assicurati che lo ZTA Agent (macOS o Windows service) sia in esecuzione sulla porta 9090.`;
+        errorBox.style.display = 'block';
+      } finally {
+        autoBtn.disabled = false;
+        submitBtn.disabled = false;
+        autoBtn.textContent = '⚡ Auto-Enroll (Local Agent)';
       }
     });
 

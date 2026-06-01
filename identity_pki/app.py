@@ -291,6 +291,13 @@ def create_app(data_dir=None) -> Flask:
             key_path = os.path.join(service.cert_dir, "issued", user_cn, "private_key.pem")
 
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
+            if os.path.exists(cert_path) and not os.path.exists(key_path):
+                return error_response(
+                    f"User '{user_cn}' is hardware-enrolled. The private key remains secure in the client device's Secure Enclave "
+                    f"and is not available on the server. To query via this Web Console, re-enroll the user in Lab Mode (using /api/certificates) "
+                    f"so that the server generates and holds the key, or execute queries using the CLI tool (`scripts/mongo_proxy_cli.py`) on your host machine.",
+                    403
+                )
             return error_response(f"Credentials not found for user '{user_cn}'. Enroll the user first.", 404)
 
         combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
