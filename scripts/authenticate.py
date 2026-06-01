@@ -21,7 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description="ZTA Authentication Simulator")
     parser.add_argument("--cn", default="paolo.roselli", help="Common Name of the identity")
     parser.add_argument("--pki-url", default="http://127.0.0.1:8080", help="PKI Server URL")
-    parser.add_argument("--mtls-url", default="https://localhost:10000", help="Envoy mTLS Endpoint URL")
+    parser.add_argument("--mtls-url", default="https://localhost:10001", help="Envoy mTLS Endpoint URL (10001 = HTTP test, 10000 = MongoDB TCP)")
     parser.add_argument("--pki-ca", help="Path to CA bundle for PKI HTTPS verification")
     parser.add_argument("--cert-dir", default=str(Path(__file__).parent.parent / "certs" / "client"), help="Directory with enrolled certs")
     args = parser.parse_args()
@@ -153,21 +153,30 @@ def main():
         print(f"\n[*] Layer 2: Executing Native mTLS Handshake via Windows Schannel/TPM...")
         try:
             # We locate the certificate by CN in the CurrentUser\My store
-            # and invoke the Envoy endpoint using .NET HttpClient with the client cert attached.
-            # We bypass SSL verification callback for local lab server certificates.
+            # and invoke the Envoy endpoint via SslStream with the client cert attached.
+            # Invoke-WebRequest -Certificate has known issues with client certs on Windows.
             ps_cmd = [
                 "powershell.exe", "-ExecutionPolicy", "Bypass", "-Command",
                 f'$cert = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object {{ $_.Subject -like "*CN={CN}*" }} | Select-Object -First 1; '
                 f'if (-not $cert) {{ Write-Error "Certificate for CN={CN} not found in Certificate Store"; exit 1 }}; '
-                f'[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{ $true }}; '
-                f'$webClient = New-Object System.Net.Http.HttpClientHandler; '
-                f'$webClient.ClientCertificates.Add($cert); '
-                f'$client = New-Object System.Net.Http.HttpClient($webClient); '
+                f'if (-not $cert.HasPrivateKey) {{ Write-Error "Certificate has no private key. Run certutil -user -repairstore My $($cert.Thumbprint) as admin"; exit 1 }}; '
                 f'try {{ '
-                f'  $resp = $client.GetStringAsync("{MTLS_URL}").GetAwaiter().GetResult(); '
+                f'  $uri = [System.Uri]"{MTLS_URL}"; '
+                f'  $tcp = New-Object System.Net.Sockets.TcpClient($uri.Host, $uri.Port); '
+                f'  $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, {{ $true }}); '
+                f'  $ssl.AuthenticateAsClient($uri.Host, (New-Object System.Security.Cryptography.X509Certificates.X509Certificate2Collection($cert)), [System.Security.Authentication.SslProtocols]::Tls12, $false); '
+                f'  $writer = New-Object System.IO.StreamWriter($ssl); '
+                f'  $writer.WriteLine("GET / HTTP/1.1"); '
+                f'  $writer.WriteLine("Host: $($uri.Host):$($uri.Port)"); '
+                f'  $writer.WriteLine("Connection: close"); '
+                f'  $writer.WriteLine(""); $writer.Flush(); '
+                f'  Start-Sleep -Milliseconds 200; '
+                f'  $reader = New-Object System.IO.StreamReader($ssl); '
+                f'  $resp = $reader.ReadToEnd(); '
+                f'  $ssl.Close(); $tcp.Close(); '
                 f'  Write-Output "Status: 200, Data: $resp"; '
                 f'}} catch {{ '
-                f'  Write-Error $_.Exception.InnerException.Message; '
+                f'  Write-Error $_.Exception.Message; '
                 f'  exit 1; '
                 f'}}'
             ]
@@ -186,7 +195,8 @@ def main():
                 else:
                     print(f"\n[!] mTLS PERIMETER CHECK FAILED.")
             else:
-                print(f"[!] mTLS Handshake failed:\n{res.stderr.strip() or res.stdout.strip()}")
+                stderr = res.stderr.strip()
+                print(f"[!] mTLS Handshake failed:\n{stderr or res.stdout.strip()}")
                 
         except Exception as e:
             print(f"[!] Error during mTLS test via Windows: {e}")

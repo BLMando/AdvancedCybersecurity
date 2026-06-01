@@ -68,6 +68,7 @@ class PKIService:
         self._ca_record: Optional[CARecord] = None
         self._ensure_ca()
         self._ensure_envoy_certs()
+        self._ensure_mongo_certs()
 
     def _ensure_envoy_certs(self) -> None:
         """Automatically generate Envoy server certificates if missing."""
@@ -86,7 +87,7 @@ class PKIService:
         
         subject = x509.Name([
             x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
             x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
         ])
         
@@ -119,6 +120,59 @@ class PKIService:
         )
         cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
         logger.info("✓ Envoy server certificates generated successfully")
+
+    def _ensure_mongo_certs(self) -> None:
+        """Automatically generate MongoDB server certificates (combined PEM) if missing."""
+        server_dir = self.cert_dir_path.parent / "server"
+        server_dir.mkdir(parents=True, exist_ok=True)
+        
+        mongo_pem_path = server_dir / "mongo.pem"
+        
+        if mongo_pem_path.exists():
+            logger.info("MongoDB server certificates already exist")
+            return
+            
+        logger.info("Generating new MongoDB server certificates")
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        
+        subject = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
+        ])
+        
+        now = datetime.now(timezone.utc)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(self.ca_cert.subject)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + timedelta(days=365))
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.DNSName("mongo"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]),
+                critical=False,
+            )
+            .sign(self.ca_key, hashes.SHA256())
+        )
+        
+        key_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
+        
+        # Combined PEM for MongoDB
+        combined_pem = key_pem + cert_pem
+        mongo_pem_path.write_bytes(combined_pem)
+        
+        logger.info("✓ MongoDB server certificates generated successfully (mongo.pem)")
 
     @property
     def ca_common_name(self) -> str:
@@ -209,8 +263,13 @@ class PKIService:
         """Verify a hardware-bound proof of possession."""
         print(f"\n[DEBUG] --- Inizio Verifica Proof ---")
         print(f"[DEBUG] Challenge ID: {challenge_id}")
-        
-        challenge = self.challenges[challenge_id]
+
+        try:
+            challenge = self.challenges[challenge_id]
+        except KeyError:
+            logger.warning("Challenge %s not found (expired or never issued)", challenge_id)
+            return False
+
         if challenge.used or datetime.now(timezone.utc) > challenge.expires_at:
             print(f"[DEBUG] Challenge scaduta o già usata")
             logger.warning("Challenge %s invalid or expired", challenge_id)

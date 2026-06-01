@@ -10,8 +10,16 @@ Usage:
 import argparse
 from dotenv import load_dotenv
 import os
+import sys
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
+
+# Import the centralized ZTA roles
+try:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from shared.zta_roles import ZTA_ROLES
+except ImportError:
+    ZTA_ROLES = {}
 
 load_dotenv()  # Load .env variables (e.g. MongoDB credentials)
 
@@ -26,7 +34,13 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-client = MongoClient(args.uri)
+client = MongoClient(
+    args.uri,
+    tls=True,
+    tlsCertificateKeyFile="volumes/certs/server/mongo.pem",
+    tlsCAFile="volumes/certs/ca/ca.crt",
+    tlsAllowInvalidCertificates=True
+)
 db = client["zta_db"]
 
 print("╔══════════════════════════════════════════════════════════════╗")
@@ -577,6 +591,19 @@ for user_doc in users_def:
     )
     print(f"✓  User created: {user_doc['user']}")
 
+# Create the Envoy proxy X.509 user in $external database
+db_external = client["$external"]
+try:
+    db_external.command("dropUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
+except OperationFailure:
+    pass
+
+envoy_roles = [{"role": role_config["mongo_role"], "db": "zta_db"} for role_config in ZTA_ROLES.values()]
+db_external.command(
+    "createUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT",
+    roles=envoy_roles
+)
+print("✓  X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
 
 print("\n╔══════════════════════════════════════════════════════════════╗")
 print("║  RLS complete: views + roles + users ready.                 ║")

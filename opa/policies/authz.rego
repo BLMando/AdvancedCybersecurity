@@ -116,9 +116,10 @@ allow if {
 
 # When mongo_proxy can't decode the wire protocol (e.g. OP_MSG), the
 # parsed_body is empty and action_name becomes "unknown". Allow these
-# connections — they're initial handshakes from modern MongoDB drivers.
+# connections ONLY if they do not target sensitive/main collections.
 allow if {
 	action_name == "unknown"
+	not normalized_collection_name in {"clinical_records", "billing", "patients", "admissions", "providers"}
 }
 
 is_destructive_operation if {
@@ -126,7 +127,7 @@ is_destructive_operation if {
 }
 
 collection_is_sensitive if {
-	collection_name in sensitive_collections
+	normalized_collection_name in sensitive_collections
 }
 
 sensitive_collections := {
@@ -137,7 +138,7 @@ sensitive_collections := {
 # ─── Collection Risk Boost (from healthcare_rls.rego) ────────────────────────
 
 collection_risk_boost := boost if {
-	collection_name in {"clinical_records", "billing"}
+	normalized_collection_name in {"clinical_records", "billing"}
 	boost := 15
 } else := 0
 
@@ -198,6 +199,23 @@ collection_name := coll if {
 	coll != ""
 } else := "unknown"
 
+normalized_collection_name := name if {
+	startswith(collection_name, "v_patients_")
+	name := "patients"
+} else := name if {
+	startswith(collection_name, "v_admissions_")
+	name := "admissions"
+} else := name if {
+	startswith(collection_name, "v_clinical_")
+	name := "clinical_records"
+} else := name if {
+	startswith(collection_name, "v_billing_")
+	name := "billing"
+} else := name if {
+	collection_name == "v_providers_all"
+	name := "providers"
+} else := collection_name
+
 known_users := {
 	"mario.rossi",
 	"anna.verdi",
@@ -225,7 +243,27 @@ user_role_map := {
 	"paolo.roselli":  "doctor"
 }
 
+# Helper to extract the Title field (OID 2.5.4.12) from Subject Names or directly
+get_cert_title(cert) := val if {
+	titles := object.get(cert.Subject, "Title", [])
+	val := titles[0]
+	val != ""
+} else := val if {
+	names := object.get(cert.Subject, "Names", [])
+	name := names[_]
+	name.Type == [2, 5, 4, 12]
+	val := name.Value
+	val != ""
+}
+
 current_role := role if {
+	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem != ""
+	certs := crypto.x509.parse_certificates(cert_pem)
+	cert := certs[0]
+	role := get_cert_title(cert)
+	role != ""
+} else := role if {
 	role := user_role_map[user_identity]
 } else := "unknown"
 
@@ -271,16 +309,16 @@ permissions := {
 }
 
 role_action_allowed if {
-	allowed_cmds := permissions[current_role][collection_name]
+	allowed_cmds := permissions[current_role][normalized_collection_name]
 	action_name in allowed_cmds
 }
 
 role_action_denied if {
-	not permissions[current_role][collection_name]
+	not permissions[current_role][normalized_collection_name]
 }
 
 role_action_denied if {
-	allowed_cmds := permissions[current_role][collection_name]
+	allowed_cmds := permissions[current_role][normalized_collection_name]
 	not action_name in allowed_cmds
 }
 
@@ -309,25 +347,25 @@ is_empty_query := count(object.keys(query_doc)) == 0
 
 # clinical_records queries MUST contain patient_id field
 inspection_violation if {
-    collection_name == "clinical_records"
+    normalized_collection_name == "clinical_records"
     action_name in {"find", "update"}
     not query_has_field("patient_id")
 }
 
 # billing queries MUST NOT use JavaScript operators
 inspection_violation if {
-    collection_name == "billing"
+    normalized_collection_name == "billing"
     query_has_field("$where")
 }
 
 inspection_violation if {
-    collection_name == "billing"
+    normalized_collection_name == "billing"
     query_has_field("$function")
 }
 
 # patients queries must not be empty for non-admin roles
 inspection_violation if {
-    collection_name == "patients"
+    normalized_collection_name == "patients"
     current_role != "admin"
     action_name == "find"
     is_empty_query
@@ -341,17 +379,17 @@ hard_deny if {
 
 hard_deny if {
 	current_role == "billing_staff"
-	collection_name == "clinical_records"
+	normalized_collection_name == "clinical_records"
 }
 
 hard_deny if {
 	current_role == "receptionist"
-	collection_name in {"billing", "clinical_records"}
+	normalized_collection_name in {"billing", "clinical_records"}
 }
 
 hard_deny if {
 	current_role == "doctor"
-	collection_name == "billing"
+	normalized_collection_name == "billing"
 }
 
 # ─── Denial Rules (from original authz.rego) ───────────────────────────────────────
@@ -374,6 +412,10 @@ deny if {
 
 deny if {
 	inspection_violation
+}
+
+deny if {
+	role_action_denied
 }
 
 # ─── Response Headers ─────────────────────────────────────────────────────────────
@@ -405,7 +447,8 @@ test_legitimate_user if {
 			"device": "device-laptop-001",
 			"network_ip": "172.20.0.5",
 			"command": "find",
-			"collection": "utenti"
+			"collection": "patients",
+			"query": "{\"patient_id\": \"P001\"}"
 		}
 	}
 }
@@ -585,6 +628,50 @@ test_admin_empty_query_allowed if {
 			"network_ip": "172.20.0.5",
 			"command": "find",
 			"collection": "patients",
+			"query": "{}"
+		}
+	}
+}
+
+# ─── View query authorization tests ──────────────────────────────────────────
+
+test_doctor_clinical_view_allowed if {
+	allow with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "v_clinical_doctor",
+			"query": "{\"patient_id\": \"P001\"}"
+		}
+	}
+}
+
+test_doctor_clinical_view_no_patient_id_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "v_clinical_doctor",
+			"query": "{}"
+		}
+	}
+}
+
+test_doctor_billing_view_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "v_billing_staff",
 			"query": "{}"
 		}
 	}

@@ -23,10 +23,30 @@ except ImportError:
     print("[!] Missing libraries. Install them with: pip install requests cryptography")
     sys.exit(1)
 
+def fetch_valid_roles(server_url: str) -> list[str]:
+    """Scarica la lista dei ruoli validi dal PKI server prima dell'enrollment."""
+    try:
+        resp = requests.get(f"{server_url}/api/roles", timeout=5)
+        resp.raise_for_status()
+        return resp.json()["valid_names"]
+    except Exception as e:
+        # Fallback offline: lista statica (aggiornata manualmente)
+        print(f"[*] Impossibile connettersi al PKI server per validare i ruoli ({e}). Uso fallback offline.")
+        return ["doctor", "billing_staff", "auditor", "receptionist", "admin"]
+
 def enroll(args):
     print(f"\n{'='*70}")
     print(f" ZTA PROFESSIONAL HARDWARE ENROLLMENT: {args.cn.upper()}")
     print(f"{'='*70}\n")
+
+    # Step 0: Valida il ruolo prima di procedere
+    valid_roles = fetch_valid_roles(args.server)
+    if args.role not in valid_roles:
+        print(f"[✗] Ruolo '{args.role}' non riconosciuto dal PKI server.")
+        print(f"[*] Ruoli disponibili: {', '.join(valid_roles)}")
+        sys.exit(1)
+
+    print(f"[✓] Ruolo '{args.role}' validato.")
 
     import platform
     current_os = platform.system()
@@ -179,11 +199,15 @@ def enroll(args):
                     f'$store.Add($cert); '
                     f'$store.Close(); '
                     f'$thumb = $cert.Thumbprint; '
-                    f'certutil.exe -repairstore My $thumb'
+                    f'certutil.exe -user -repairstore My $thumb'
                 ]
                 res = subprocess.run(ps_cmd, capture_output=True, text=True, errors="replace")
                 if res.returncode == 0:
                     print("[✓] Certificate imported and linked to Windows TPM/KSP key store successfully.")
+                elif "privilegi" in res.stderr or "elevated" in res.stderr.lower():
+                    print("[!] Nota: per collegare il certificato alla chiave TPM servono privilegi di amministratore.")
+                    print(f"[*] Esegui manualmente in una shell come Administrator:")
+                    print(f"    certutil.exe -user -repairstore My {abs_cert_path}")
                 else:
                     print(f"[!] Warning: Windows Certificate Store repair failed:\n{res.stderr or res.stdout}")
             except Exception as e:

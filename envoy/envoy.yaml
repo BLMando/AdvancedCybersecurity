@@ -145,11 +145,23 @@ static_resources:
                     socket_address:
                       address: mongo
                       port_value: 27017
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain:
+                  filename: /etc/certs/server/envoy.crt
+                private_key:
+                  filename: /etc/certs/server/envoy.key
+            validation_context:
+              trusted_ca:
+                filename: /etc/certs/ca/ca.crt
 
     - name: opa_cluster
       connect_timeout: 2s
       type: STRICT_DNS
-      http2_protocol_options: {}
       typed_extension_protocol_options:
         envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
           "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
@@ -166,7 +178,11 @@ static_resources:
                       port_value: 9002
 
 admin:
-  access_log_path: /tmp/admin_access.log
+  access_log:
+    - name: envoy.access_loggers.file
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+        path: /tmp/admin_access.log
   address:
     socket_address:
       address: 0.0.0.0
