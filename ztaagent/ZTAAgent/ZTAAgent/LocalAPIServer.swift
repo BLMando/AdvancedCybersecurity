@@ -44,6 +44,12 @@ class LocalAPIServer {
         let method = parts[0]
         let path = parts[1]
         
+        // Handle CORS OPTIONS preflight requests globally
+        if method == "OPTIONS" {
+            self.sendOptionsResponse(connection: connection)
+            return
+        }
+        
         if method == "POST" && path.contains("/enroll") {
             self.handleEnroll(request: request, connection: connection)
         } else if method == "POST" && path.contains("/auth") {
@@ -61,6 +67,18 @@ class LocalAPIServer {
         } else {
             self.sendResponse(body: "{\"error\": \"Not Found\"}", status: "404 Not Found", connection: connection)
         }
+    }
+    
+    private func sendOptionsResponse(connection: NWConnection) {
+        let response = "HTTP/1.1 204 No Content\r\n" +
+                       "Access-Control-Allow-Origin: *\r\n" +
+                       "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
+                       "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
+                       "Content-Length: 0\r\n" +
+                       "Connection: close\r\n\r\n"
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ _ in
+            connection.cancel()
+        }))
     }
     
     private func handleEnroll(request: String, connection: NWConnection) {
