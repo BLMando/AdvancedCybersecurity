@@ -400,7 +400,22 @@
             queryPayload.local_proxy_port = agentData.port;
             proxyToken = agentData.session_token;
             
-            submitBtn.textContent = '⏳ Esecuzione query via hardware mTLS...';
+            submitBtn.textContent = '⏳ Sblocco biometrico per token OIDC...';
+            
+            const oidcResponse = await fetch('http://localhost:9090/oidc/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user })
+            });
+            
+            const oidcData = await oidcResponse.json();
+            if (!oidcResponse.ok) {
+              throw new Error(oidcData.message || oidcData.error || 'Generazione OIDC fallita.');
+            }
+            
+            queryPayload.jwt_token = oidcData.token;
+            
+            submitBtn.textContent = '⏳ Esecuzione query via hardware OIDC mTLS...';
           } catch (agentErr) {
             throw new Error(`Impossibile comunicare con l'Agente ZTA locale (porta 9090): ${agentErr.message}`);
           }
@@ -430,7 +445,7 @@
         }
         
         if (!response.ok) {
-          throw new Error(data.error || 'Server error');
+          throw new Error(data.message || data.error || 'Server error');
         }
         
         // Success

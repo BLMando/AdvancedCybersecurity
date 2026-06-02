@@ -103,6 +103,7 @@ class PKIService:
             .add_extension(
                 x509.SubjectAlternativeName([
                     x509.DNSName("envoy"),
+                    x509.DNSName("identity-pki"),
                     x509.DNSName("localhost"),
                     x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
                 ]),

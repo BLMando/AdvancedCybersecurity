@@ -73,6 +73,23 @@ def create_app(data_dir=None) -> Flask:
                 roles=[{"role": mongo_role, "db": mongo_db_name}]
             )
             app.logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
+
+            # Create user in $external database for MONGODB-OIDC authentication
+            db_external = client["$external"]
+            oidc_username = f"oidc/{username}"
+            try:
+                db_external.command("dropUser", oidc_username)
+            except Exception:
+                pass
+            try:
+                db_external.command(
+                    "createUser", oidc_username,
+                    roles=[{"role": mongo_role, "db": mongo_db_name}]
+                )
+                app.logger.info(f"Auto-provisioned MongoDB external OIDC user '{oidc_username}' with role '{mongo_role}'")
+            except Exception as ex:
+                app.logger.warning(f"Failed to auto-provision external OIDC user '{oidc_username}': {ex}")
+
             client.close()
         except Exception as e:
             app.logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
@@ -263,6 +280,81 @@ def create_app(data_dir=None) -> Flask:
         else:
             return jsonify({"error": "Identity verification failed"}), 401
 
+    @app.get("/.well-known/jwks.json")
+    def well_known_jwks():
+        """Retrieve JWKS for signature verification."""
+        try:
+            from .oidc import get_jwks
+            return jsonify(get_jwks())
+        except Exception as e:
+            return error_response(f"OIDC Error: {e}", 500)
+
+    @app.get("/.well-known/openid-configuration")
+    def well_known_openid_configuration():
+        """Retrieve OpenID Connect discovery document."""
+        return jsonify({
+            "issuer": "https://identity-pki:8080",
+            "jwks_uri": "https://identity-pki:8080/.well-known/jwks.json",
+            "response_types_supported": ["id_token"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"]
+        })
+
+
+    @app.post("/api/oidc/token")
+    def api_oidc_token():
+        """Exchange verified biometric hardware signature for a cert-bound JWT token (RFC 8705)."""
+        payload = request.get_json(silent=True) or {}
+        challenge_id = payload.get("challenge_id")
+        signature_b64 = payload.get("signature")
+        public_key_pem = payload.get("public_key_pem")
+        proof_string = payload.get("proof_string")
+        
+        if not challenge_id or not signature_b64:
+            return error_response("challenge_id and signature are required", 400)
+            
+        identity = service.verify_proof(
+            challenge_id=challenge_id,
+            signature_b64=signature_b64,
+            public_key_pem=public_key_pem,
+            proof_string=proof_string
+        )
+        
+        if not identity:
+            return error_response("Identity verification failed", 401)
+            
+        user_cn = identity["user"]
+        role = identity["role"]
+        
+        # Load cert fingerprint
+        cert_path = os.path.join(service.cert_dir, "client", f"{user_cn}.crt")
+        if not os.path.exists(cert_path):
+            cert_path = os.path.join(service.cert_dir, "issued", user_cn, "certificate.crt")
+            
+        if not os.path.exists(cert_path):
+            return error_response(f"Certificate not found for user '{user_cn}'. Enroll the user first.", 404)
+            
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes
+            from .oidc import issue_jwt
+            
+            with open(cert_path, "rb") as f:
+                cert = x509.load_pem_x509_certificate(f.read())
+            
+            cert_fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+            token = issue_jwt(user_cn, role, cert_fingerprint)
+            
+            return jsonify({
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": 900
+            })
+        except Exception as e:
+            logger.exception("OIDC token issuance failed")
+            return error_response(f"Failed to issue token: {e}", 500)
+
+
     @app.get("/api/roles")
     def api_get_roles():
         """Get the valid roles and their mappings."""
@@ -325,6 +417,7 @@ def create_app(data_dir=None) -> Flask:
         collection_name = payload.get("collection")
         query_filter_str = payload.get("filter", "{}")
         limit = int(payload.get("limit", 10))
+        jwt_token = payload.get("jwt_token")
 
         if not user_cn or not collection_name:
             return error_response("User CN and Collection name are required", 400)
@@ -346,10 +439,10 @@ def create_app(data_dir=None) -> Flask:
         if not os.path.exists(key_path):
             key_path = os.path.join(service.cert_dir, "issued", user_cn, "private_key.pem")
 
-        if not os.path.exists(cert_path):
+        if not os.path.exists(cert_path) and not jwt_token:
             return error_response(f"Credentials not found for user '{user_cn}'. Enroll the user first.", 404)
 
-        if not local_proxy_port and not os.path.exists(key_path):
+        if not jwt_token and not local_proxy_port and not os.path.exists(key_path):
             return error_response(
                 f"User '{user_cn}' is hardware-enrolled. The private key remains secure in the client device's Secure Enclave "
                 f"and is not available on the server. To query via this Web Console, re-enroll the user in Lab Mode (using /api/certificates) "
@@ -359,7 +452,13 @@ def create_app(data_dir=None) -> Flask:
 
         combined_pem_path = None
         if not local_proxy_port:
-            combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
+            if jwt_token and (not os.path.exists(key_path) or not os.path.exists(cert_path)):
+                # Hardware mode OIDC connection from Flask to Envoy: use Flask's own server cert/key
+                cert_path = "/data/server/envoy.crt"
+                key_path = "/data/server/envoy.key"
+                combined_pem_path = os.path.join(service.cert_dir, "client", "envoy_combined.pem")
+            else:
+                combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
             try:
                 with open(combined_pem_path, "w") as out:
                     with open(cert_path) as c:
@@ -369,16 +468,33 @@ def create_app(data_dir=None) -> Flask:
             except Exception as e:
                 return error_response(f"Failed to prepare combined PEM: {e}", 500)
 
+
         # Get role to perform RLS view translation
         role = "unknown"
-        metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
-        if os.path.exists(metadata_path):
+        if jwt_token:
             try:
-                with open(metadata_path) as f:
-                    meta = json.load(f)
-                    role = meta.get("role", "unknown")
-            except Exception:
-                pass
+                parts = jwt_token.split(".")
+                if len(parts) == 3:
+                    payload_b64 = parts[1]
+                    payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+                    payload_data = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
+                    claims = json.loads(payload_data)
+                    role = claims.get("role", "unknown")
+                    if isinstance(role, list):
+                        role = role[0] if role else "unknown"
+            except Exception as ex:
+                logger.warning(f"Failed to decode JWT claims: {ex}")
+
+
+        if role == "unknown":
+            metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path) as f:
+                        meta = json.load(f)
+                        role = meta.get("role", "unknown")
+                except Exception:
+                    pass
 
         if role == "unknown":
             try:
@@ -440,22 +556,51 @@ def create_app(data_dir=None) -> Flask:
         ca_path = os.path.join(service.cert_dir, "ca.crt")
 
         try:
-            if local_proxy_port:
-                # Connect via the host's local proxy port
-                client = MongoClient(
-                    f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
-                    serverSelectionTimeoutMS=8000
-                )
+            if jwt_token:
+                from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+
+                class StaticTokenCallback(OIDCCallback):
+                    def __init__(self, token):
+                        self.token = token
+                    def fetch(self, context):
+                        return OIDCCallbackResult(access_token=self.token)
+
+                callback_instance = StaticTokenCallback(jwt_token)
+
+                if local_proxy_port:
+                    client = MongoClient(
+                        f"mongodb://host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                        authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                        serverSelectionTimeoutMS=8000
+                    )
+                else:
+                    client = MongoClient(
+                        f"mongodb://envoy:10000/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                        authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                        tls=True,
+                        tlsCertificateKeyFile=combined_pem_path,
+                        tlsCAFile=ca_path,
+                        tlsAllowInvalidCertificates=True,
+                        serverSelectionTimeoutMS=4000
+                    )
             else:
-                # Connect to Envoy proxy inside the docker network
-                client = MongoClient(
-                    f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
-                    tls=True,
-                    tlsCertificateKeyFile=combined_pem_path,
-                    tlsCAFile=ca_path,
-                    tlsAllowInvalidCertificates=True,
-                    serverSelectionTimeoutMS=4000
-                )
+                if local_proxy_port:
+                    # Connect via the host's local proxy port
+                    client = MongoClient(
+                        f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
+                        serverSelectionTimeoutMS=8000
+                    )
+                else:
+                    # Connect to Envoy proxy inside the docker network
+                    client = MongoClient(
+                        f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
+                        tls=True,
+                        tlsCertificateKeyFile=combined_pem_path,
+                        tlsCAFile=ca_path,
+                        tlsAllowInvalidCertificates=True,
+                        serverSelectionTimeoutMS=4000
+                    )
+
             db = client[mongo_db_name]
             cursor = db[view_name].find(query_filter).limit(limit)
             
@@ -499,7 +644,8 @@ def main() -> None:
     host = os.environ.get("IDENTITY_APP_HOST", "0.0.0.0")
     port = int(os.environ.get("IDENTITY_APP_PORT", "8080"))
     debug = os.environ.get("IDENTITY_APP_DEBUG", "false").lower() == "true"
-    app.run(host=host, port=port, debug=debug)
+    ssl_context = ("/data/server/envoy.crt", "/data/server/envoy.key")
+    app.run(host=host, port=port, debug=debug, ssl_context=ssl_context)
 
 if __name__ == "__main__":
     main()

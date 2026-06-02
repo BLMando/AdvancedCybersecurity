@@ -14,6 +14,8 @@ param (
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+
 
 # Path relativo alla directory dei certificati client (condivisa col container PKI)
 $CERT_DIR = [System.IO.Path]::GetFullPath((Join-Path (Split-Path $PSCommandPath -Parent) "..\..\volumes\certs\client"))
@@ -313,7 +315,7 @@ function Start-HttpServer {
                     
                     try {
                         # 1. Recupera challenge dal server PKI
-                        $challengeUrl = "http://localhost:8080/api/challenge"
+                        $challengeUrl = "https://localhost:8080/api/challenge"
                         $challengeResp = Invoke-RestMethod -Uri $challengeUrl -Method Get -TimeoutSec 10
                         $challengeId = $challengeResp.challenge_id
                         
@@ -343,7 +345,7 @@ function Start-HttpServer {
                         $pubKeyPem = $rsa.ExportSubjectPublicKeyInfoPem()
                         
                         # 3. Richiedi firma del certificato al server PKI
-                        $enrollUrl = "http://localhost:8080/api/csr"
+                        $enrollUrl = "https://localhost:8080/api/csr"
                         $enrollPayload = @{
                             user = $cn
                             role = $role
@@ -417,6 +419,62 @@ function Start-HttpServer {
                     } else {
                         $statusCode = 404
                         $responseObj = @{ error = "Sessione non trovata" }
+                    }
+                }
+                elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/oidc/token") {
+                    $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
+                    if (-not $cn) { $cn = "paolo.roselli" }
+                    Write-Host "[API] Ricevuto /oidc/token per CN=$cn" -ForegroundColor Gray
+                    
+                    try {
+                        # 1. Recupera challenge dal server PKI
+                        $challengeUrl = "https://localhost:8080/api/challenge"
+                        $challengeResp = Invoke-RestMethod -Uri $challengeUrl -Method Get -TimeoutSec 10
+                        $challengeId = $challengeResp.challenge_id
+                        
+                        # 2. Trova il certificato nel Windows Store
+                        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                        if (-not $cert) {
+                            throw "Certificato non trovato in Windows Store per CN=$cn"
+                        }
+                        
+                        # 3. Costruisci il proof_string e firmalo con la chiave TPM
+                        $timestamp = (Get-Date -uformat "%Y-%m-%dT%H:%M:%SZ")
+                        $proofString = "ZTA-CERT-BINDING|CN=$cn|TIME=$timestamp"
+                        $proofBytes = [System.Text.Encoding]::UTF8.GetBytes($proofString)
+                        
+                        $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+                        if (-not $rsa) {
+                            throw "Impossibile recuperare la chiave privata per CN=$cn"
+                        }
+                        $sigBytes = $rsa.SignData($proofBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                        $sigB64 = [Convert]::ToBase64String($sigBytes)
+                        
+                        # 4. Ottieni la chiave pubblica PEM
+                        $pubKeyPem = Get-PublicKeyPem $cert
+                        
+                        # 5. Invia al server PKI per ottenere il JWT
+                        $oidcUrl = "https://localhost:8080/api/oidc/token"
+                        $oidcPayload = @{
+                            challenge_id = $challengeId
+                            signature = $sigB64
+                            public_key_pem = $pubKeyPem
+                            proof_string = $proofString
+                        }
+                        
+                        $oidcResp = Invoke-RestMethod -Uri $oidcUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $oidcPayload -Compress) -TimeoutSec 15
+                        
+                        $responseObj = @{
+                            status = "success"
+                            token = $oidcResp.access_token
+                            access_token = $oidcResp.access_token
+                        }
+                        Write-Host "[API] /oidc/token completato con successo per CN=$cn" -ForegroundColor Green
+                    } catch {
+                        $statusCode = 500
+                        $responseObj = @{ status = "error"; message = $_.Exception.Message }
+                        Write-Host "[API] /oidc/token fallito per CN=$cn : $_" -ForegroundColor Red
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/sign") {

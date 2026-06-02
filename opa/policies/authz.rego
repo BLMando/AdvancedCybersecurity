@@ -107,11 +107,22 @@ valid_action if {
 
 # MongoDB handshake / auth / admin commands — always allowed
 allow if {
-	action_name in {"hello", "isMaster", "saslStart", "saslContinue", "buildinfo", "buildInfo"}
+	action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo"}
 }
 
 allow if {
 	action_name in {"ping", "getLog", "getCmdLineOpts", "serverStatus"}
+}
+
+allow if {
+	action_name == "saslStart"
+	not is_mongodb_oidc
+}
+
+allow if {
+	action_name == "saslStart"
+	is_mongodb_oidc
+	valid_oidc_token
 }
 
 # When mongo_proxy can't decode the wire protocol (e.g. OP_MSG), the
@@ -675,4 +686,241 @@ test_doctor_billing_view_denied if {
 			"query": "{}"
 		}
 	}
+}
+
+# ─── OIDC Federated mTLS & RFC 8705 Token Binding ─────────────────────────────
+
+is_mongodb_oidc if {
+	input.parsed_body.query.mechanism == "MONGODB-OIDC"
+} else if {
+	input.parsed_body.mechanism == "MONGODB-OIDC"
+}
+
+oidc_payload_field := val if {
+	val := input.parsed_body.query.payload
+	val != ""
+} else := val if {
+	val := input.parsed_body.payload
+	val != ""
+} else := ""
+
+cert_der_bytes(pem_str) := der if {
+	clean1 := replace(pem_str, "-----BEGIN CERTIFICATE-----", "")
+	clean2 := replace(clean1, "-----END CERTIFICATE-----", "")
+	clean3 := replace(clean2, "\n", "")
+	clean_pem := replace(clean3, "\r", "")
+	der := base64.decode(clean_pem)
+}
+
+get_cert_cn(cert) := val if {
+	cns := object.get(cert.Subject, "CommonName", [])
+	val := cns[0]
+	val != ""
+} else := val if {
+	names := object.get(cert.Subject, "Names", [])
+	name := names[_]
+	name.Type == [2, 5, 4, 3]
+	val := name.Value
+	val != ""
+}
+
+cert_subject_cn := cn if {
+	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem != ""
+	certs := crypto.x509.parse_certificates(cert_pem)
+	cert := certs[0]
+	cn := get_cert_cn(cert)
+}
+
+extract_jwt_from_payload(payload_val) := token if {
+	is_string(payload_val)
+	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, payload_val)
+	token := payload_val
+} else := token if {
+	is_string(payload_val)
+	decoded := base64.decode(payload_val)
+	json.is_valid(decoded)
+	parsed := json.unmarshal(decoded)
+	token := parsed.jwt
+} else := token if {
+	is_string(payload_val)
+	decoded := base64.decode(payload_val)
+	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
+	token := decoded
+} else := token if {
+	is_object(payload_val)
+	base64_data := payload_val["$binary"].base64
+	decoded := base64.decode(base64_data)
+	json.is_valid(decoded)
+	parsed := json.unmarshal(decoded)
+	token := parsed.jwt
+} else := token if {
+	is_object(payload_val)
+	base64_data := payload_val["$binary"].base64
+	decoded := base64.decode(base64_data)
+	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
+	token := decoded
+} else := "unknown"
+
+verify_oidc_jwt(token) := claims if {
+	jwks_resp := http.send({
+		"method": "get",
+		"url": "https://identity-pki:8080/.well-known/jwks.json",
+		"tls_insecure_skip_verify": true,
+		"timeout": 1000000000
+	})
+	jwks_resp.status_code == 200
+	jwks := json.marshal(jwks_resp.body)
+	
+	io.jwt.verify_rs256(token, jwks)
+	[_, claims, _] := io.jwt.decode(token)
+}
+
+trusted_proxies := {
+	"envoy",
+	"identity-pki"
+}
+
+valid_oidc_token if {
+	payload_val := oidc_payload_field
+	payload_val != ""
+	
+	token := extract_jwt_from_payload(payload_val)
+	token != "unknown"
+	
+	claims := verify_oidc_jwt(token)
+	
+	# Verify expiration
+	claims.exp > time.now_ns() / 1000000000
+	
+	is_valid_token_binding(claims, cert_subject_cn)
+}
+
+is_valid_token_binding(claims, cert_subject_cn) if {
+	# Direct client: CN matches sub, cert fingerprint matches cnf
+	cert_subject_cn == claims.sub
+	
+	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem != ""
+	
+	cert_der := cert_der_bytes(cert_pem)
+	client_cert_hex := crypto.sha256(cert_der)
+	
+	claims.cnf["x5t#S256_hex"] == client_cert_hex
+}
+
+is_valid_token_binding(claims, cert_subject_cn) if {
+	# Trusted proxy: connection is from a trusted gateway or service
+	cert_subject_cn in trusted_proxies
+}
+
+
+# ─── OIDC Verification Tests ──────────────────────────────────────────────
+
+test_oidc_valid if {
+	allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "paolo.roselli",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "saslStart",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
+		}
+	}
+	with verify_oidc_jwt as {"sub": "paolo.roselli", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
+	with cert_subject_cn as "paolo.roselli"
+	with cert_der_bytes as "mock-der"
+	with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_invalid_cert_denied if {
+	not allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "paolo.roselli",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "saslStart",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
+		}
+	}
+	with verify_oidc_jwt as {"sub": "paolo.roselli", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
+	with cert_subject_cn as "paolo.roselli"
+	with cert_der_bytes as "mock-der"
+	with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_expired_token_denied if {
+	not allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "paolo.roselli",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "saslStart",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
+		}
+	}
+	with verify_oidc_jwt as {"sub": "paolo.roselli", "role": "doctor", "exp": 100000, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
+	with cert_subject_cn as "paolo.roselli"
+	with cert_der_bytes as "mock-der"
+	with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_wrong_cn_denied if {
+	not allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "paolo.roselli",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "saslStart",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
+		}
+	}
+	with verify_oidc_jwt as {"sub": "attacker.name", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
+	with cert_subject_cn as "paolo.roselli"
+	with cert_der_bytes as "mock-der"
+	with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_trusted_proxy_valid if {
+	allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "envoy",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "saslStart",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
+		}
+	}
+	with verify_oidc_jwt as {"sub": "paolo.roselli", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
+	with cert_subject_cn as "envoy"
 }
