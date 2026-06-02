@@ -75,6 +75,7 @@ services:
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy/lua:/etc/envoy/lua:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
       - envoy-logs:/var/log/envoy
@@ -131,6 +132,7 @@ services:
       - --server
       - --addr=0.0.0.0:8181
       - --set=plugins.envoy_ext_authz_grpc.addr=:9002
+      - --set=plugins.envoy_ext_authz_grpc.path=envoy/authz/main
       - --log-level=info
       - /policies
     networks:
