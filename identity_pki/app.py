@@ -185,6 +185,60 @@ def create_app(data_dir=None) -> Flask:
             }
         )
 
+    @app.post("/api/enroll")
+    def api_enroll_delegated():
+        """Delegate hardware enrollment request to the host local agent."""
+        payload = request.get_json(silent=True) or {}
+        user = payload.get("common_name") or payload.get("user")
+        role = payload.get("role")
+        department = payload.get("department")
+        
+        if not user:
+            return error_response("User CN is required", 400)
+            
+        import urllib.request
+        import urllib.error
+        
+        agent_url = "http://host.docker.internal:9090/enroll"
+        agent_payload = {
+            "common_name": user,
+            "role": role,
+            "department": department
+        }
+        
+        req = urllib.request.Request(
+            agent_url,
+            data=json.dumps(agent_payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        
+        try:
+            print(f"[DEBUG] Delegating enrollment to agent on {agent_url} for {user}...")
+            with urllib.request.urlopen(req, timeout=60) as response:
+                resp_data = response.read().decode('utf-8')
+                return jsonify(json.loads(resp_data)), response.status
+        except urllib.error.HTTPError as e:
+            resp_data = e.read().decode('utf-8')
+            try:
+                err_json = json.loads(resp_data)
+            except:
+                err_json = {"message": resp_data}
+            return jsonify({
+                "status": "error",
+                "message": f"Local Agent returned status {e.code}: {err_json.get('message', resp_data)}"
+            }), e.code
+        except urllib.error.URLError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"ZTA Local Agent is not running or unreachable on port 9090 on the host: {e.reason}"
+            }), 502
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Delegation error: {e}"
+            }), 500
+
     @app.post("/api/verify")
     def api_verify_identity():
         """Verify a hardware-bound identity proof."""

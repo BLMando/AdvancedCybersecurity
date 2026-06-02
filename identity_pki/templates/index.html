@@ -39,23 +39,17 @@
     <div id="tab-enroll" class="tab-content active">
       <section class="panel-grid">
         <section class="panel">
-          <h2>CSR Upload & Signing</h2>
+          <h2>Zero Trust Auto-Enrollment</h2>
           <div id="error-box" class="error-box" style="display: none;"></div>
           <div id="success-box" class="success-box" style="display: none;"></div>
 
           <form id="csr-form" class="form-grid">
             <label style="grid-column: span 2;">
-              <span>CSR File (PEM)</span>
-              <textarea id="csr-pem" placeholder="-----BEGIN CERTIFICATE REQUEST-----&#10;...&#10;-----END CERTIFICATE REQUEST-----" required style="font-family: monospace; font-size: 12px; min-height: 120px;"></textarea>
-              <small>Incolla il contenuto del file .csr generato da scripts/generate_client_csr.py</small>
-            </label>
-
-            <label>
               <span>Utente (CN)</span>
               <input type="text" id="user" placeholder="dr_mario_rossi" required>
             </label>
 
-            <label>
+            <label style="grid-column: span 2;">
               <span>Ruolo</span>
               <select id="role">
                 {% for key, role in roles.items() %}
@@ -69,75 +63,23 @@
               <input type="text" id="department" placeholder="Cardiologia">
             </label>
 
-            <div id="extracted-hardware" style="display: none; background: rgba(56, 189, 248, 0.08); padding: 1rem; border-radius: 14px; grid-column: span 2; border: 1px solid rgba(56, 189, 248, 0.2);">
-              <p style="margin: 0 0 0.5rem 0; font-weight: bold;">📋 Dettagli Hardware Estratti dal CSR:</p>
-              <small>
-                MAC: <code id="extracted-mac" style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;"></code> | 
-                CPU: <code id="extracted-cpu" style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;"></code>
-              </small>
-            </div>
-
-            <label style="display: none;" id="mac-cpu-fields">
-              <span>MAC Address (opzionale - sovrascrivi)</span>
-              <input type="text" id="hardware_mac" placeholder="00:1A:2B:3C:4D:5E">
-            </label>
-
-            <label style="display: none;" id="cpu-field">
-              <span>CPU Model (opzionale - sovrascrivi)</span>
-              <input type="text" id="hardware_cpu" placeholder="Intel(R) Core(TM) i7-10700K">
-            </label>
-
-            <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px;">
-              <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button type="submit" id="submit-btn" style="flex: 1; min-width: 200px;">Firma CSR & Provisioning</button>
-                <button type="button" id="auto-enroll-btn" class="ghost-link" style="flex: 1; min-width: 200px;">⚡ Auto-Enroll (Local Agent)</button>
-              </div>
+            <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px; margin-top: 1rem;">
+              <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">⚡ Avvia Auto-Enroll (Local Agent)</button>
               <p style="margin-top: 10px;">
-                <strong>Enrollment:</strong> La chiave privata rimane al sicuro nel tuo dispositivo, il server firma solo il CSR e crea automaticamente l'utente nel DB MongoDB.
+                <strong>Nota:</strong> Questa operazione contatterà l'Agente ZTA locale (porta 9090) in esecuzione sul tuo dispositivo per generare la chiave hardware nel Secure Enclave/TPM e registrarla.
               </p>
             </div>
           </form>
-
-          <div id="result-section" style="display: none; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #eee;">
-            <h3>✓ Certificato firmato & Utente Creato in DB</h3>
-            <div class="detail-grid">
-              <div><span>User</span><strong class="mono" id="result-user"></strong></div>
-              <div><span>Serial</span><strong class="mono" id="result-serial"></strong></div>
-              <div><span>Expires</span><strong class="mono" id="result-expires"></strong></div>
-              <div><span>Fingerprint SHA-256</span><strong class="mono" id="result-fingerprint"></strong></div>
-            </div>
-
-            <div style="margin-top: 1rem;">
-              <h4>SAN (Device Binding)</h4>
-              <pre id="result-san" style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 14px; overflow-x: auto; max-height: 120px; font-family: monospace;"></pre>
-            </div>
-
-            <div class="download-row">
-              <a id="download-cert-link" class="button-link" href="#" download>📥 Download Certificato</a>
-              <a id="download-metadata-link" class="button-link ghost" href="#" download>📋 Download Metadata</a>
-            </div>
-
-            <div class="actions">
-              <a class="ghost-link" href="{{ url_for('index') }}">Firma un altro CSR</a>
-            </div>
-          </div>
         </section>
 
         <section class="panel info-panel">
-          <h2>CSR-Based Enrollment</h2>
+          <h2>Automated Enrollment</h2>
           <ul>
-            <li><strong>Sicurezza:</strong> La coppia di chiavi viene generata nel Secure Enclave/TPM locale.</li>
-            <li><strong>CSR:</strong> Solo la richiesta di firma (CSR) viene trasmessa alla PKI.</li>
-            <li><strong>Device binding:</strong> MAC e CPU registrati all'interno delle estensioni X.509.</li>
-            <li><strong>Auto-Provisioning:</strong> L'utente viene registrato all'istante su MongoDB col ruolo specificato.</li>
+            <li><strong>Sicurezza Hardware:</strong> La coppia di chiavi viene generata e custodita all'interno del Secure Enclave (macOS) o del TPM 2.0 (Windows) locale.</li>
+            <li><strong>Zero Knowledge:</strong> La chiave privata rimane al sicuro nel dispositivo e non viene mai trasmessa al server né salvata su disco.</li>
+            <li><strong>Automazione Completa:</strong> L'agente locale dialoga con il server PKI per firmare il certificato e registrarlo nel portachiavi di sistema.</li>
+            <li><strong>Auto-Provisioning:</strong> L'utente viene registrato ed autorizzato all'istante all'interno di MongoDB.</li>
           </ul>
-          <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid rgba(148,163,184,0.1);">
-          <h3>Genera CSR localmente</h3>
-          <pre style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 14px; overflow-x: auto; font-size: 11px;">python scripts/generate_client_csr.py \
-  --cn paolo.roselli \
-  --department Cardiologia \
-  --mac "00:1A:2B:3C:4D:5E" \
-  --cpu "Apple M4"</pre>
         </section>
       </section>
     </div>
@@ -345,120 +287,10 @@
       }
     }
 
-    // Listen to CSR textarea changes
-    document.getElementById('csr-pem').addEventListener('input', (e) => {
-      const csrPem = e.target.value.trim();
-      if (csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
-        const { mac, cpu } = parseCSRForHardware(csrPem);
-        const extractedBox = document.getElementById('extracted-hardware');
-        const macField = document.getElementById('mac-cpu-fields');
-        const cpuField = document.getElementById('cpu-field');
-        
-        if (mac || cpu) {
-          if (mac) {
-            document.getElementById('extracted-mac').textContent = mac;
-            document.getElementById('hardware_mac').value = mac;
-          }
-          if (cpu) {
-            document.getElementById('extracted-cpu').textContent = cpu;
-            document.getElementById('hardware_cpu').value = cpu;
-          }
-          extractedBox.style.display = 'block';
-          macField.style.display = 'block';
-          cpuField.style.display = 'block';
-        }
-      }
-    });
-
-    // Handle form submission
+    // Handle Auto-Enroll form submission
     document.getElementById('csr-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-
-      const csrPem = document.getElementById('csr-pem').value.trim();
-      const user = document.getElementById('user').value;
-      const role = document.getElementById('role').value;
-      const department = document.getElementById('department').value;
-      const hardware_mac = document.getElementById('hardware_mac').value;
-      const hardware_cpu = document.getElementById('hardware_cpu').value;
-
-      const errorBox = document.getElementById('error-box');
-      const submitBtn = document.getElementById('submit-btn');
-      const resultSection = document.getElementById('result-section');
-
-      errorBox.style.display = 'none';
-      resultSection.style.display = 'none';
-
-      if (!csrPem) {
-        errorBox.textContent = '❌ Incolla il CSR nella textarea';
-        errorBox.style.display = 'block';
-        return;
-      }
-
-      try {
-        submitBtn.disabled = true;
-        submitBtn.textContent = '⏳ Firma e Provisioning...';
-
-        const response = await fetch('/api/csr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            csr: csrPem,
-            user: user,
-            role: role,
-            department: department,
-            mac: hardware_mac,
-            cpu: hardware_cpu,
-            is_hardware_csr: false
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Server error');
-        }
-
-        // Display result
-        // Check if certificate bundle is inside data.certificate or is returned flat
-        const certData = data.certificate || {
-          user: user,
-          serial_number: "Signed Successfully",
-          expires_at: "See downloaded cert",
-          fingerprint_sha256: "See downloaded cert",
-          san_dns: ["Hardware Attestation OK"]
-        };
-        
-        document.getElementById('result-user').textContent = certData.user || user;
-        document.getElementById('result-serial').textContent = certData.serial_number || 'N/A';
-        document.getElementById('result-expires').textContent = certData.expires_at || 'N/A';
-        document.getElementById('result-fingerprint').textContent = certData.fingerprint_sha256 || 'N/A';
-        document.getElementById('result-san').textContent = (certData.san_dns || []).join('\n') || 'Device Binding Complete';
-
-        // Setup downloads
-        const certificatePem = data.certificate_pem;
-        const metadataJson = JSON.stringify(certData, null, 2);
-
-        document.getElementById('download-cert-link').href = 'data:text/plain,' + encodeURIComponent(certificatePem);
-        document.getElementById('download-cert-link').download = `${user}.crt`;
-
-        document.getElementById('download-metadata-link').href = 'data:application/json,' + encodeURIComponent(metadataJson);
-        document.getElementById('download-metadata-link').download = `${user}_metadata.json`;
-
-        resultSection.style.display = 'block';
-        document.getElementById('csr-form').style.opacity = '0.5';
-        document.getElementById('csr-form').style.pointerEvents = 'none';
-
-      } catch (error) {
-        errorBox.textContent = `❌ ${error.message}`;
-        errorBox.style.display = 'block';
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Firma CSR & Provisioning';
-      }
-    });
-
-    // Handle Auto-Enroll via Local Agent
-    document.getElementById('auto-enroll-btn').addEventListener('click', async () => {
+      
       const user = document.getElementById('user').value.trim();
       const role = document.getElementById('role').value;
       const department = document.getElementById('department').value.trim();
@@ -466,7 +298,6 @@
       const errorBox = document.getElementById('error-box');
       const successBox = document.getElementById('success-box');
       const autoBtn = document.getElementById('auto-enroll-btn');
-      const submitBtn = document.getElementById('submit-btn');
 
       errorBox.style.display = 'none';
       successBox.style.display = 'none';
@@ -479,10 +310,9 @@
 
       try {
         autoBtn.disabled = true;
-        submitBtn.disabled = true;
         autoBtn.textContent = '⏳ Enrollment in corso...';
 
-        const response = await fetch('http://localhost:9090/enroll', {
+        const response = await fetch('/api/enroll', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -504,13 +334,17 @@
         // Disabilita form
         document.getElementById('csr-form').style.opacity = '0.5';
         document.getElementById('csr-form').style.pointerEvents = 'none';
+        
+        // Ricarica la lista degli utenti attivi nella scheda query
+        if (typeof loadActiveCertificates === 'function') {
+          await loadActiveCertificates();
+        }
       } catch (error) {
-        errorBox.textContent = `❌ Errore Local Agent: ${error.message}. Assicurati che lo ZTA Agent (macOS o Windows service) sia in esecuzione sulla porta 9090.`;
+        errorBox.textContent = `❌ Errore durante l'enrollment: ${error.message}`;
         errorBox.style.display = 'block';
       } finally {
         autoBtn.disabled = false;
-        submitBtn.disabled = false;
-        autoBtn.textContent = '⚡ Auto-Enroll (Local Agent)';
+        autoBtn.textContent = '⚡ Avvia Auto-Enroll (Local Agent)';
       }
     });
 
