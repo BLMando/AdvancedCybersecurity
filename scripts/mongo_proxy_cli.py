@@ -466,23 +466,94 @@ class ZTAMongoConnection:
                 self.proxy_session = ZTAProxySession(self.cn)
                 self.proxy_session.__enter__()
 
-                mongo_cred = get_mongo_credentials(self.cn, allow_admin_fallback=True)
                 role = get_user_role(self.cn)
 
-                info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} (ruolo: {role})...")
+                if hasattr(self.args, "oidc") and self.args.oidc:
+                    # OIDC Federated Authentication Flow
+                    import urllib.request
+                    import json
+                    
+                    jwt_token = None
+                    agent_url = "http://localhost:9090/oidc/token"
+                    payload = {"common_name": self.cn}
+                    
+                    info(f"Recupero token OIDC dall'agente locale all'indirizzo {agent_url}...")
+                    req = urllib.request.Request(
+                        agent_url,
+                        data=json.dumps(payload).encode('utf-8'),
+                        headers={'Content-Type': 'application/json'},
+                        method='POST'
+                    )
+                    try:
+                        with urllib.request.urlopen(req, timeout=8) as response:
+                            resp_data = json.loads(response.read().decode('utf-8'))
+                            jwt_token = resp_data.get("token") or resp_data.get("access_token")
+                    except Exception as ex:
+                        warn(f"Connessione all'agente fallita ({ex}). Tento fallback per ottenere il token...")
+                        # If agent fails, try calling flask backend directly using client cert files as a fallback
+                        try:
+                            import ssl
+                            ssl_context = ssl.create_default_context()
+                            ssl_context.check_hostname = False
+                            ssl_context.verify_mode = ssl.CERT_NONE
+                            
+                            pki_url = "https://localhost:8080/api/oidc/token"
+                            pki_req = urllib.request.Request(
+                                pki_url,
+                                data=json.dumps({"user": self.cn, "proof_string": "cli_attestation_proof"}).encode('utf-8'),
+                                headers={'Content-Type': 'application/json'},
+                                method='POST'
+                            )
+                            with urllib.request.urlopen(pki_req, context=ssl_context, timeout=8) as response:
+                                resp_data = json.loads(response.read().decode('utf-8'))
+                                jwt_token = resp_data.get("token") or resp_data.get("access_token")
+                        except Exception as ex2:
+                            raise Exception(f"Impossibile ottenere il token OIDC federato: {ex2}")
+                    
+                    if not jwt_token:
+                        raise Exception("L'agente locale non ha restituito alcun token OIDC valido.")
+                        
+                    from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
 
-                user = mongo_cred["user"]
-                password = mongo_cred["password"]
-                auth_source = "admin" if user == "admin" else MONGO_DB
-                uri = (
-                    f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
-                    f"?authSource={auth_source}&directConnection=true"
-                )
-                self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
-                mongo_info = {
-                    "user": user,
-                    "role": role
-                }
+                    class StaticTokenCallback(OIDCCallback):
+                        def __init__(self, token):
+                            self.token = token
+                        def fetch(self, context):
+                            return OIDCCallbackResult(access_token=self.token)
+
+                    callback_instance = StaticTokenCallback(jwt_token)
+                    
+                    info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} via MONGODB-OIDC...")
+                    uri = (
+                        f"mongodb://localhost:{self.proxy_session.port}/{MONGO_DB}"
+                        f"?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true"
+                    )
+                    self.client = MongoClient(
+                        uri,
+                        authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                        serverSelectionTimeoutMS=8000
+                    )
+                    mongo_info = {
+                        "user": f"oidc/{self.cn}",
+                        "role": role
+                    }
+                else:
+                    # Traditional SCRAM Flow
+                    mongo_cred = get_mongo_credentials(self.cn, allow_admin_fallback=True)
+                    info(f"Connessione al tunnel locale localhost:{self.proxy_session.port} (ruolo: {role})...")
+
+                    user = mongo_cred["user"]
+                    password = mongo_cred["password"]
+                    auth_source = "admin" if user == "admin" else MONGO_DB
+                    uri = (
+                        f"mongodb://{user}:{password}@localhost:{self.proxy_session.port}/{MONGO_DB}"
+                        f"?authSource={auth_source}&directConnection=true"
+                    )
+                    self.client = MongoClient(uri, serverSelectionTimeoutMS=8000)
+                    mongo_info = {
+                        "user": user,
+                        "role": role
+                    }
                 return self.client, mongo_info
             except Exception as e:
                 warn(f"Errore connessione tramite ZTA Agent ({e}). Fallback su connessione diretta con file...")
@@ -490,8 +561,73 @@ class ZTAMongoConnection:
 
         # Fallback a connessione diretta mTLS (es. Linux, o macOS/Windows senza agent running, o con flag --file)
         self.bundle = get_cert_bundle(self.cn, force_file=True)
-        self.client, mongo_info = build_mongo_client(self.cn, self.bundle, insecure=self.args.insecure)
-        return self.client, mongo_info
+        
+        if hasattr(self.args, "oidc") and self.args.oidc:
+            # Fallback OIDC via direct file
+            import urllib.request
+            import json
+            import ssl
+            
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            pki_url = "https://localhost:8080/api/oidc/token"
+            pki_req = urllib.request.Request(
+                pki_url,
+                data=json.dumps({"user": self.cn, "proof_string": "cli_attestation_proof"}).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            try:
+                with urllib.request.urlopen(pki_req, context=ssl_context, timeout=8) as response:
+                    resp_data = json.loads(response.read().decode('utf-8'))
+                    jwt_token = resp_data.get("token") or resp_data.get("access_token")
+            except Exception as ex2:
+                raise Exception(f"Impossibile ottenere il token OIDC federato: {ex2}")
+                
+            from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+
+            class StaticTokenCallback(OIDCCallback):
+                def __init__(self, token):
+                    self.token = token
+                def fetch(self, context):
+                    return OIDCCallbackResult(access_token=self.token)
+
+            callback_instance = StaticTokenCallback(jwt_token)
+            
+            role = get_user_role(self.cn)
+            info(f"Connessione diretta a Envoy {ENVOY_HOST}:{ENVOY_PORT} via MONGODB-OIDC (ruolo: {role})...")
+            
+            combined_pem = None
+            if self.bundle.key_path:
+                combined_pem = os.path.join(
+                    os.path.dirname(self.bundle.cert_path), f"{self.cn}_combined.pem"
+                )
+                with open(combined_pem, "w") as out:
+                    with open(self.bundle.cert_path) as c:
+                        out.write(c.read())
+                    with open(self.bundle.key_path) as k:
+                        out.write(k.read())
+            
+            self.client = MongoClient(
+                f"mongodb://{ENVOY_HOST}:{ENVOY_PORT}/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                tls=True,
+                tlsCertificateKeyFile=combined_pem,
+                tlsCAFile=str(CA_CERT) if CA_CERT.exists() else None,
+                tlsAllowInvalidCertificates=self.args.insecure or not CA_CERT.exists(),
+                tlsAllowInvalidHostnames=True,
+                serverSelectionTimeoutMS=8000
+            )
+            mongo_info = {
+                "user": f"oidc/{self.cn}",
+                "role": role
+            }
+            return self.client, mongo_info
+        else:
+            self.client, mongo_info = build_mongo_client(self.cn, self.bundle, insecure=self.args.insecure)
+            return self.client, mongo_info
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         import subprocess
@@ -1006,6 +1142,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--file", action="store_true",
         help="Forza caricamento cert da file (bypassa ZTA Agent)"
+    )
+    parser.add_argument(
+        "--oidc", action="store_true",
+        help="Abilita autenticazione federata OIDC (RFC 8705 Token Binding)"
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

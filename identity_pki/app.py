@@ -419,6 +419,12 @@ def create_app(data_dir=None) -> Flask:
         limit = int(payload.get("limit", 10))
         jwt_token = payload.get("jwt_token")
 
+        if not jwt_token:
+            return error_response(
+                "Autenticazione OIDC obbligatoria. L'autenticazione legacy (SCRAM/Password) è disabilitata.",
+                401
+            )
+
         if not user_cn or not collection_name:
             return error_response("User CN and Collection name are required", 400)
 
@@ -570,13 +576,19 @@ def create_app(data_dir=None) -> Flask:
                 if local_proxy_port:
                     client = MongoClient(
                         f"mongodb://host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
-                        authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                        authMechanismProperties={
+                            "OIDC_CALLBACK": callback_instance,
+                            "authzId": f"oidc/{user_cn}"
+                        },
                         serverSelectionTimeoutMS=8000
                     )
                 else:
                     client = MongoClient(
                         f"mongodb://envoy:10000/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
-                        authMechanismProperties={"OIDC_CALLBACK": callback_instance},
+                        authMechanismProperties={
+                            "OIDC_CALLBACK": callback_instance,
+                            "authzId": f"oidc/{user_cn}"
+                        },
                         tls=True,
                         tlsCertificateKeyFile=combined_pem_path,
                         tlsCAFile=ca_path,
