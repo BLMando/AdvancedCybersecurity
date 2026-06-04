@@ -258,16 +258,33 @@ function Stop-ProxySession ($sessionToken) {
 # Avvia l'API HTTP locale
 function Start-HttpServer {
     $http = [System.Net.HttpListener]::new()
-    $http.Prefixes.Add("http://localhost:$Port/")
+    $boundAll = $false
     try {
+        # Ascolta su tutte le interfacce per poter ricevere chiamate dai container Docker via host.docker.internal
+        # Nota: in Windows HttpListener richiede privilegi amministrativi per associarsi a '+' o '*'
+        $http.Prefixes.Add("http://+:$Port/")
         $http.Start()
+        $boundAll = $true
     } catch {
-        Write-Error "Impossibile avviare il server HTTP sulla porta $Port. Assicurati che non sia già in uso."
-        exit 1
+        Write-Host "    [WARN] Impossibile avviare il listener su tutte le interfacce (Accesso negato/Privilegi non sufficienti)." -ForegroundColor Yellow
+        Write-Host "    [WARN] Provo fallback su localhost (non sara' raggiungibile dai container Docker)." -ForegroundColor Yellow
+        $http.Close()
+        $http = [System.Net.HttpListener]::new()
+        $http.Prefixes.Add("http://localhost:$Port/")
+        try {
+            $http.Start()
+        } catch {
+            Write-Error "Impossibile avviare il server HTTP sulla porta $Port. Assicurati che non sia gia' in uso."
+            exit 1
+        }
     }
     
     Write-Host "="*70 -ForegroundColor Cyan
-    Write-Host " Windows ZTA TPM Agent Service Emulator attivo su http://localhost:$Port/" -ForegroundColor Cyan
+    if ($boundAll) {
+        Write-Host " Windows ZTA TPM Agent Service Emulator attivo su all interfaces (http://+:$Port/)" -ForegroundColor Cyan
+    } else {
+        Write-Host " Windows ZTA TPM Agent Service Emulator attivo su http://localhost:$Port/ (Localhost Only)" -ForegroundColor Cyan
+    }
     Write-Host " Inoltro traffico a Envoy su ${EnvoyHost}:${EnvoyPort}" -ForegroundColor Cyan
     Write-Host "="*70 -ForegroundColor Cyan
     Write-Host "Premere CTRL+C per arrestare il server.`n"
