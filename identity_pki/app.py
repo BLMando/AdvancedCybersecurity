@@ -227,10 +227,17 @@ def create_app(data_dir=None) -> Flask:
             "department": department
         }
         
+        from urllib.parse import urlparse
+        parsed_url = urlparse(agent_url)
+        host_port = parsed_url.port or 9090
+        
         req = urllib.request.Request(
             agent_url,
             data=json.dumps(agent_payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
+            headers={
+                'Content-Type': 'application/json',
+                'Host': f'localhost:{host_port}'
+            },
             method='POST'
         )
         
@@ -255,6 +262,7 @@ def create_app(data_dir=None) -> Flask:
                 "message": f"ZTA Local Agent is not running or unreachable on port 9090 on the host: {e.reason}"
             }), 502
         except Exception as e:
+            logger.exception("Delegation failed with unexpected error")
             return jsonify({
                 "status": "error",
                 "message": f"Delegation error: {e}"

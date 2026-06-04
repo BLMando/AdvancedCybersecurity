@@ -14,7 +14,20 @@ param (
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+try {
+    Add-Type -TypeDefinition '
+        using System.Net;
+        using System.Security.Cryptography.X509Certificates;
+        public class SSLBypass {
+            public static void Bypass() {
+                ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
+            }
+        }
+    '
+    [SSLBypass]::Bypass()
+} catch {
+    [SSLBypass]::Bypass()
+}
 
 
 # Path relativo alla directory dei certificati client (condivisa col container PKI)
@@ -31,13 +44,81 @@ function Get-CertPem ($cert) {
     return "-----BEGIN CERTIFICATE-----`n$certB64`n-----END CERTIFICATE-----"
 }
 
+# Helper per esportare una chiave pubblica RSA in formato SubjectPublicKeyInfo (SPKI) PEM su .NET Framework
+function Export-SpkiPublicKeyPem ($modulus, $exponent) {
+    $encodeInteger = {
+        param([byte[]]$bytes)
+        if ($bytes[0] -ge 0x80) {
+            $bytes = ,0x00 + $bytes
+        }
+        $len = $bytes.Length
+        if ($len -lt 128) {
+            $lenBytes = ,[byte]$len
+        } else {
+            if ($len -le 255) {
+                $lenBytes = 0x81, [byte]$len
+            } else {
+                $lenBytes = 0x82, [byte]($len -shr 8), [byte]($len -band 0xff)
+            }
+        }
+        return [byte[]](,0x02 + $lenBytes + $bytes)
+    }
+
+    $modDer = &$encodeInteger $modulus
+    $expDer = &$encodeInteger $exponent
+    
+    $innerLen = $modDer.Length + $expDer.Length
+    if ($innerLen -lt 128) {
+        $seqLenBytes = ,[byte]$innerLen
+    } else {
+        if ($innerLen -le 255) {
+            $seqLenBytes = 0x81, [byte]$innerLen
+        } else {
+            $seqLenBytes = 0x82, [byte]($innerLen -shr 8), [byte]($innerLen -band 0xff)
+        }
+    }
+    $rsaPubKeyDer = [byte[]](,0x30 + $seqLenBytes + $modDer + $expDer)
+    
+    # Wrap in BIT STRING (prepend 0x00 unused bits byte)
+    $bitStringVal = ,[byte]0x00 + $rsaPubKeyDer
+    $bitStringLen = $bitStringVal.Length
+    if ($bitStringLen -lt 128) {
+        $bitStringLenBytes = ,[byte]$bitStringLen
+    } else {
+        if ($bitStringLen -le 255) {
+            $bitStringLenBytes = 0x81, [byte]$bitStringLen
+        } else {
+            $bitStringLenBytes = 0x82, [byte]($bitStringLen -shr 8), [byte]($bitStringLen -band 0xff)
+        }
+    }
+    $bitStringDer = [byte[]](,0x03 + $bitStringLenBytes + $bitStringVal)
+    
+    # AlgorithmIdentifier per rsaEncryption: 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00
+    $algIdDer = 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00
+    
+    # Wrap in SEQUENCE
+    $spkiInnerLen = $algIdDer.Length + $bitStringDer.Length
+    if ($spkiInnerLen -lt 128) {
+        $spkiSeqLenBytes = ,[byte]$spkiInnerLen
+    } else {
+        if ($spkiInnerLen -le 255) {
+            $spkiSeqLenBytes = 0x81, [byte]$spkiInnerLen
+        } else {
+            $spkiSeqLenBytes = 0x82, [byte]($spkiInnerLen -shr 8), [byte]($spkiInnerLen -band 0xff)
+        }
+    }
+    $spkiDer = [byte[]](,0x30 + $spkiSeqLenBytes + $algIdDer + $bitStringDer)
+    
+    $b64 = [Convert]::ToBase64String($spkiDer, [Base64FormattingOptions]::InsertLineBreaks)
+    return "-----BEGIN PUBLIC KEY-----`n$b64`n-----END PUBLIC KEY-----"
+}
+
 # Helper per estrarre la chiave pubblica PEM dal certificato
 function Get-PublicKeyPem ($cert) {
-    $pubKeyBytes = $cert.PublicKey.EncodedKeyValue.RawData
     $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
     if ($rsa) {
-        $pubKeyPem = $rsa.ExportSubjectPublicKeyInfoPem()
-        return $pubKeyPem
+        $params = $rsa.ExportParameters($false)
+        return Export-SpkiPublicKeyPem $params.Modulus $params.Exponent
     }
     return $null
 }
@@ -342,8 +423,8 @@ function Start-HttpServer {
                         
                         # 2. Genera chiave nel TPM ed esegui la firma di attestazione
                         $hwScript = Join-Path (Split-Path $PSCommandPath -Parent) "hw_attestation.ps1"
-                        $res = & $hwScript -CN $cn
-                        $hwData = ConvertFrom-Json $res
+                        $hwRes = & $hwScript -CN $cn
+                        $hwData = ConvertFrom-Json $hwRes
                         
                         # Rileva MAC e CPU
                         $mac = ""
@@ -357,13 +438,10 @@ function Start-HttpServer {
                             $cpu = (Get-CimInstance Win32_Processor).Name.Trim()
                         } catch {}
                         
-                        # Costruisci PEM della chiave pubblica
-                        $rsa = [System.Security.Cryptography.RSA]::Create()
-                        $rsaParams = [System.Security.Cryptography.RSAParameters]::new()
-                        $rsaParams.Modulus = [Convert]::FromBase64String($hwData.modulus_b64)
-                        $rsaParams.Exponent = [Convert]::FromBase64String($hwData.exponent_b64)
-                        $rsa.ImportParameters($rsaParams)
-                        $pubKeyPem = $rsa.ExportSubjectPublicKeyInfoPem()
+                        # Costruisci PEM della chiave pubblica (usa la funzione custom compatibile con .NET Framework)
+                        $modRaw = [Convert]::FromBase64String($hwData.modulus_b64)
+                        $expRaw = [Convert]::FromBase64String($hwData.exponent_b64)
+                        $pubKeyPem = Export-SpkiPublicKeyPem $modRaw $expRaw
                         
                         # 3. Richiedi firma del certificato al server PKI
                         $enrollUrl = "https://localhost:8080/api/csr"
@@ -388,7 +466,7 @@ function Start-HttpServer {
                         $certObj = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
                         $certObj.Import($certBytes, $null, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet)
                         
-                        $store = New-Object System.Security.Cryptography.X509Store("My", "CurrentUser")
+                        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("My", "CurrentUser")
                         $store.Open("ReadWrite")
                         $store.Add($certObj)
                         $store.Close()
@@ -534,15 +612,22 @@ function Start-HttpServer {
             }
             
             # Invia risposta
-            $res.StatusCode = $statusCode
-            $res.ContentType = "application/json"
-            $res.Headers.Add("Access-Control-Allow-Origin", "*")
-            
-            $responseBody = ConvertTo-Json $responseObj -Depth 5 -Compress
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($responseBody)
-            $res.ContentLength64 = $buffer.Length
-            $res.OutputStream.Write($buffer, 0, $buffer.Length)
-            $res.OutputStream.Close()
+            try {
+                $res.StatusCode = $statusCode
+                $res.ContentType = "application/json"
+                if (-not $res.Headers["Access-Control-Allow-Origin"]) {
+                    $res.Headers.Add("Access-Control-Allow-Origin", "*")
+                }
+                
+                $responseBody = ConvertTo-Json $responseObj -Depth 5 -Compress
+                $buffer = [System.Text.Encoding]::UTF8.GetBytes($responseBody)
+                $res.ContentLength64 = $buffer.Length
+                $res.OutputStream.Write($buffer, 0, $buffer.Length)
+            } catch {
+                Write-Host "[API ERROR] Errore durante la scrittura della risposta: $_" -ForegroundColor Red
+            } finally {
+                try { $res.Close() } catch {}
+            }
         }
     } catch {
         # Server arrestato
