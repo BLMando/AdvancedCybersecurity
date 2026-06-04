@@ -376,6 +376,21 @@ function Start-HttpServer {
             $req = $ctx.Request
             $res = $ctx.Response
             
+            # Gestione CORS OPTIONS preflight a livello globale
+            if ($req.HttpMethod -eq "OPTIONS") {
+                try {
+                    $res.StatusCode = 204
+                    $res.Headers.Add("Access-Control-Allow-Origin", "*")
+                    $res.Headers.Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+                    $res.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                    $res.ContentLength64 = 0
+                } catch {}
+                finally {
+                    try { $res.OutputStream.Close() } catch {}
+                }
+                continue
+            }
+            
             # Leggi corpo della richiesta
             $reader = [System.IO.StreamReader]::new($req.InputStream, [System.Text.Encoding]::UTF8)
             $body = $reader.ReadToEnd()
@@ -599,6 +614,70 @@ function Start-HttpServer {
                     } else {
                         $statusCode = 404
                         $responseObj = @{ error = "Certificato per la firma non trovato" }
+                    }
+                }
+                elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/auth") {
+                    $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
+                    Write-Host "[API] Ricevuto /auth per CN=$cn" -ForegroundColor Gray
+                    
+                    try {
+                        # Trova il certificato nel Windows Store
+                        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                        if (-not $cert) {
+                            $cert = Get-FileCertWithKey $cn
+                        }
+                        if (-not $cert) {
+                            throw "Certificato non trovato per CN=$cn"
+                        }
+                        
+                        # Esegui handshake mTLS verso Envoy per verificare il funzionamento (porta 10001)
+                        $uri = [System.Uri]"https://localhost:10001/api/resource"
+                        $tcp = [System.Net.Sockets.TcpClient]::new($uri.Host, $uri.Port)
+                        # Ignora la convalida del certificato server per Envoy in dev
+                        $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, { $true })
+                        $certsCollection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new($cert)
+                        $ssl.AuthenticateAsClient($uri.Host, $certsCollection, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+                        
+                        $writer = [System.IO.StreamWriter]::new($ssl)
+                        $writer.WriteLine("GET /api/resource HTTP/1.1")
+                        $writer.WriteLine("Host: $($uri.Host):$($uri.Port)")
+                        $writer.WriteLine("Connection: close")
+                        $writer.WriteLine("")
+                        $writer.Flush()
+                        
+                        $reader = [System.IO.StreamReader]::new($ssl)
+                        $resp = $reader.ReadToEnd()
+                        $ssl.Close()
+                        $tcp.Close()
+                        
+                        # Estrai la prima riga dello status HTTP
+                        $statusLine = ($resp -split "`r`n")[0]
+                        $responseObj = @{
+                            status = "success"
+                            response = "Status: 200, Data: $statusLine"
+                        }
+                        Write-Host "[API] /auth completato con successo per CN=$cn" -ForegroundColor Green
+                    } catch {
+                        $statusCode = 500
+                        $responseObj = @{ status = "error"; message = $_.Exception.Message }
+                        Write-Host "[API] /auth fallito per CN=$cn : $_" -ForegroundColor Red
+                    }
+                }
+                elseif ($req.HttpMethod -eq "GET" -and $req.Url.AbsolutePath -eq "/proxy/status") {
+                    Write-Host "[API] Ricevuto GET /proxy/status" -ForegroundColor Gray
+                    $active = @()
+                    foreach ($pair in $script:Sessions) {
+                        $state = $pair.Value
+                        $active += @{
+                            common_name = $state.CN
+                            port = $state.Port
+                            expires_at = $state.ExpiresAt.ToString("o")
+                        }
+                    }
+                    $responseObj = @{
+                        status = "success"
+                        sessions = $active
                     }
                 }
                 else {
