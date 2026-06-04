@@ -36,7 +36,7 @@ parser = argparse.ArgumentParser(description="Seed ZTA Healthcare DB from CSV")
 parser.add_argument(
     "--uri",   default="mongodb://zta_user:zta_password@localhost:27017/zta_db?authSource=admin")
 parser.add_argument("--csv",   default="mongo/dataset/healthcare_dataset.csv")
-parser.add_argument("--limit", type=int, default=None,
+parser.add_argument("--limit", type=int, default=10,
                     help="Max rows to import")
 args = parser.parse_args()
 
