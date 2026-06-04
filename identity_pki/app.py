@@ -130,8 +130,12 @@ def create_app(data_dir=None) -> Flask:
         print(f"[DEBUG] MAC: {payload.get('mac_address')}, CPU: {payload.get('cpu_id')}")
         
         try:
-            # If it's a hardware CSR, csr_pem might be empty or same as signature
-            effective_csr = csr_pem if not is_hw else base64.b64decode(signature_b64).decode()
+            # If it's a hardware CSR, csr_pem might be empty or same as signature.
+            # Skip decoding binary signature if proof_string is present (native hardware proof case)
+            if proof_string:
+                effective_csr = ""
+            else:
+                effective_csr = csr_pem if not is_hw else base64.b64decode(signature_b64).decode()
             
             user_mac = payload.get("mac_address") or payload.get("mac")
             user_cpu = payload.get("cpu_id") or payload.get("cpu")

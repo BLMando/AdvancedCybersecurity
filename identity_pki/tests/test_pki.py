@@ -162,6 +162,45 @@ class PKIServiceTests(unittest.TestCase):
                     self.assertIsInstance(res, OIDCCallbackResult)
                     self.assertEqual(res.access_token, jwt_token)
 
+    def test_csr_enrollment_with_proof_string_and_is_hw(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app(data_dir=Path(temp_dir))
+            app.config["TESTING"] = True
+            
+            with app.test_client() as client:
+                # Mock service verify_proof and issue_hardware_bound_certificate
+                from unittest.mock import patch
+                with patch('identity_pki.pki.PKIService.verify_proof') as mock_verify, \
+                     patch('identity_pki.pki.PKIService.issue_hardware_bound_certificate') as mock_issue:
+                    
+                    mock_verify.return_value = {
+                        "user": "paolo.roselli",
+                        "role": "doctor",
+                        "department": "Cardiologia"
+                    }
+                    mock_issue.return_value = "-----BEGIN CERTIFICATE-----\nMOCK_CERT\n-----END CERTIFICATE-----"
+                    
+                    # We pass raw binary-like signature in signature (attestation_sig_b64)
+                    # which cannot be decoded to UTF-8
+                    response = client.post(
+                        "/api/csr",
+                        json={
+                            "user": "paolo.roselli",
+                            "role": "doctor",
+                            "department": "Cardiologia",
+                            "challenge_id": "mock_chal",
+                            "proof_string": "ZTA-CERT-BINDING|CN=paolo.roselli|TIME=2026-06-04T16:29:00Z",
+                            "attestation_sig_b64": "AP8B+QD4AP0B",  # Binary signature representation (fails to decode to UTF-8)
+                            "is_hardware_csr": True,
+                            "public_key_pem": "mock_pub"
+                        }
+                    )
+                    
+                    self.assertEqual(response.status_code, 200)
+                    payload = json.loads(response.data.decode("utf-8"))
+                    self.assertEqual(payload["status"], "signed")
+                    self.assertEqual(payload["certificate_pem"], "-----BEGIN CERTIFICATE-----\nMOCK_CERT\n-----END CERTIFICATE-----")
+
     def test_invalid_cn_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = PKIService(data_dir=Path(temp_dir))

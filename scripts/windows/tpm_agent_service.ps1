@@ -291,6 +291,7 @@ function Start-HttpServer {
                 
                 if ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/cert") {
                     $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
                     Write-Host "[API] Ricevuto /cert per CN=$cn" -ForegroundColor Gray
                     $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
                     if (-not $cert) {
@@ -309,8 +310,11 @@ function Start-HttpServer {
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/enroll") {
                     $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
                     $role = $jsonBody.role
+                    if (-not $role) { $role = "doctor" }
                     $dept = $jsonBody.department
+                    if (-not $dept) { $dept = "Cardiologia" }
                     Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept" -ForegroundColor Gray
                     
                     try {
@@ -354,7 +358,7 @@ function Start-HttpServer {
                             proof_string = $hwData.csr_pem
                             attestation_sig_b64 = $hwData.signature_b64
                             public_key_pem = $pubKeyPem
-                            is_hardware_csr = $true
+                            is_hardware_csr = $false
                             mac = $mac
                             cpu = $cpu
                         }
@@ -393,6 +397,7 @@ function Start-HttpServer {
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/proxy/start") {
                     $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
                     $ttl = if ($jsonBody.ttl_seconds) { $jsonBody.ttl_seconds } else { 900 }
                     Write-Host "[API] Ricevuto /proxy/start per CN=$cn, TTL=$ttl" -ForegroundColor Gray
                     
@@ -479,6 +484,7 @@ function Start-HttpServer {
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/sign") {
                     $cn = $jsonBody.common_name
+                    if (-not $cn) { $cn = $jsonBody.user }
                     $dataB64 = $jsonBody.data_b64
                     Write-Host "[API] Ricevuto /sign per CN=$cn" -ForegroundColor Gray
                     
