@@ -14,7 +14,7 @@ def main():
     
     # 1. Start proxy session and get OIDC token from the local agent
     agent_url = "http://localhost:9090/oidc/token"
-    payload = {"common_name": "paolo.roselli"}
+    payload = {"common_name": "mattia.mando"}
     
     print(f"\n[*] Fetching OIDC JWT token from local agent at {agent_url}...")
     req = urllib.request.Request(
@@ -36,11 +36,11 @@ def main():
         print(f"[✗] Connection to agent failed: {e}")
         print("Please check if the macOS agent is running on port 9090.")
         sys.exit(1)
-
+ 
     # 2. Call Web Console API endpoint to perform the query
     query_url = "https://localhost:8080/api/query"
     query_payload = {
-        "user": "paolo.roselli",
+        "user": "mattia.mando",
         "collection": "clinical_records",
         "filter": '{}',
         "jwt_token": jwt_token

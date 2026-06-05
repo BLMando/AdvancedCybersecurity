@@ -5,6 +5,56 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Identity PKI Console - CSR Enrollment & Query Console</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    /* Mode Toggles */
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #03111f;
+      border-color: transparent;
+    }
+    
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.8em;
+      font-weight: 700;
+    }
+    .badge-success {
+      background: rgba(34, 197, 94, 0.15);
+      color: #bff5cd;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .badge-danger {
+      background: rgba(251, 113, 133, 0.15);
+      color: #fecdd3;
+      border: 1px solid rgba(251, 113, 133, 0.3);
+    }
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fef3c7;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .badge-muted {
+      background: rgba(148, 163, 184, 0.15);
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+
+    /* Table styles */
+    #query-output-table tr:hover {
+      background: rgba(148, 163, 184, 0.05);
+    }
+    
+    #query-output-table th, #query-output-table td {
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    
+    #query-output-table th {
+      background: rgba(8, 15, 27, 0.5);
+    }
+  </style>
 </head>
 <body>
   <main class="shell">
@@ -120,11 +170,10 @@
               <input type="number" id="query-limit" value="5" min="1" max="50">
             </label>
 
-            <label style="grid-column: span 2;">
-              <span>Filtro Query (JSON)</span>
-              <textarea id="query-filter" style="font-family: monospace; font-size: 13px; min-height: 80px;">{"patient_id": "4f781fb9-ce9f-5313-913d-7ec2be6047fa"}</textarea>
-              <small id="filter-hint">Esempio per cartelle cliniche: {"patient_id": "4f781fb9-ce9f-5313-913d-7ec2be6047fa"} (La policy OPA impone il filtro patient_id per il ruolo medico)</small>
-            </label>
+            <!-- Simple Mode Container -->
+            <div id="simple-filter-container" style="grid-column: span 2;">
+              <!-- Dynamically populated fields -->
+            </div>
 
             <div class="actions" style="grid-column: span 2;">
               <button type="submit" id="query-submit-btn">Invia Query mTLS</button>
@@ -132,14 +181,29 @@
           </form>
 
           <div id="query-result-section" style="display: none; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(148, 163, 184, 0.15);">
-            <h3>Risultati della Query</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
+              <h3 style="margin: 0;">Risultati della Query</h3>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" id="result-view-table" class="tab-btn active" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">📋 Tabella</button>
+                <button type="button" id="result-view-json" class="tab-btn" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">{ } JSON</button>
+              </div>
+            </div>
+            
             <div class="query-meta">
               <div>Ruolo Rilevato: <strong id="query-resp-role" style="color: var(--accent);">doctor</strong></div>
               <div>Vista RLS Applicata: <strong id="query-resp-view" style="color: var(--accent);">v_clinical_doctor</strong></div>
               <div>Documenti: <strong id="query-resp-count">0</strong></div>
             </div>
             
-            <div id="query-output-json" class="query-result-box"></div>
+            <!-- Table View Container -->
+            <div id="query-output-table-container" style="overflow-x: auto; width: 100%; border-radius: 14px; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(8, 15, 27, 0.4); margin-top: 16px;">
+              <table id="query-output-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9em; color: var(--text);">
+                <!-- Table headers and rows will be generated dynamically -->
+              </table>
+            </div>
+
+            <!-- JSON View Container -->
+            <div id="query-output-json" class="query-result-box" style="display: none;"></div>
           </div>
         </section>
 
@@ -237,25 +301,348 @@
     });
 
     // Dynamic Filter Hints based on chosen collection
-    document.getElementById('query-collection').addEventListener('change', (e) => {
-      const coll = e.target.value;
-      const filterArea = document.getElementById('query-filter');
-      const hint = document.getElementById('filter-hint');
-      
-      if (coll === 'patients') {
-        filterArea.value = '{"age": {"$gt": 40}}';
-        hint.textContent = 'Esempio: {"age": {"$gt": 40}} | Cerca pazienti sopra i 40 anni.';
-      } else if (coll === 'clinical_records') {
-        filterArea.value = '{"patient_id": "4f781fb9-ce9f-5313-913d-7ec2be6047fa"}';
-        hint.textContent = 'Esempio: {"patient_id": "..."} | La policy OPA impone il filtro patient_id per il ruolo medico.';
-      } else if (coll === 'billing') {
-        filterArea.value = '{"payment_status": "pending"}';
-        hint.textContent = 'Esempio: {"payment_status": "pending"} | Cerca fatture in sospeso.';
-      } else {
-        filterArea.value = '{}';
-        hint.textContent = 'Filtro JSON vuoto {} recupererà tutti i record (soggetto a limiti e viste).';
+    // Update simple query input fields dynamically based on chosen collection
+    function updateSimpleQueryFields() {
+      const collection = document.getElementById('query-collection').value;
+      const container = document.getElementById('simple-filter-container');
+      let html = '';
+
+      if (collection === 'patients') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>Nome Paziente (Filtro parziale)</span>
+              <input type="text" id="simple-patient-name" placeholder="Es. Jane, Robert...">
+            </label>
+            <label>
+              <span>Genere</span>
+              <select id="simple-patient-gender">
+                <option value="">Tutti</option>
+                <option value="Male">Maschio (Male)</option>
+                <option value="Female">Femmina (Female)</option>
+              </select>
+            </label>
+            <label>
+              <span>Gruppo Sanguigno</span>
+              <select id="simple-patient-blood">
+                <option value="">Tutti</option>
+                <option value="A+">A+</option>
+                <option value="A-">A-</option>
+                <option value="B+">B+</option>
+                <option value="B-">B-</option>
+                <option value="AB+">AB+</option>
+                <option value="AB-">AB-</option>
+                <option value="O+">O+</option>
+                <option value="O-">O-</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'clinical_records') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-clinical-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Condizione Medica</span>
+              <select id="simple-clinical-condition">
+                <option value="">Tutte</option>
+                <option value="Cancer">Cancro (Cancer)</option>
+                <option value="Asthma">Asma (Asthma)</option>
+                <option value="Obesity">Obesità (Obesity)</option>
+                <option value="Diabetes">Diabete (Diabetes)</option>
+                <option value="Arthritis">Artrite (Arthritis)</option>
+                <option value="Hypertension">Ipertensione (Hypertension)</option>
+              </select>
+            </label>
+            <label>
+              <span>Risultato Test</span>
+              <select id="simple-clinical-result">
+                <option value="">Tutti</option>
+                <option value="Normal">Normale (Normal)</option>
+                <option value="Abnormal">Anormale (Abnormal)</option>
+                <option value="Inconclusive">Inconcludente (Inconclusive)</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'admissions') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-admission-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Tipo di Ricovero</span>
+              <select id="simple-admission-type">
+                <option value="">Tutti</option>
+                <option value="Emergency">Emergenza (Emergency)</option>
+                <option value="Urgent">Urgente (Urgent)</option>
+                <option value="Elective">Elettivo (Elective)</option>
+              </select>
+            </label>
+            <label>
+              <span>Stato Ricovero</span>
+              <select id="simple-admission-status">
+                <option value="">Tutti</option>
+                <option value="Admitted">Ricoverato (Admitted)</option>
+                <option value="Discharged">Dimesso (Discharged)</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'billing') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-billing-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Stato Pagamento</span>
+              <select id="simple-billing-status">
+                <option value="">Tutti</option>
+                <option value="Paid">Pagato (Paid)</option>
+                <option value="Unpaid">Non Pagato (Unpaid)</option>
+                <option value="Pending">In Sospeso (Pending)</option>
+              </select>
+            </label>
+            <label>
+              <span>Compagnia Assicuratrice (Filtro parziale)</span>
+              <input type="text" id="simple-billing-insurance" placeholder="Es. Cigna, Aetna...">
+            </label>
+          </div>
+        `;
+      } else if (collection === 'providers') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>Nome Fornitore (Filtro parziale)</span>
+              <input type="text" id="simple-provider-name" placeholder="Es. Dr. Smith, General Hospital...">
+            </label>
+            <label style="grid-column: span 2;">
+              <span>Tipo Fornitore</span>
+              <select id="simple-provider-type">
+                <option value="">Tutti</option>
+                <option value="doctor">Medico (Doctor)</option>
+                <option value="hospital">Ospedale (Hospital)</option>
+              </select>
+            </label>
+          </div>
+        `;
       }
+
+      container.innerHTML = html;
+    }
+
+    // Build filter payload (JSON)
+    function getFilterPayload() {
+      // Construct filter object dynamically
+      const collection = document.getElementById('query-collection').value;
+      const filterObj = {};
+
+      if (collection === 'patients') {
+        const name = document.getElementById('simple-patient-name').value.trim();
+        const gender = document.getElementById('simple-patient-gender').value;
+        const blood = document.getElementById('simple-patient-blood').value;
+
+        if (name) {
+          filterObj.full_name = { "$regex": name, "$options": "i" };
+        }
+        if (gender) {
+          filterObj.gender = gender;
+        }
+        if (blood) {
+          filterObj.blood_type = blood;
+        }
+      } else if (collection === 'clinical_records') {
+        const patientId = document.getElementById('simple-clinical-patient-id').value.trim();
+        const condition = document.getElementById('simple-clinical-condition').value;
+        const result = document.getElementById('simple-clinical-result').value;
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (condition) {
+          filterObj.medical_condition = condition;
+        }
+        if (result) {
+          filterObj.test_results = result;
+        }
+      } else if (collection === 'admissions') {
+        const patientId = document.getElementById('simple-admission-patient-id').value.trim();
+        const type = document.getElementById('simple-admission-type').value;
+        const status = document.getElementById('simple-admission-status').value;
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (type) {
+          filterObj.admission_type = type;
+        }
+        if (status) {
+          filterObj.status = status;
+        }
+      } else if (collection === 'billing') {
+        const patientId = document.getElementById('simple-billing-patient-id').value.trim();
+        const status = document.getElementById('simple-billing-status').value;
+        const insurance = document.getElementById('simple-billing-insurance').value.trim();
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (status) {
+          filterObj.payment_status = status;
+        }
+        if (insurance) {
+          filterObj.insurance_provider = { "$regex": insurance, "$options": "i" };
+        }
+      } else if (collection === 'providers') {
+        const name = document.getElementById('simple-provider-name').value.trim();
+        const type = document.getElementById('simple-provider-type').value;
+
+        if (name) {
+          filterObj.name = { "$regex": name, "$options": "i" };
+        }
+        if (type) {
+          filterObj.type = type;
+        }
+      }
+
+      return JSON.stringify(filterObj);
+    }
+
+    // Render results inside a beautiful HTML table
+    function renderQueryResults(results, collection) {
+      const table = document.getElementById('query-output-table');
+      if (!results || results.length === 0) {
+        table.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: var(--muted);">Nessun record trovato per i filtri specificati.</td></tr>`;
+        return;
+      }
+
+      let headers = [];
+      let rowRenderer = null;
+
+      if (collection === 'patients') {
+        headers = ['ID Paziente', 'Nome Completo', 'Età', 'Genere', 'Gruppo Sanguigno'];
+        rowRenderer = (row) => [
+          row._id || 'N/A',
+          row.full_name || 'N/A',
+          row.age !== undefined ? row.age : 'N/A',
+          row.gender || 'N/A',
+          row.blood_type || 'N/A'
+        ];
+      } else if (collection === 'clinical_records') {
+        headers = ['ID Record', 'ID Paziente', 'Condizione Medica', 'Terapia / Farmaco', 'Risultato Test', 'Data Registrazione'];
+        rowRenderer = (row) => {
+          let dateStr = 'N/A';
+          if (row.recorded_at) {
+            dateStr = row.recorded_at.$date ? new Date(row.recorded_at.$date).toLocaleDateString('it-IT') : new Date(row.recorded_at).toLocaleDateString('it-IT');
+          }
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            row.medical_condition || 'N/A',
+            row.medication || 'N/A',
+            row.test_results || 'N/A',
+            dateStr
+          ];
+        };
+      } else if (collection === 'admissions') {
+        headers = ['ID Ricovero', 'ID Paziente', 'Stato', 'Tipo', 'Entrata', 'Uscita', 'Camera'];
+        rowRenderer = (row) => {
+          let inDate = row.date_of_admission ? (row.date_of_admission.$date ? new Date(row.date_of_admission.$date).toLocaleDateString('it-IT') : new Date(row.date_of_admission).toLocaleDateString('it-IT')) : 'N/A';
+          let outDate = row.discharge_date ? (row.discharge_date.$date ? new Date(row.discharge_date.$date).toLocaleDateString('it-IT') : new Date(row.discharge_date).toLocaleDateString('it-IT')) : 'N/A';
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            `<span class="badge ${row.status === 'Admitted' ? 'badge-success' : 'badge-muted'}">${row.status || 'N/A'}</span>`,
+            row.admission_type || 'N/A',
+            inDate,
+            outDate,
+            row.room_number !== undefined ? row.room_number : (row.room !== undefined ? row.room : 'N/A')
+          ];
+        };
+      } else if (collection === 'billing') {
+        headers = ['ID Fattura', 'ID Paziente', 'Importo', 'Stato Pagamento', 'Assicurazione'];
+        rowRenderer = (row) => {
+          let amountStr = row.billing_amount !== undefined ? `€ ${parseFloat(row.billing_amount).toLocaleString('it-IT', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : 'N/A';
+          let statusClass = 'badge-muted';
+          if (row.payment_status === 'Paid') statusClass = 'badge-success';
+          if (row.payment_status === 'Unpaid') statusClass = 'badge-danger';
+          if (row.payment_status === 'Pending') statusClass = 'badge-warning';
+          
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            amountStr,
+            `<span class="badge ${statusClass}">${row.payment_status || 'N/A'}</span>`,
+            row.insurance_provider || 'N/A'
+          ];
+        };
+      } else if (collection === 'providers') {
+        headers = ['ID Fornitore', 'Nome / Struttura', 'Tipo'];
+        rowRenderer = (row) => [
+          row._id || 'N/A',
+          row.name || 'N/A',
+          row.type || 'N/A'
+        ];
+      } else {
+        headers = Object.keys(results[0]).filter(k => k !== '_id');
+        headers.unshift('ID');
+        rowRenderer = (row) => {
+          return headers.map(h => {
+            if (typeof row[h] === 'object') return JSON.stringify(row[h]);
+            return row[h] !== undefined ? row[h] : 'N/A';
+          });
+        };
+      }
+
+      let headerHtml = '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
+      headers.forEach(h => {
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent);">${h}</th>`;
+      });
+      headerHtml += '</tr></thead>';
+
+      let rowsHtml = '<tbody>';
+      results.forEach(row => {
+        rowsHtml += '<tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">';
+        const cells = rowRenderer(row);
+        cells.forEach(c => {
+          rowsHtml += `<td style="padding: 12px 16px; font-family: sans-serif; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
+        });
+        rowsHtml += '</tr>';
+      });
+      rowsHtml += '</tbody>';
+
+      table.innerHTML = headerHtml + rowsHtml;
+    }
+
+    // Toggle Result View event handlers
+    document.getElementById('result-view-table').addEventListener('click', () => {
+      document.getElementById('result-view-table').classList.add('active');
+      document.getElementById('result-view-json').classList.remove('active');
+      document.getElementById('query-output-table-container').style.display = 'block';
+      document.getElementById('query-output-json').style.display = 'none';
     });
+
+    document.getElementById('result-view-json').addEventListener('click', () => {
+      document.getElementById('result-view-json').classList.add('active');
+      document.getElementById('result-view-table').classList.remove('active');
+      document.getElementById('query-output-table-container').style.display = 'none';
+      document.getElementById('query-output-json').style.display = 'block';
+    });
+
+    document.getElementById('query-collection').addEventListener('change', (e) => {
+      // Update simple fields
+      updateSimpleQueryFields();
+    });
+
+    // Initialize simple query fields on load
+    updateSimpleQueryFields();
 
     // Parse CSR to extract hardware identifiers from SAN
     function parseCSRForHardware(csrPem) {
@@ -355,7 +742,7 @@
       const user = document.getElementById('query-user').value;
       const collection = document.getElementById('query-collection').value;
       const limit = document.getElementById('query-limit').value;
-      const filter = document.getElementById('query-filter').value;
+      const filter = getFilterPayload();
       
       const errBox = document.getElementById('query-error-box');
       const resSection = document.getElementById('query-result-section');
@@ -453,7 +840,12 @@
         document.getElementById('query-resp-view').textContent = data.translated_collection;
         document.getElementById('query-resp-count').textContent = data.count;
         
+        // Render JSON
         outputBox.textContent = JSON.stringify(data.results, null, 2);
+        
+        // Render Table
+        renderQueryResults(data.results, collection);
+        
         resSection.style.display = 'block';
         
       } catch (err) {
