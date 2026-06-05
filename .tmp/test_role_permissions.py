@@ -84,7 +84,8 @@ def query_opa(user, collection, command):
     
     try:
         # Give ample timeout because Splunk sidecar has 1s latency per call
-        with urllib.request.urlopen(req, timeout=5) as response:
+        # and Gunicorn has 2 workers (meaning requests queue up).
+        with urllib.request.urlopen(req, timeout=60) as response:
             resp_data = json.loads(response.read().decode('utf-8'))
             result = resp_data.get("result", {})
             return result.get("allow", False)
@@ -130,10 +131,10 @@ def main():
     failed = 0
     errors = 0
     
-    print(f"Esecuzione di {total} test in parallelo (max 20 thread)...")
+    print(f"Esecuzione di {total} test in parallelo (max 10 thread)...")
     
     results = []
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(test_single, role, user, coll, cmd) for role, user, coll, cmd in tasks]
         for fut in futures:
             results.append(fut.result())
