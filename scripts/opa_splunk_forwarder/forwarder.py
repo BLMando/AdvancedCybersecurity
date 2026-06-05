@@ -222,47 +222,6 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
     logger.info("Envoy log tailer stopped")
 
 
-MONGO_AUDIT_LOG_PATH = Path("/var/log/mongodb/audit.json")
-
-def tail_mongo_logs(stop_event: threading.Event) -> None:
-    """Background thread that tails the MongoDB audit log file."""
-    logger.info("MongoDB audit log tailer started, watching: %s", MONGO_AUDIT_LOG_PATH)
-    last_position = 0
-
-    while not stop_event.is_set():
-        try:
-            if MONGO_AUDIT_LOG_PATH.exists():
-                current_size = MONGO_AUDIT_LOG_PATH.stat().st_size
-                if current_size < last_position:
-                    last_position = 0
-                if current_size > last_position:
-                    with open(MONGO_AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
-                        f.seek(last_position)
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                hec_envoy.send_event(
-                                    log_entry,
-                                    index="zta_envoy",
-                                    sourcetype="mongo:audit",
-                                )
-                            except json.JSONDecodeError:
-                                pass
-                        last_position = f.tell()
-                    hec_envoy.flush()
-            else:
-                logger.debug("MongoDB audit log file not yet available: %s", MONGO_AUDIT_LOG_PATH)
-        except Exception as e:
-            logger.error("Error tailing MongoDB audit log: %s", e)
-
-        stop_event.wait(timeout=2.0)
-
-    logger.info("MongoDB audit log tailer stopped")
-
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -287,21 +246,16 @@ _TAILER_LOCK = Path("/tmp/envoy_tailer.lock")
 
 
 def _ensure_tailer():
-    """Start the log tailers once per host (avoids duplication under Gunicorn)."""
+    """Start the Envoy log tailer once per host (avoids duplication under Gunicorn)."""
     try:
         _TAILER_LOCK.touch(exist_ok=False)
-        
-        t1 = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
-        t1.start()
-        
-        t2 = threading.Thread(target=tail_mongo_logs, args=(_stop_event,), daemon=True)
-        t2.start()
-        
-        logger.info("Log tailers started (lock acquired)")
+        t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
+        t.start()
+        logger.info("Envoy log tailer started (lock acquired)")
     except FileExistsError:
-        logger.debug("Log tailers already running in another worker (lock exists)")
+        logger.debug("Envoy log tailer already running in another worker (lock exists)")
     except Exception as e:
-        logger.error("Failed to start log tailers: %s", e)
+        logger.error("Failed to start Envoy log tailer: %s", e)
 
 
 atexit.register(lambda: _TAILER_LOCK.unlink(missing_ok=True))
