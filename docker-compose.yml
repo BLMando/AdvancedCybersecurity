@@ -43,6 +43,7 @@ services:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - ./volumes/mongo/logs:/var/log/mongodb
     networks:
       - backend-net
 
@@ -108,6 +109,7 @@ services:
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
+      - ./volumes/mongo/logs:/var/log/mongodb:ro
     depends_on:
       - splunk
     networks:

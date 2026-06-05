@@ -13,6 +13,10 @@ if [ "$(id -u)" = '0' ]; then
     # Ensure data directory is writable by mongod
     chown -R mongod:mongod /data/db
     
+    # Ensure audit log directory is writable by mongod
+    mkdir -p /var/log/mongodb
+    chown -R mongod:mongod /var/log/mongodb
+    
     # Execute the command as the mongod user
     echo "[INFO] Starting mongod as mongod user..."
     exec runuser -u mongod -- "$@"

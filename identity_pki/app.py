@@ -656,6 +656,56 @@ def create_app(data_dir=None) -> Flask:
                 "error_type": "connection_failed",
                 "message": f"Connection failed: {e}"
             }), 500
+    @app.post("/api/alerts/anomaly")
+    def api_alerts_anomaly():
+        """Receive anomaly webhooks and execute active revocation."""
+        payload = request.get_json(silent=True) or {}
+        user_cn = payload.get("user")
+        if not user_cn:
+            return error_response("User CN is required", 400)
+
+        app.logger.warning(f"[Active Revocation] Received anomaly alert for user: {user_cn}")
+
+        # 1. Revoke user certificate
+        try:
+            service.revoke_certificate(user_cn)
+            app.logger.info(f"[Active Revocation] Certificate revoked for {user_cn}")
+        except Exception as e:
+            app.logger.error(f"[Active Revocation] Failed to revoke certificate for {user_cn}: {e}")
+
+        # 2. Inform OPA to deny future requests immediately
+        try:
+            import urllib.request
+            import json
+            req = urllib.request.Request(
+                "http://opa:8181/v1/data/splunk/anomalies",
+                data=json.dumps({user_cn: {"risk_boost": 100}}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="PUT"
+            )
+            with urllib.request.urlopen(req, timeout=3) as r:
+                pass
+            app.logger.info(f"[Active Revocation] Pushed anomaly to OPA blacklist for {user_cn}")
+        except Exception as e:
+            app.logger.error(f"[Active Revocation] Failed to push anomaly to OPA: {e}")
+
+        # 3. Terminate active proxy tunnels via Windows Agent on the host
+        try:
+            import urllib.request
+            import json
+            req = urllib.request.Request(
+                "http://host.docker.internal:9090/admin/revoke-user",
+                data=json.dumps({"common_name": user_cn}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3) as r:
+                pass
+            app.logger.info(f"[Active Revocation] Revoked active tunnels on host agent for {user_cn}")
+        except Exception as e:
+            app.logger.error(f"[Active Revocation] Failed to revoke active tunnels in host agent: {e}")
+
+        return jsonify({"status": "success", "message": f"Active revocation executed for {user_cn}"})
 
     return app
 

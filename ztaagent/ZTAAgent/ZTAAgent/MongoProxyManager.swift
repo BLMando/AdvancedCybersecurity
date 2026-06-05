@@ -249,6 +249,23 @@ class MongoProxyManager {
         }
     }
     
+    /// Stop all active sessions for a given CN and return the number of revoked sessions.
+    @discardableResult
+    func stopSessionsByCN(_ cn: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let tokensToRevoke = sessions.compactMap { (token, session) -> String? in
+            session.cn == cn ? token : nil
+        }
+        for token in tokensToRevoke {
+            sessions[token]?.stop()
+            sessions.removeValue(forKey: token)
+        }
+        print("[!] Revoked \(tokensToRevoke.count) session(s) for CN: \(cn)")
+        return tokensToRevoke.count
+    }
+
     func stopAllSessions() {
         lock.lock()
         defer { lock.unlock() }

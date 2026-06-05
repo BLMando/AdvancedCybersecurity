@@ -66,6 +66,8 @@ class LocalAPIServer {
             self.handleProxyStop(request: request, connection: connection)
         } else if method == "GET" && path.contains("/proxy/status") {
             self.handleProxyStatus(request: request, connection: connection)
+        } else if method == "POST" && path.contains("/admin/revoke-user") {
+            self.handleRevokeUser(request: request, connection: connection)
         } else {
             self.sendResponse(body: "{\"error\": \"Not Found\"}", status: "404 Not Found", connection: connection)
         }
@@ -348,6 +350,34 @@ class LocalAPIServer {
             self.sendResponse(body: responseString, connection: connection)
         } else {
             self.sendResponse(body: "{\"error\": \"Failed to serialize status\"}", status: "500 Error", connection: connection)
+        }
+    }
+
+    private func handleRevokeUser(request: String, connection: NWConnection) {
+        let components = request.components(separatedBy: "\r\n\r\n")
+        guard components.count > 1, let bodyData = components[1].data(using: .utf8) else {
+            self.sendResponse(body: "{\"error\": \"Invalid Body\"}", status: "400 Bad Request", connection: connection)
+            return
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: String],
+              let cn = json["common_name"], !cn.isEmpty else {
+            self.sendResponse(body: "{\"error\": \"Missing or empty common_name\"}", status: "400 Bad Request", connection: connection)
+            return
+        }
+
+        print("[API] Received /admin/revoke-user for CN=\(cn)")
+        let revokedCount = MongoProxyManager.shared.stopSessionsByCN(cn)
+
+        let responseDict: [String: Any] = [
+            "status": "success",
+            "message": "Revoked \(revokedCount) active session(s) for CN \(cn)"
+        ]
+        if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+           let responseString = String(data: responseData, encoding: .utf8) {
+            self.sendResponse(body: responseString, connection: connection)
+        } else {
+            self.sendResponse(body: "{\"status\": \"success\", \"message\": \"Revoked sessions for \(cn)\"}", connection: connection)
         }
     }
 }

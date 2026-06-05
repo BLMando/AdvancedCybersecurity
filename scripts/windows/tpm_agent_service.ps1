@@ -680,6 +680,23 @@ function Start-HttpServer {
                         sessions = $active
                     }
                 }
+                elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/admin/revoke-user") {
+                    $cn = $jsonBody.common_name
+                    Write-Host "[API] Ricevuto /admin/revoke-user per CN=$cn" -ForegroundColor Yellow
+                    $revokedCount = 0
+                    foreach ($pair in $script:Sessions) {
+                        $state = $pair.Value
+                        if ($state.CN -eq $cn) {
+                            if (Stop-ProxySession $pair.Key) {
+                                $revokedCount++
+                            }
+                        }
+                    }
+                    $responseObj = @{
+                        status = "success"
+                        message = "Revoked $revokedCount active session(s) for CN $cn"
+                    }
+                }
                 else {
                     $statusCode = 404
                     $responseObj = @{ error = "Endpoint non valido o metodo HTTP errato" }
