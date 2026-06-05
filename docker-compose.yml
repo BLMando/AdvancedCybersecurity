@@ -109,6 +109,8 @@ services:
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
+      - snort-logs:/var/log/snort:ro
+      - nftables-logs:/var/log/nftables:ro
     depends_on:
       - splunk
     networks:
@@ -144,6 +146,7 @@ services:
   snort:
     image: ciscotalos/snort3:latest
     container_name: snort
+    user: root
     restart: unless-stopped
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
@@ -153,11 +156,32 @@ services:
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules:/etc/snort/rules:ro
-      - ./volumes/snort/logs:/var/log/snort
+      - snort-logs:/var/log/snort
     command:
       - |
-        if ! snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort; then
-          echo "snort failed to start, container kept alive for debugging"
+        echo "[snort] Starting Snort 3 NIDS in IDS mode..."
+        
+        # Rileva dinamicamente le interfacce disponibili (eth0, services1, br-*)
+        INTERFACES=""
+        for iface in $$(cat /proc/net/dev | cut -d: -f1 | tr -d ' '); do
+          if [ "$$iface" = "eth0" ] || [ "$$iface" = "services1" ] || echo "$$iface" | grep -q "^br-"; then
+            if [ -z "$$INTERFACES" ]; then
+              INTERFACES="$$iface"
+            else
+              INTERFACES="$$INTERFACES:$$iface"
+            fi
+          fi
+        done
+        
+        echo "[snort] Detected interfaces: $$INTERFACES"
+        echo "[snort] Log output: /var/log/snort/alert_json.txt"
+        
+        mkdir -p /var/log/snort
+        
+        # Avvia Snort 3 in modalità IDS sulle interfacce rilevate usando afpacket
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "$$INTERFACES" -l /var/log/snort 2>&1; then
+          echo "[snort] ERROR: Snort failed to start"
+          echo "[snort] Container kept alive for debugging"
         fi
         tail -f /dev/null
 
@@ -166,24 +190,43 @@ services:
     image: alpine:latest
     container_name: nftables
     restart: unless-stopped
+    environment:
+      APPLY_NFT_RULES: "0"
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN        # Necessario per leggere /proc/kmsg (dmesg)
     network_mode: host
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
-      - ./volumes/nftables/logs:/var/log/nftables
+      - nftables-logs:/var/log/nftables
     command:
       - |
         apk add --no-cache nftables
+        
+        # Crea directory log
+        mkdir -p /var/log/nftables
+        
+        # Applica regole nftables
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
-          if ! nft -f /tmp/nftables.conf; then
-            echo "nftables rules failed, container kept alive for debugging"
+          if nft -f /tmp/nftables.conf; then
+            echo "[nftables] Rules applied successfully"
+            nft list ruleset
+          else
+            echo "[nftables] ERROR: Rules failed to apply"
           fi
         else
-          echo "nftables safe mode: rules not applied (set APPLY_NFT_RULES=1 to enable)"
+          echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
+        
+        # Avvia cattura log dal kernel ring buffer
+        # I log nftables con prefisso NFT_ vengono scritti su file
+        # per il forwarding a Splunk
+        echo "[nftables] Starting kernel log capture..."
+        cat /proc/kmsg 2>/dev/null | grep --line-buffered "NFT_" > /var/log/nftables/nft.log &
+        
+        echo "[nftables] Container ready. Logs at /var/log/nftables/nft.log"
         tail -f /dev/null
 
   splunk:
@@ -214,6 +257,8 @@ volumes:
   splunk-etc:
   mongdata:
   envoy-logs:
+  snort-logs:
+  nftables-logs:
 
 networks:
   frontend-net:

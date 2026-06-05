@@ -3,7 +3,9 @@ Envoy-to-Splunk Forwarder + Stats API for OPA
 
 Responsibilities:
   1) Forward Envoy access logs to Splunk HEC.
-  2) Expose a lightweight stats endpoint that OPA can query to enrich
+  2) Forward Snort 3 IDS alert logs to Splunk HEC.
+  3) Forward nftables firewall logs to Splunk HEC.
+  4) Expose a lightweight stats endpoint that OPA can query to enrich
      risk evaluation with recent activity from Splunk.
 
 OPA must not send decision logs to Splunk.
@@ -13,6 +15,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import threading
 import urllib.parse
 import urllib.request
@@ -34,6 +37,8 @@ hec_envoy = HEClient(
 )
 
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
+SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
+NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
 SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
@@ -220,6 +225,132 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
         stop_event.wait(timeout=2.0)
 
     logger.info("Envoy log tailer stopped")
+
+
+def extract_snort_fields(log_entry: dict) -> dict:
+    """Estrae i campi rilevanti dal JSON nativo di Snort 3."""
+    return {
+        "timestamp": log_entry.get("timestamp", ""),
+        "msg": log_entry.get("msg", "unknown"),
+        "src_addr": log_entry.get("src_addr", "0.0.0.0"),
+        "src_port": log_entry.get("src_port", 0),
+        "dst_addr": log_entry.get("dst_addr", "0.0.0.0"),
+        "dst_port": log_entry.get("dst_port", 0),
+        "proto": log_entry.get("proto", "unknown"),
+        "action": log_entry.get("action", "alert"),
+        "gid": log_entry.get("gid", 1),
+        "sid": log_entry.get("sid", 0),
+        "rev": log_entry.get("rev", 0),
+        "priority": log_entry.get("priority", 0),
+    }
+
+
+def tail_snort_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the Snort 3 alert_json log file."""
+    logger.info("Snort log tailer started, watching: %s", SNORT_LOG_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if SNORT_LOG_PATH.exists():
+                current_size = SNORT_LOG_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(SNORT_LOG_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                fields = extract_snort_fields(log_entry)
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_snort",
+                                    sourcetype="snort:alert_json",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from Snort log")
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("Snort log file not yet available: %s", SNORT_LOG_PATH)
+        except Exception as e:
+            logger.error("Error tailing Snort log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("Snort log tailer stopped")
+
+
+# Regex per parsare i log del kernel nftables
+# Formato: <N>NFT_DROP: IN=eth0 OUT= MAC=... SRC=1.2.3.4 DST=5.6.7.8
+#          LEN=52 ... PROTO=TCP SPT=12345 DPT=27017 ...
+NFT_LOG_PATTERN = re.compile(
+    r"(NFT_\w+):\s+"
+    r".*?IN=(\S*)\s+"
+    r".*?SRC=(\S+)\s+"
+    r".*?DST=(\S+)\s+"
+    r".*?PROTO=(\S+)\s*"
+    r"(?:.*?SPT=(\d+))?\s*"
+    r"(?:.*?DPT=(\d+))?"
+)
+
+
+def parse_nftables_line(line: str) -> dict | None:
+    """Parsa una riga di log kernel nftables in campi strutturati."""
+    match = NFT_LOG_PATTERN.search(line)
+    if not match:
+        return None
+    prefix = match.group(1)  # es. NFT_DROP, NFT_SSH_ACCEPT
+    action = "DROP" if "DROP" in prefix else "ACCEPT" if "ACCEPT" in prefix else prefix
+    return {
+        "prefix": prefix,
+        "action": action,
+        "in_iface": match.group(2) or "",
+        "src_ip": match.group(3) or "0.0.0.0",
+        "dst_ip": match.group(4) or "0.0.0.0",
+        "proto": match.group(5) or "unknown",
+        "src_port": int(match.group(6)) if match.group(6) else 0,
+        "dst_port": int(match.group(7)) if match.group(7) else 0,
+    }
+
+
+def tail_nftables_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails nftables kernel log output."""
+    logger.info("nftables log tailer started, watching: %s", NFTABLES_LOG_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if NFTABLES_LOG_PATH.exists():
+                current_size = NFTABLES_LOG_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(NFTABLES_LOG_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            fields = parse_nftables_line(line)
+                            if fields:
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_nftables",
+                                    sourcetype="nftables:log",
+                                )
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("nftables log file not yet available: %s", NFTABLES_LOG_PATH)
+        except Exception as e:
+            logger.error("Error tailing nftables log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("nftables log tailer stopped")
 
 
 @app.route("/health", methods=["GET"])
@@ -443,17 +574,29 @@ def _ensure_tailer():
     """Start background sync and log tailing once per host."""
     try:
         _TAILER_LOCK.touch(exist_ok=False)
+        # Thread: Envoy logs
         t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
         t.start()
         logger.info("Envoy log tailer started (lock acquired)")
 
+        # Thread: Splunk ↔ OPA sync
         t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
         t_sync.start()
         logger.info("Splunk to OPA sync thread started (lock acquired)")
+
+        # Thread: Snort logs
+        t_snort = threading.Thread(target=tail_snort_logs, args=(_stop_event,), daemon=True)
+        t_snort.start()
+        logger.info("Snort log tailer started")
+
+        # Thread: nftables logs
+        t_nft = threading.Thread(target=tail_nftables_logs, args=(_stop_event,), daemon=True)
+        t_nft.start()
+        logger.info("nftables log tailer started")
     except FileExistsError:
-        logger.debug("Envoy log tailer/sync already running in another worker (lock exists)")
+        logger.debug("Log tailer/sync already running in another worker (lock exists)")
     except Exception as e:
-        logger.error("Failed to start Envoy log tailer/sync: %s", e)
+        logger.error("Failed to start log tailer/sync: %s", e)
 
 
 atexit.register(lambda: _TAILER_LOCK.unlink(missing_ok=True))

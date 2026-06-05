@@ -1,6 +1,6 @@
 <dashboard version="1.1">
   <label>ZTA - Zero Trust Architecture Overview</label>
-  <description>Real-time monitoring of Envoy access logs and policy decisions (index zta_envoy)</description>
+  <description>Real-time monitoring of Envoy access logs, Snort IDS alerts, and nftables firewall activity (indexes: zta_envoy, zta_snort, zta_nftables)</description>
   <fieldset submitButton="false">
     <input type="time" token="timerange">
       <label>Time Range</label>
@@ -163,6 +163,88 @@
             | sort -_time
             | head 25
             | table _time user resource command decision risk_score device network_ip</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ═══ SNORT IDS ALERTS ═══ -->
+  <row>
+    <panel>
+      <title>Snort IDS — Alert Timeline</title>
+      <chart>
+        <search>
+          <query>index=zta_snort sourcetype="snort:alert_json"
+            | timechart span=5m count by msg</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Snort IDS — Top Alerts</title>
+      <chart>
+        <search>
+          <query>index=zta_snort sourcetype="snort:alert_json"
+            | top limit=10 msg
+            | table msg count percent</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══ NFTABLES FIREWALL ═══ -->
+  <row>
+    <panel>
+      <title>Firewall — Attività per Azione</title>
+      <chart>
+        <search>
+          <query>index=zta_nftables sourcetype="nftables:log"
+            | timechart span=5m count by action</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Firewall — Top IP Bloccati</title>
+      <chart>
+        <search>
+          <query>index=zta_nftables sourcetype="nftables:log" action="DROP"
+            | top limit=10 src_ip
+            | table src_ip count percent</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ═══ CORRELAZIONE CROSS-INDEX ═══ -->
+  <row>
+    <panel>
+      <title>Correlazione Snort Alert + OPA Deny (stesso IP)</title>
+      <table>
+        <search>
+          <query>index=zta_snort OR index=zta_envoy
+            | eval src=coalesce(src_addr, source_ip)
+            | eval event_type=if(index="zta_snort", "SNORT: ".msg, "OPA: ".decision)
+            | where index="zta_snort" OR decision="DENY"
+            | stats count by src event_type
+            | sort -count
+            | head 20</query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
