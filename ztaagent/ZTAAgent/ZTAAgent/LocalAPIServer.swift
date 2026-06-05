@@ -44,10 +44,18 @@ class LocalAPIServer {
         let method = parts[0]
         let path = parts[1]
         
+        // Handle CORS OPTIONS preflight requests globally
+        if method == "OPTIONS" {
+            self.sendOptionsResponse(connection: connection)
+            return
+        }
+        
         if method == "POST" && path.contains("/enroll") {
             self.handleEnroll(request: request, connection: connection)
         } else if method == "POST" && path.contains("/auth") {
             self.handleAuth(request: request, connection: connection)
+        } else if method == "POST" && path.contains("/oidc/token") {
+            self.handleOidcToken(request: request, connection: connection)
         } else if method == "POST" && path.contains("/sign") {
             self.handleSign(request: request, connection: connection)
         } else if method == "POST" && path.contains("/cert") {
@@ -61,6 +69,18 @@ class LocalAPIServer {
         } else {
             self.sendResponse(body: "{\"error\": \"Not Found\"}", status: "404 Not Found", connection: connection)
         }
+    }
+    
+    private func sendOptionsResponse(connection: NWConnection) {
+        let response = "HTTP/1.1 204 No Content\r\n" +
+                       "Access-Control-Allow-Origin: *\r\n" +
+                       "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
+                       "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
+                       "Content-Length: 0\r\n" +
+                       "Connection: close\r\n\r\n"
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed({ _ in
+            connection.cancel()
+        }))
     }
     
     private func handleEnroll(request: String, connection: NWConnection) {
@@ -84,6 +104,7 @@ class LocalAPIServer {
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } catch {
+                print("[!] Error during enrollment: \(error)")
                 self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
             }
         }
@@ -214,6 +235,38 @@ class LocalAPIServer {
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } catch {
+                self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
+            }
+        }
+    }
+
+    private func handleOidcToken(request: String, connection: NWConnection) {
+        let components = request.components(separatedBy: "\r\n\r\n")
+        guard components.count > 1, let bodyData = components[1].data(using: .utf8) else {
+            self.sendResponse(body: "{\"error\": \"Invalid Body\"}", status: "400 Bad Request", connection: connection)
+            return
+        }
+        
+        Task {
+            do {
+                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
+                let cn = json?["common_name"] ?? json?["user"] ?? "paolo.roselli"
+                
+                print("[*] Generazione token OIDC con biometric sblocco per: \(cn)")
+                let token = try await PKIClient.shared.getOidcToken(cn: cn)
+                
+                let responseDict = [
+                    "status": "success",
+                    "token": token,
+                    "access_token": token
+                ]
+                
+                if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+                   let responseString = String(data: responseData, encoding: .utf8) {
+                    self.sendResponse(body: responseString, connection: connection)
+                }
+            } catch {
+                print("[!] Error generating OIDC token: \(error)")
                 self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
             }
         }

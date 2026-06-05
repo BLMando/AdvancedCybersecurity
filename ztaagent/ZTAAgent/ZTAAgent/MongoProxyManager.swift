@@ -2,6 +2,9 @@ import Foundation
 import Network
 import LocalAuthentication
 import Security
+#if os(macOS)
+import AppKit
+#endif
 
 class MongoProxySession {
     let cn: String
@@ -91,26 +94,35 @@ class MongoProxySession {
         source.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self, !self.isStopped else { return }
             
-            if let data = data, !data.isEmpty {
-                destination.send(content: data, completion: .contentProcessed({ [weak self] error in
-                    if let error = error {
-                        print("[!] Errore di invio nel tunnel: \(error.localizedDescription)")
-                        source.cancel()
-                        destination.cancel()
-                    } else {
-                        self?.pipe(from: source, to: destination)
-                    }
-                }))
-            }
-            
-            if isComplete {
-                destination.send(content: nil, contentContext: .defaultStream, isComplete: true, completion: .contentProcessed({ _ in }))
-            }
-            
             if let error = error {
-                print("[!] Errore di ricezione nel tunnel: \(error.localizedDescription)")
+                let errDesc = error.localizedDescription
+                // Suppress common benign socket closure errors in logs
+                if !errDesc.contains("No message available on STREAM") &&
+                   !errDesc.contains("Operation canceled") &&
+                   !errDesc.contains("Socket is not connected") {
+                    print("[!] Errore di ricezione nel tunnel: \(errDesc)")
+                }
                 source.cancel()
                 destination.cancel()
+                return
+            }
+            
+            if (data != nil && !data!.isEmpty) || isComplete {
+                destination.send(content: data, contentContext: .defaultStream, isComplete: isComplete, completion: .contentProcessed({ [weak self] sendError in
+                    guard let self = self, !self.isStopped else { return }
+                    if let sendError = sendError {
+                        let errDesc = sendError.localizedDescription
+                        if !errDesc.contains("Operation canceled") && !errDesc.contains("Socket is not connected") {
+                            print("[!] Errore di invio nel tunnel: \(errDesc)")
+                        }
+                        source.cancel()
+                        destination.cancel()
+                    } else if !isComplete {
+                        self.pipe(from: source, to: destination)
+                    }
+                }))
+            } else if !isComplete {
+                self.pipe(from: source, to: destination)
             }
         }
     }
@@ -189,6 +201,11 @@ class MongoProxyManager {
         var error: NSError?
         
         if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            #if os(macOS)
+            await MainActor.run {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            #endif
             let reason = "Consenti a ZTA Agent di avviare il tunnel MongoDB per \(cn)"
             let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
             guard success else {

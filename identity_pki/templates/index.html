@@ -3,18 +3,67 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Identity PKI Console - CSR Enrollment</title>
+  <title>Identity PKI Console - CSR Enrollment & Query Console</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    /* Mode Toggles */
+    .tab-btn.active {
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #03111f;
+      border-color: transparent;
+    }
+    
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.8em;
+      font-weight: 700;
+    }
+    .badge-success {
+      background: rgba(34, 197, 94, 0.15);
+      color: #bff5cd;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .badge-danger {
+      background: rgba(251, 113, 133, 0.15);
+      color: #fecdd3;
+      border: 1px solid rgba(251, 113, 133, 0.3);
+    }
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fef3c7;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .badge-muted {
+      background: rgba(148, 163, 184, 0.15);
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+
+    /* Table styles */
+    #query-output-table tr:hover {
+      background: rgba(148, 163, 184, 0.05);
+    }
+    
+    #query-output-table th, #query-output-table td {
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+    
+    #query-output-table th {
+      background: rgba(8, 15, 27, 0.5);
+    }
+  </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">ZTA · PKI & Identity</p>
-        <h1>Enrollment certificati con CSR lato client e binding hardware.</h1>
+        <h1>Zero Trust Certificate Enrollment & Query Console</h1>
         <p class="lede">
-          Genera un CSR nel tuo dispositivo usando <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">scripts/generate_client_csr.py</code> o carica un CSR esistente.
-          La chiave privata rimane nel tuo dispositivo, il server firma solo il CSR.
+          Gestisci le identità crittografiche hardware-bound e interroga in modo sicuro le collezioni di MongoDB passando per il gateway mTLS di Envoy e il motore decisionale di OPA.
         </p>
       </div>
 
@@ -30,151 +79,592 @@
       </aside>
     </section>
 
-    <section class="panel-grid">
-      <section class="panel">
-        <h2>CSR Upload & Signing</h2>
-        <div id="error-box" class="error-box" style="display: none;"></div>
-        <div id="success-box" class="success-box" style="display: none;"></div>
+    <!-- Tab Controls -->
+    <div class="tabs-container">
+      <button id="btn-enroll" class="tab-btn active" onclick="switchTab('enroll')">🔑 Hardware CSR Enrollment</button>
+      <button id="btn-query" class="tab-btn" onclick="switchTab('query')">🔍 ZTA MongoDB Console</button>
+    </div>
 
-        <form id="csr-form" class="form-grid">
-          <label>
-            <span>CSR File (PEM)</span>
-            <textarea id="csr-pem" placeholder="-----BEGIN CERTIFICATE REQUEST-----&#10;...&#10;-----END CERTIFICATE REQUEST-----" required style="font-family: monospace; font-size: 12px; min-height: 150px;"></textarea>
-            <small>Incolla il contenuto del file .csr generato da scripts/generate_client_csr.py</small>
-          </label>
+    <!-- Enrollment Tab Content -->
+    <div id="tab-enroll" class="tab-content active">
+      <section class="panel-grid">
+        <section class="panel">
+          <h2>Zero Trust Auto-Enrollment</h2>
+          <div id="error-box" class="error-box" style="display: none;"></div>
+          <div id="success-box" class="success-box" style="display: none;"></div>
 
-          <label>
-            <span>Utente</span>
-            <input type="text" id="user" placeholder="dr_mario_rossi" required>
-          </label>
+          <form id="csr-form" class="form-grid">
+            <label style="grid-column: span 2;">
+              <span>Utente (CN)</span>
+              <input type="text" id="user" placeholder="dr_mario_rossi" required>
+            </label>
 
-          <label>
-            <span>Ruolo</span>
-            <select id="role">
-              {% for key, role in roles.items() %}
-              <option value="{{ key }}">{{ role.label }}</option>
-              {% endfor %}
-            </select>
-          </label>
+            <label style="grid-column: span 2;">
+              <span>Ruolo</span>
+              <select id="role">
+                {% for key, role in roles.items() %}
+                <option value="{{ key }}">{{ role.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
 
-          <label>
-            <span>Reparto / OU</span>
-            <input type="text" id="department" placeholder="Cardiologia">
-          </label>
+            <label style="grid-column: span 2;">
+              <span>Reparto / OU</span>
+              <input type="text" id="department" placeholder="Cardiologia">
+            </label>
 
-          <div id="extracted-hardware" style="display: none; background: #f0f7ff; padding: 1rem; border-radius: 4px; margin: 1rem 0; border-left: 4px solid #0066cc;">
-            <p style="margin: 0 0 0.5rem 0; font-weight: bold;">📋 Estratto dal CSR:</p>
-            <small>
-              MAC: <code id="extracted-mac" style="background: white; padding: 2px 4px; border-radius: 2px;"></code><br>
-              CPU: <code id="extracted-cpu" style="background: white; padding: 2px 4px; border-radius: 2px;"></code>
-            </small>
-          </div>
+            <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px; margin-top: 1rem;">
+              <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">⚡ Avvia Auto-Enroll (Local Agent)</button>
+              <p style="margin-top: 10px;">
+                <strong>Nota:</strong> Questa operazione contatterà l'Agente ZTA locale (porta 9090) in esecuzione sul tuo dispositivo per generare la chiave hardware nel Secure Enclave/TPM e registrarla.
+              </p>
+            </div>
+          </form>
+        </section>
 
-          <label style="display: none;" id="mac-cpu-fields">
-            <span>MAC Address (opzionale - sovrascrivi estratto)</span>
-            <input type="text" id="hardware_mac" placeholder="00:1A:2B:3C:4D:5E">
-            <small>Lascia vuoto per usare il valore dal CSR</small>
-          </label>
-
-          <label style="display: none;" id="cpu-field">
-            <span>CPU Model (opzionale - sovrascrivi estratto)</span>
-            <input type="text" id="hardware_cpu" placeholder="Intel(R) Core(TM) i7-10700K">
-            <small>Lascia vuoto per usare il valore dal CSR</small>
-          </label>
-
-          <div class="actions">
-            <button type="submit" id="submit-btn">Firma CSR</button>
-            <p>
-              <strong>Flusso:</strong><br>
-              1️⃣ Genera CSR localmente: <code style="background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">python scripts/generate_client_csr.py</code><br>
-              2️⃣ Incolla il CSR (file .csr) nella textarea<br>
-              3️⃣ I dati hardware (MAC e CPU) vengono estratti automaticamente dal CSR<br>
-              4️⃣ Inserisci user, role, department e opzionalmente sovrascrivi hardware<br>
-              5️⃣ Il server firma il CSR e ritorna il certificato
-            </p>
-          </div>
-        </form>
-
-        <div id="result-section" style="display: none; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #eee;">
-          <h3>✓ Certificato firmato</h3>
-          <div class="detail-grid">
-            <div><span>User</span><strong class="mono" id="result-user"></strong></div>
-            <div><span>Serial</span><strong class="mono" id="result-serial"></strong></div>
-            <div><span>Expires</span><strong class="mono" id="result-expires"></strong></div>
-            <div><span>Fingerprint SHA-256</span><strong class="mono" id="result-fingerprint"></strong></div>
-          </div>
-
-          <div style="margin-top: 1rem;">
-            <h4>SAN (Device Binding)</h4>
-            <pre id="result-san" style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto; max-height: 150px;"></pre>
-          </div>
-
-          <div class="download-row">
-            <a id="download-cert-link" class="button-link" href="#" download>📥 Download Certificato</a>
-            <a id="download-metadata-link" class="button-link ghost" href="#" download>📋 Download Metadata</a>
-          </div>
-
-          <div class="actions">
-            <a class="ghost-link" href="{{ url_for('index') }}">Firma un altro CSR</a>
-          </div>
-        </div>
+        <section class="panel info-panel">
+          <h2>Automated Enrollment</h2>
+          <ul>
+            <li><strong>Sicurezza Hardware:</strong> La coppia di chiavi viene generata e custodita all'interno del Secure Enclave (macOS) o del TPM 2.0 (Windows) locale.</li>
+            <li><strong>Zero Knowledge:</strong> La chiave privata rimane al sicuro nel dispositivo e non viene mai trasmessa al server né salvata su disco.</li>
+            <li><strong>Automazione Completa:</strong> L'agente locale dialoga con il server PKI per firmare il certificato e registrarlo nel portachiavi di sistema.</li>
+            <li><strong>Auto-Provisioning:</strong> L'utente viene registrato ed autorizzato all'istante all'interno di MongoDB.</li>
+          </ul>
+        </section>
       </section>
+    </div>
 
-      <section class="panel info-panel">
-        <h2>CSR-Based Enrollment</h2>
-        <ul>
-          <li><strong>Sicurezza:</strong> Keypair generata nel dispositivo del client, mai inviata al server</li>
-          <li><strong>CSR:</strong> Solo il Certificate Signing Request viene inviato al server</li>
-          <li><strong>Device binding:</strong> MAC e CPU nel certificato (SAN) per Zero-Trust</li>
-          <li><strong>Uniqueness:</strong> Non puoi avere due certificati per lo stesso CN</li>
-          <li><strong>X.509v3:</strong> BasicConstraints, KeyUsage, ExtendedKeyUsage, SubjectAlternativeName</li>
-          <li><strong>CA persistente:</strong> Riutilizzabile per più iscrizioni</li>
-          <li><strong>Metadata:</strong> Tracking enrollment_method, timestamp, hardware_info</li>
-        </ul>
-        <hr style="margin: 1rem 0; border: none; border-top: 1px solid #ddd;">
-        <h3>Genera CSR localmente</h3>
-        <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;">python scripts/generate_client_csr.py \
-  --cn dr_mario_rossi \
-  --department Cardiologia \
-  --mac "00:1A:2B:3C:4D:5E" \
-  --cpu "Intel(R) Core(TM) i7"</pre>
+    <!-- Query Tab Content -->
+    <div id="tab-query" class="tab-content">
+      <section class="panel-grid">
+        <section class="panel">
+          <h2>ZTA MongoDB Query Console</h2>
+          <div id="query-error-box" class="error-box" style="display: none;"></div>
+          <div id="query-success-box" class="success-box" style="display: none;"></div>
+
+          <form id="query-form" class="form-grid">
+            <label style="grid-column: span 2;">
+              <span>Seleziona Identità Client (CN)</span>
+              <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
+                <select id="query-user" required style="flex-grow: 1; min-width: 200px;">
+                  <option value="" disabled selected>Caricamento certificati...</option>
+                </select>
+                <span id="hardware-badge" style="display: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85em; font-weight: bold; white-space: nowrap;"></span>
+              </div>
+              <small>Mostra gli utenti registrati con certificati attivi in volumes/certs/client/</small>
+            </label>
+
+            <label>
+              <span>Collezione</span>
+              <select id="query-collection" required>
+                <option value="patients">patients (Anagrafica pazienti)</option>
+                <option value="clinical_records" selected>clinical_records (Cartelle cliniche)</option>
+                <option value="billing">billing (Fatturazione)</option>
+                <option value="providers">providers (Medici / Ospedali)</option>
+                <option value="admissions">admissions (Ricoveri)</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Limite Risultati</span>
+              <input type="number" id="query-limit" value="5" min="1" max="50">
+            </label>
+
+            <!-- Simple Mode Container -->
+            <div id="simple-filter-container" style="grid-column: span 2;">
+              <!-- Dynamically populated fields -->
+            </div>
+
+            <div class="actions" style="grid-column: span 2;">
+              <button type="submit" id="query-submit-btn">Invia Query mTLS</button>
+            </div>
+          </form>
+
+          <div id="query-result-section" style="display: none; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(148, 163, 184, 0.15);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
+              <h3 style="margin: 0;">Risultati della Query</h3>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" id="result-view-table" class="tab-btn active" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">📋 Tabella</button>
+                <button type="button" id="result-view-json" class="tab-btn" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">{ } JSON</button>
+              </div>
+            </div>
+            
+            <div class="query-meta">
+              <div>Ruolo Rilevato: <strong id="query-resp-role" style="color: var(--accent);">doctor</strong></div>
+              <div>Vista RLS Applicata: <strong id="query-resp-view" style="color: var(--accent);">v_clinical_doctor</strong></div>
+              <div>Documenti: <strong id="query-resp-count">0</strong></div>
+            </div>
+            
+            <!-- Table View Container -->
+            <div id="query-output-table-container" style="overflow-x: auto; width: 100%; border-radius: 14px; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(8, 15, 27, 0.4); margin-top: 16px;">
+              <table id="query-output-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9em; color: var(--text);">
+                <!-- Table headers and rows will be generated dynamically -->
+              </table>
+            </div>
+
+            <!-- JSON View Container -->
+            <div id="query-output-json" class="query-result-box" style="display: none;"></div>
+          </div>
+        </section>
+
+        <section class="panel info-panel">
+          <h2>Zero Trust Policy Gate</h2>
+          <p>
+            Ogni query inviata da questa console viene inoltrata a **Envoy** sulla porta <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">10000</code> utilizzando il certificato client dell'utente selezionato.
+          </p>
+          <ul>
+            <li><strong>Autenticazione hardware:</strong> Envoy convalida il certificato mTLS.</li>
+            <li><strong>Decisione OPA:</strong> Open Policy Agent valuta il ruolo, la collezione e l'IP sorgente per calcolare il punteggio di rischio.</li>
+            <li><strong>Tracciamento Splunk:</strong> Ogni decisione di policy (ALLOW/DENY) viene registrata con il CN dell'utente reale.</li>
+            <li><strong>Row-Level Security (RLS):</strong> La collezione viene tradotta dinamicamente nella vista MongoDB associata al ruolo dell'utente prima dell'esecuzione.</li>
+          </ul>
+        </section>
       </section>
-    </section>
+    </div>
   </main>
 
   <script>
+    // Tab switching function
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+      if (tabName === 'enroll') {
+        document.getElementById('btn-enroll').classList.add('active');
+        document.getElementById('tab-enroll').classList.add('active');
+      } else if (tabName === 'query') {
+        document.getElementById('btn-query').classList.add('active');
+        document.getElementById('tab-query').classList.add('active');
+        loadActiveCertificates(); // Load users when switching to query tab
+      }
+    }
+
+    // Load active certificates dynamically to fill CN dropdown
+    async function loadActiveCertificates() {
+      const select = document.getElementById('query-user');
+      try {
+        const response = await fetch('/api/admin/certificates');
+        const data = await response.json();
+        
+        // Store certs in global variable
+        window.activeCertificates = data;
+        
+        // Clear previous options
+        select.innerHTML = '<option value="" disabled selected>Seleziona un utente...</option>';
+        
+        if (!data || data.length === 0) {
+          select.innerHTML = '<option value="" disabled>Nessun certificato attivo trovato</option>';
+          document.getElementById('hardware-badge').style.display = 'none';
+          return;
+        }
+        
+        // Add users
+        data.forEach(cert => {
+          const opt = document.createElement('option');
+          opt.value = cert.user;
+          opt.textContent = `${cert.user} (${cert.role} - ${cert.is_hardware ? 'Hardware 🛡️' : 'Software 🧪'})`;
+          select.appendChild(opt);
+        });
+        
+        // Reset badge
+        document.getElementById('hardware-badge').style.display = 'none';
+      } catch (err) {
+        select.innerHTML = '<option value="" disabled>Errore caricamento certificati</option>';
+        document.getElementById('hardware-badge').style.display = 'none';
+        console.error('Failed to load certificates:', err);
+      }
+    }
+
+    // Update badge on CN select change
+    document.getElementById('query-user').addEventListener('change', (e) => {
+      const selectedCN = e.target.value;
+      const badge = document.getElementById('hardware-badge');
+      if (window.activeCertificates) {
+        const cert = window.activeCertificates.find(c => c.user === selectedCN);
+        if (cert) {
+          badge.style.display = 'inline-block';
+          if (cert.is_hardware) {
+            badge.textContent = '🛡️ Hardware Bound (Secure Enclave/TPM)';
+            badge.style.background = 'rgba(0, 200, 100, 0.2)';
+            badge.style.color = '#5affb0';
+            badge.style.border = '1px solid rgba(0, 200, 100, 0.3)';
+          } else {
+            badge.textContent = '🧪 Software Cert (Lab Mode)';
+            badge.style.background = 'rgba(0, 150, 255, 0.2)';
+            badge.style.color = '#5ad0ff';
+            badge.style.border = '1px solid rgba(0, 150, 255, 0.3)';
+          }
+          return;
+        }
+      }
+      badge.style.display = 'none';
+    });
+
+    // Dynamic Filter Hints based on chosen collection
+    // Update simple query input fields dynamically based on chosen collection
+    function updateSimpleQueryFields() {
+      const collection = document.getElementById('query-collection').value;
+      const container = document.getElementById('simple-filter-container');
+      let html = '';
+
+      if (collection === 'patients') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>Nome Paziente (Filtro parziale)</span>
+              <input type="text" id="simple-patient-name" placeholder="Es. Jane, Robert...">
+            </label>
+            <label>
+              <span>Genere</span>
+              <select id="simple-patient-gender">
+                <option value="">Tutti</option>
+                <option value="Male">Maschio (Male)</option>
+                <option value="Female">Femmina (Female)</option>
+              </select>
+            </label>
+            <label>
+              <span>Gruppo Sanguigno</span>
+              <select id="simple-patient-blood">
+                <option value="">Tutti</option>
+                <option value="A+">A+</option>
+                <option value="A-">A-</option>
+                <option value="B+">B+</option>
+                <option value="B-">B-</option>
+                <option value="AB+">AB+</option>
+                <option value="AB-">AB-</option>
+                <option value="O+">O+</option>
+                <option value="O-">O-</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'clinical_records') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-clinical-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Condizione Medica</span>
+              <select id="simple-clinical-condition">
+                <option value="">Tutte</option>
+                <option value="Cancer">Cancro (Cancer)</option>
+                <option value="Asthma">Asma (Asthma)</option>
+                <option value="Obesity">Obesità (Obesity)</option>
+                <option value="Diabetes">Diabete (Diabetes)</option>
+                <option value="Arthritis">Artrite (Arthritis)</option>
+                <option value="Hypertension">Ipertensione (Hypertension)</option>
+              </select>
+            </label>
+            <label>
+              <span>Risultato Test</span>
+              <select id="simple-clinical-result">
+                <option value="">Tutti</option>
+                <option value="Normal">Normale (Normal)</option>
+                <option value="Abnormal">Anormale (Abnormal)</option>
+                <option value="Inconclusive">Inconcludente (Inconclusive)</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'admissions') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-admission-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Tipo di Ricovero</span>
+              <select id="simple-admission-type">
+                <option value="">Tutti</option>
+                <option value="Emergency">Emergenza (Emergency)</option>
+                <option value="Urgent">Urgente (Urgent)</option>
+                <option value="Elective">Elettivo (Elective)</option>
+              </select>
+            </label>
+            <label>
+              <span>Stato Ricovero</span>
+              <select id="simple-admission-status">
+                <option value="">Tutti</option>
+                <option value="Admitted">Ricoverato (Admitted)</option>
+                <option value="Discharged">Dimesso (Discharged)</option>
+              </select>
+            </label>
+          </div>
+        `;
+      } else if (collection === 'billing') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>ID Paziente (UUID)</span>
+              <input type="text" id="simple-billing-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
+            </label>
+            <label>
+              <span>Stato Pagamento</span>
+              <select id="simple-billing-status">
+                <option value="">Tutti</option>
+                <option value="Paid">Pagato (Paid)</option>
+                <option value="Unpaid">Non Pagato (Unpaid)</option>
+                <option value="Pending">In Sospeso (Pending)</option>
+              </select>
+            </label>
+            <label>
+              <span>Compagnia Assicuratrice (Filtro parziale)</span>
+              <input type="text" id="simple-billing-insurance" placeholder="Es. Cigna, Aetna...">
+            </label>
+          </div>
+        `;
+      } else if (collection === 'providers') {
+        html = `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
+            <label style="grid-column: span 2;">
+              <span>Nome Fornitore (Filtro parziale)</span>
+              <input type="text" id="simple-provider-name" placeholder="Es. Dr. Smith, General Hospital...">
+            </label>
+            <label style="grid-column: span 2;">
+              <span>Tipo Fornitore</span>
+              <select id="simple-provider-type">
+                <option value="">Tutti</option>
+                <option value="doctor">Medico (Doctor)</option>
+                <option value="hospital">Ospedale (Hospital)</option>
+              </select>
+            </label>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // Build filter payload (JSON)
+    function getFilterPayload() {
+      // Construct filter object dynamically
+      const collection = document.getElementById('query-collection').value;
+      const filterObj = {};
+
+      if (collection === 'patients') {
+        const name = document.getElementById('simple-patient-name').value.trim();
+        const gender = document.getElementById('simple-patient-gender').value;
+        const blood = document.getElementById('simple-patient-blood').value;
+
+        if (name) {
+          filterObj.full_name = { "$regex": name, "$options": "i" };
+        }
+        if (gender) {
+          filterObj.gender = gender;
+        }
+        if (blood) {
+          filterObj.blood_type = blood;
+        }
+      } else if (collection === 'clinical_records') {
+        const patientId = document.getElementById('simple-clinical-patient-id').value.trim();
+        const condition = document.getElementById('simple-clinical-condition').value;
+        const result = document.getElementById('simple-clinical-result').value;
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (condition) {
+          filterObj.medical_condition = condition;
+        }
+        if (result) {
+          filterObj.test_results = result;
+        }
+      } else if (collection === 'admissions') {
+        const patientId = document.getElementById('simple-admission-patient-id').value.trim();
+        const type = document.getElementById('simple-admission-type').value;
+        const status = document.getElementById('simple-admission-status').value;
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (type) {
+          filterObj.admission_type = type;
+        }
+        if (status) {
+          filterObj.status = status;
+        }
+      } else if (collection === 'billing') {
+        const patientId = document.getElementById('simple-billing-patient-id').value.trim();
+        const status = document.getElementById('simple-billing-status').value;
+        const insurance = document.getElementById('simple-billing-insurance').value.trim();
+
+        if (patientId) {
+          filterObj.patient_id = patientId;
+        }
+        if (status) {
+          filterObj.payment_status = status;
+        }
+        if (insurance) {
+          filterObj.insurance_provider = { "$regex": insurance, "$options": "i" };
+        }
+      } else if (collection === 'providers') {
+        const name = document.getElementById('simple-provider-name').value.trim();
+        const type = document.getElementById('simple-provider-type').value;
+
+        if (name) {
+          filterObj.name = { "$regex": name, "$options": "i" };
+        }
+        if (type) {
+          filterObj.type = type;
+        }
+      }
+
+      return JSON.stringify(filterObj);
+    }
+
+    // Render results inside a beautiful HTML table
+    function renderQueryResults(results, collection) {
+      const table = document.getElementById('query-output-table');
+      if (!results || results.length === 0) {
+        table.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: var(--muted);">Nessun record trovato per i filtri specificati.</td></tr>`;
+        return;
+      }
+
+      let headers = [];
+      let rowRenderer = null;
+
+      if (collection === 'patients') {
+        headers = ['ID Paziente', 'Nome Completo', 'Età', 'Genere', 'Gruppo Sanguigno'];
+        rowRenderer = (row) => [
+          row._id || 'N/A',
+          row.full_name || 'N/A',
+          row.age !== undefined ? row.age : 'N/A',
+          row.gender || 'N/A',
+          row.blood_type || 'N/A'
+        ];
+      } else if (collection === 'clinical_records') {
+        headers = ['ID Record', 'ID Paziente', 'Condizione Medica', 'Terapia / Farmaco', 'Risultato Test', 'Data Registrazione'];
+        rowRenderer = (row) => {
+          let dateStr = 'N/A';
+          if (row.recorded_at) {
+            dateStr = row.recorded_at.$date ? new Date(row.recorded_at.$date).toLocaleDateString('it-IT') : new Date(row.recorded_at).toLocaleDateString('it-IT');
+          }
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            row.medical_condition || 'N/A',
+            row.medication || 'N/A',
+            row.test_results || 'N/A',
+            dateStr
+          ];
+        };
+      } else if (collection === 'admissions') {
+        headers = ['ID Ricovero', 'ID Paziente', 'Stato', 'Tipo', 'Entrata', 'Uscita', 'Camera'];
+        rowRenderer = (row) => {
+          let inDate = row.date_of_admission ? (row.date_of_admission.$date ? new Date(row.date_of_admission.$date).toLocaleDateString('it-IT') : new Date(row.date_of_admission).toLocaleDateString('it-IT')) : 'N/A';
+          let outDate = row.discharge_date ? (row.discharge_date.$date ? new Date(row.discharge_date.$date).toLocaleDateString('it-IT') : new Date(row.discharge_date).toLocaleDateString('it-IT')) : 'N/A';
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            `<span class="badge ${row.status === 'Admitted' ? 'badge-success' : 'badge-muted'}">${row.status || 'N/A'}</span>`,
+            row.admission_type || 'N/A',
+            inDate,
+            outDate,
+            row.room_number !== undefined ? row.room_number : (row.room !== undefined ? row.room : 'N/A')
+          ];
+        };
+      } else if (collection === 'billing') {
+        headers = ['ID Fattura', 'ID Paziente', 'Importo', 'Stato Pagamento', 'Assicurazione'];
+        rowRenderer = (row) => {
+          let amountStr = row.billing_amount !== undefined ? `€ ${parseFloat(row.billing_amount).toLocaleString('it-IT', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : 'N/A';
+          let statusClass = 'badge-muted';
+          if (row.payment_status === 'Paid') statusClass = 'badge-success';
+          if (row.payment_status === 'Unpaid') statusClass = 'badge-danger';
+          if (row.payment_status === 'Pending') statusClass = 'badge-warning';
+          
+          return [
+            row._id || 'N/A',
+            row.patient_id || 'N/A',
+            amountStr,
+            `<span class="badge ${statusClass}">${row.payment_status || 'N/A'}</span>`,
+            row.insurance_provider || 'N/A'
+          ];
+        };
+      } else if (collection === 'providers') {
+        headers = ['ID Fornitore', 'Nome / Struttura', 'Tipo'];
+        rowRenderer = (row) => [
+          row._id || 'N/A',
+          row.name || 'N/A',
+          row.type || 'N/A'
+        ];
+      } else {
+        headers = Object.keys(results[0]).filter(k => k !== '_id');
+        headers.unshift('ID');
+        rowRenderer = (row) => {
+          return headers.map(h => {
+            if (typeof row[h] === 'object') return JSON.stringify(row[h]);
+            return row[h] !== undefined ? row[h] : 'N/A';
+          });
+        };
+      }
+
+      let headerHtml = '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
+      headers.forEach(h => {
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent);">${h}</th>`;
+      });
+      headerHtml += '</tr></thead>';
+
+      let rowsHtml = '<tbody>';
+      results.forEach(row => {
+        rowsHtml += '<tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">';
+        const cells = rowRenderer(row);
+        cells.forEach(c => {
+          rowsHtml += `<td style="padding: 12px 16px; font-family: sans-serif; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
+        });
+        rowsHtml += '</tr>';
+      });
+      rowsHtml += '</tbody>';
+
+      table.innerHTML = headerHtml + rowsHtml;
+    }
+
+    // Toggle Result View event handlers
+    document.getElementById('result-view-table').addEventListener('click', () => {
+      document.getElementById('result-view-table').classList.add('active');
+      document.getElementById('result-view-json').classList.remove('active');
+      document.getElementById('query-output-table-container').style.display = 'block';
+      document.getElementById('query-output-json').style.display = 'none';
+    });
+
+    document.getElementById('result-view-json').addEventListener('click', () => {
+      document.getElementById('result-view-json').classList.add('active');
+      document.getElementById('result-view-table').classList.remove('active');
+      document.getElementById('query-output-table-container').style.display = 'none';
+      document.getElementById('query-output-json').style.display = 'block';
+    });
+
+    document.getElementById('query-collection').addEventListener('change', (e) => {
+      // Update simple fields
+      updateSimpleQueryFields();
+    });
+
+    // Initialize simple query fields on load
+    updateSimpleQueryFields();
+
     // Parse CSR to extract hardware identifiers from SAN
     function parseCSRForHardware(csrPem) {
       try {
-        // Extract base64 content from PEM
         const base64 = csrPem
           .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, '')
           .replace(/-----END CERTIFICATE REQUEST-----/g, '')
           .replace(/\s/g, '');
         
-        // Decode base64 to get binary data
         const binary = atob(base64);
-        
-        // Look for MAC- and CPU- patterns in the binary data
-        // These are DNS names in the SAN extension
-        const macMatch = binary.match(/MAC-([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})/);
-        const cpuMatch = binary.match(/CPU-([^\x00]+?)(?:\x00|$)/);
-        
-        // Alternative: search in the whole binary string for readable patterns
         let mac = null, cpu = null;
         
-        // Look for MAC pattern more carefully
         const macRegex = /MAC-([0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2})/gi;
-        const macMatch2 = macRegex.exec(binary);
-        if (macMatch2) {
-          mac = macMatch2[1];
+        const macMatch = macRegex.exec(binary);
+        if (macMatch) {
+          mac = macMatch[1];
         }
         
-        // Look for CPU pattern - it's usually readable text
         const cpuRegex = /CPU-([A-Za-z0-9()\-\s.®™]+)/;
-        const cpuMatch2 = cpuRegex.exec(binary);
-        if (cpuMatch2) {
-          cpu = cpuMatch2[1].trim();
+        const cpuMatch = cpuRegex.exec(binary);
+        if (cpuMatch) {
+          cpu = cpuMatch[1].trim();
         }
         
         return { mac, cpu };
@@ -184,106 +674,198 @@
       }
     }
 
-    // Listen to CSR textarea changes
-    document.getElementById('csr-pem').addEventListener('input', (e) => {
-      const csrPem = e.target.value.trim();
-      if (csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
-        const { mac, cpu } = parseCSRForHardware(csrPem);
-        const extractedBox = document.getElementById('extracted-hardware');
-        const macField = document.getElementById('mac-cpu-fields');
-        const cpuField = document.getElementById('cpu-field');
-        
-        if (mac || cpu) {
-          if (mac) {
-            document.getElementById('extracted-mac').textContent = mac;
-            document.getElementById('hardware_mac').value = mac;
-          }
-          if (cpu) {
-            document.getElementById('extracted-cpu').textContent = cpu;
-            document.getElementById('hardware_cpu').value = cpu;
-          }
-          extractedBox.style.display = 'block';
-          macField.style.display = 'block';
-          cpuField.style.display = 'block';
-        }
-      }
-    });
-
-    // Handle form submission
+    // Handle Auto-Enroll form submission
     document.getElementById('csr-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-
-      const csrPem = document.getElementById('csr-pem').value.trim();
-      const user = document.getElementById('user').value;
+      
+      const user = document.getElementById('user').value.trim();
       const role = document.getElementById('role').value;
-      const department = document.getElementById('department').value;
-      const hardware_mac = document.getElementById('hardware_mac').value;
-      const hardware_cpu = document.getElementById('hardware_cpu').value;
+      const department = document.getElementById('department').value.trim();
 
       const errorBox = document.getElementById('error-box');
-      const submitBtn = document.getElementById('submit-btn');
-      const resultSection = document.getElementById('result-section');
+      const successBox = document.getElementById('success-box');
+      const autoBtn = document.getElementById('auto-enroll-btn');
 
       errorBox.style.display = 'none';
-      resultSection.style.display = 'none';
+      successBox.style.display = 'none';
 
-      if (!csrPem) {
-        errorBox.textContent = '❌ Incolla il CSR nella textarea';
+      if (!user) {
+        errorBox.textContent = '❌ Inserisci l\'Utente (CN)';
         errorBox.style.display = 'block';
         return;
       }
 
       try {
-        submitBtn.disabled = true;
-        submitBtn.textContent = '⏳ Firma in corso...';
+        autoBtn.disabled = true;
+        autoBtn.textContent = '⏳ Enrollment in corso...';
 
-        const response = await fetch('/api/csr', {
+        const response = await fetch('/api/enroll', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            csr: csrPem,
-            user: user,
+            common_name: user,
             role: role,
-            department: department,
-            hardware_mac: hardware_mac,
-            hardware_cpu: hardware_cpu,
-          }),
+            department: department
+          })
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data.error || 'Server error');
+          throw new Error(data.message || 'L\'agente locale ha restituito un errore');
         }
 
-        // Display result
-        const bundle = data.certificate;
-        document.getElementById('result-user').textContent = bundle.user;
-        document.getElementById('result-serial').textContent = bundle.serial_number;
-        document.getElementById('result-expires').textContent = bundle.expires_at;
-        document.getElementById('result-fingerprint').textContent = bundle.fingerprint_sha256;
-        document.getElementById('result-san').textContent = bundle.san_dns.join('\n');
+        successBox.textContent = `✓ Enrollment Hardware Completato! Il certificato per ${user} è stato generato e salvato nel Keychain/Certificate Store di sistema.`;
+        successBox.style.display = 'block';
 
-        // Setup downloads
-        const certificatePem = data.certificate_pem;
-        const metadataJson = JSON.stringify(bundle, null, 2);
-
-        document.getElementById('download-cert-link').href = 'data:text/plain,' + encodeURIComponent(certificatePem);
-        document.getElementById('download-cert-link').download = `${user}.crt`;
-
-        document.getElementById('download-metadata-link').href = 'data:application/json,' + encodeURIComponent(metadataJson);
-        document.getElementById('download-metadata-link').download = `${user}_metadata.json`;
-
-        resultSection.style.display = 'block';
+        // Disabilita form
         document.getElementById('csr-form').style.opacity = '0.5';
         document.getElementById('csr-form').style.pointerEvents = 'none';
-
+        
+        // Ricarica la lista degli utenti attivi nella scheda query
+        if (typeof loadActiveCertificates === 'function') {
+          await loadActiveCertificates();
+        }
       } catch (error) {
-        errorBox.textContent = `❌ ${error.message}`;
+        errorBox.textContent = `❌ Errore durante l'enrollment: ${error.message}`;
         errorBox.style.display = 'block';
       } finally {
+        autoBtn.disabled = false;
+        autoBtn.textContent = '⚡ Avvia Auto-Enroll (Local Agent)';
+      }
+    });
+
+    // Handle Query Form Submission
+    document.getElementById('query-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const user = document.getElementById('query-user').value;
+      const collection = document.getElementById('query-collection').value;
+      const limit = document.getElementById('query-limit').value;
+      const filter = getFilterPayload();
+      
+      const errBox = document.getElementById('query-error-box');
+      const resSection = document.getElementById('query-result-section');
+      const submitBtn = document.getElementById('query-submit-btn');
+      const outputBox = document.getElementById('query-output-json');
+      const mainPanel = document.querySelector('#tab-query .panel');
+      
+      errBox.style.display = 'none';
+      resSection.style.display = 'none';
+      mainPanel.classList.remove('forbidden-card');
+      
+      if (!user) {
+        errBox.textContent = '❌ Seleziona un utente con certificato attivo.';
+        errBox.style.display = 'block';
+        return;
+      }
+      
+      let proxyToken = null;
+      try {
+        submitBtn.disabled = true;
+        
+        // Check if selected CN is hardware bound
+        const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+        const isHardware = cert ? cert.is_hardware : false;
+        
+        let queryPayload = { user, collection, filter, limit };
+        
+        if (isHardware) {
+          submitBtn.textContent = '⏳ Richiesta Touch ID / Windows Hello...';
+          try {
+            const agentResponse = await fetch('http://localhost:9090/proxy/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
+            });
+            
+            const agentData = await agentResponse.json();
+            if (!agentResponse.ok) {
+              throw new Error(agentData.error || 'Autenticazione hardware fallita.');
+            }
+            
+            queryPayload.local_proxy_port = agentData.port;
+            proxyToken = agentData.session_token;
+            
+            submitBtn.textContent = '⏳ Sblocco biometrico per token OIDC...';
+            
+            const oidcResponse = await fetch('http://localhost:9090/oidc/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user })
+            });
+            
+            const oidcData = await oidcResponse.json();
+            if (!oidcResponse.ok) {
+              throw new Error(oidcData.message || oidcData.error || 'Generazione OIDC fallita.');
+            }
+            
+            queryPayload.jwt_token = oidcData.token;
+            
+            submitBtn.textContent = '⏳ Esecuzione query via hardware OIDC mTLS...';
+          } catch (agentErr) {
+            throw new Error(`Impossibile comunicare con l'Agente ZTA locale (porta 9090): ${agentErr.message}`);
+          }
+        } else {
+          submitBtn.textContent = '⏳ Esecuzione query in corso...';
+        }
+        
+        const response = await fetch('/api/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(queryPayload)
+        });
+        
+        const data = await response.json();
+        
+        if (response.status === 403) {
+          mainPanel.classList.add('forbidden-card');
+          errBox.textContent = `❌ ${data.message || 'Accesso negato da OPA/RBAC.'}`;
+          errBox.style.display = 'block';
+          
+          document.getElementById('query-resp-role').textContent = data.role || 'unknown';
+          document.getElementById('query-resp-view').textContent = data.translated_collection || 'None';
+          document.getElementById('query-resp-count').textContent = 'BLOCKED';
+          outputBox.textContent = JSON.stringify(data, null, 2);
+          resSection.style.display = 'block';
+          return;
+        }
+        
+        if (!response.ok) {
+          throw new Error(data.message || data.error || 'Server error');
+        }
+        
+        // Success
+        document.getElementById('query-resp-role').textContent = data.role;
+        document.getElementById('query-resp-view').textContent = data.translated_collection;
+        document.getElementById('query-resp-count').textContent = data.count;
+        
+        // Render JSON
+        outputBox.textContent = JSON.stringify(data.results, null, 2);
+        
+        // Render Table
+        renderQueryResults(data.results, collection);
+        
+        resSection.style.display = 'block';
+        
+      } catch (err) {
+        errBox.textContent = `❌ Errore: ${err.message}`;
+        errBox.style.display = 'block';
+      } finally {
+        if (proxyToken) {
+          // Stop proxy session immediately
+          try {
+            await fetch('http://localhost:9090/proxy/stop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: proxyToken })
+            });
+          } catch (stopErr) {
+            console.error('Failed to stop proxy session:', stopErr);
+          }
+        }
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Firma CSR';
+        submitBtn.textContent = 'Invia Query mTLS';
       }
     });
   </script>

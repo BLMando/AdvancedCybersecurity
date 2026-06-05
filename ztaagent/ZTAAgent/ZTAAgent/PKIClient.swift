@@ -3,15 +3,21 @@ import Security
 
 class PKIClient: NSObject, URLSessionDelegate {
     static let shared = PKIClient()
-    private let serverUrl = "http://127.0.0.1:8080"
+    private let serverUrl = "https://127.0.0.1:8080"
     private let envoyUrl = "https://localhost:10001"
     private var activeCNs: [URLSession: String] = [:]
     private let activeCNsLock = NSLock()
+    private var pkiSession: URLSession!
+    
+    override init() {
+        super.init()
+        pkiSession = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+    }
     
     func enroll(cn: String, role: String, department: String) async throws -> String {
         // ... (metodo enroll già implementato e funzionante)
         let challengeUrl = URL(string: "\(serverUrl)/api/challenge")!
-        let (cData, _) = try await URLSession.shared.data(from: challengeUrl)
+        let (cData, _) = try await pkiSession.data(from: challengeUrl)
         let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
         let challengeId = challengeJson["challenge_id"] as! String
         
@@ -39,7 +45,7 @@ class PKIClient: NSObject, URLSessionDelegate {
         print("[DEBUG] Payload Enrollment: \(body)")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        let (eData, eResp) = try await URLSession.shared.data(for: request)
+        let (eData, eResp) = try await pkiSession.data(for: request)
         let httpResp = eResp as! HTTPURLResponse
         
         if httpResp.statusCode == 200 {
@@ -168,4 +174,47 @@ class PKIClient: NSObject, URLSessionDelegate {
         
         completionHandler(.performDefaultHandling, nil)
     }
+
+    func getOidcToken(cn: String) async throws -> String {
+        let challengeUrl = URL(string: "\(serverUrl)/api/challenge")!
+        let (cData, _) = try await pkiSession.data(from: challengeUrl)
+        let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
+        let challengeId = challengeJson["challenge_id"] as! String
+        
+        _ = try await HardwareManager.shared.generateHardwareKey(for: cn)
+        let pubKeyData = try await HardwareManager.shared.getPublicKeyDER(for: cn)
+        let pubKeyPEM = "-----BEGIN PUBLIC KEY-----\n\(pubKeyData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n-----END PUBLIC KEY-----"
+        
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let proofString = "ZTA-CERT-BINDING|CN=\(cn)|TIME=\(timestamp)"
+        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn)
+        
+        let oidcUrl = URL(string: "\(serverUrl)/api/oidc/token")!
+        var request = URLRequest(url: oidcUrl)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "challenge_id": challengeId,
+            "signature": signature.base64EncodedString(),
+            "public_key_pem": pubKeyPEM,
+            "proof_string": proofString
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (tData, tResp) = try await pkiSession.data(for: request)
+        let httpResp = tResp as! HTTPURLResponse
+        
+        if httpResp.statusCode == 200 {
+            let resJson = try JSONSerialization.jsonObject(with: tData) as! [String: Any]
+            if let token = resJson["access_token"] as? String {
+                return token
+            }
+            throw NSError(domain: "com.zta", code: 500, userInfo: [NSLocalizedDescriptionKey: "Token not found in response"])
+        }
+        
+        let errorMsg = String(data: tData, encoding: .utf8) ?? "HTTP \(httpResp.statusCode)"
+        throw NSError(domain: "com.zta", code: httpResp.statusCode, userInfo: [NSLocalizedDescriptionKey: "Server error: \(errorMsg)"])
+    }
 }
+

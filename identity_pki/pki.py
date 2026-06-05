@@ -103,6 +103,7 @@ class PKIService:
             .add_extension(
                 x509.SubjectAlternativeName([
                     x509.DNSName("envoy"),
+                    x509.DNSName("identity-pki"),
                     x509.DNSName("localhost"),
                     x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
                 ]),
@@ -755,13 +756,29 @@ class PKIService:
 
     def list_certificates(self):
         """List all certificates in the registry."""
+        import json
         certs = []
         if self.client_dir.exists():
             for filename in os.listdir(self.client_dir):
                 if filename.endswith(".crt"):
                     user_cn = filename[:-4]
                     status = "revoked" if (self.revoked_dir / f"{user_cn}.rev").exists() else "active"
-                    certs.append({"user": user_cn, "status": status})
+                    key_exists = (self.client_dir / f"{user_cn}.key").exists() or (self.issued_dir / user_cn / "private_key.pem").exists()
+                    role = "unknown"
+                    metadata_path = self.issued_dir / user_cn / "metadata.json"
+                    if metadata_path.exists():
+                        try:
+                            with open(metadata_path) as f:
+                                meta = json.load(f)
+                                role = meta.get("role", "unknown")
+                        except Exception:
+                            pass
+                    certs.append({
+                        "user": user_cn,
+                        "status": status,
+                        "role": role,
+                        "is_hardware": not key_exists
+                    })
         return certs
 
     def revoke_certificate(self, user_cn):
