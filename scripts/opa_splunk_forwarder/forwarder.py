@@ -241,21 +241,219 @@ def handle_envoy_log():
     return jsonify({"status": "queued"}), 202
 
 
+def _splunk_query_anomalies() -> dict:
+    """
+    Query Splunk for recent event counts (last 15m) grouped by user.
+    """
+    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
+    query = "search index=zta_envoy earliest=-15m | stats count by user"
+    form = urllib.parse.urlencode(
+        {
+            "search": query,
+            "output_mode": "json",
+            "exec_mode": "oneshot",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        base_url,
+        data=form,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    if not SPLUNK_SEARCH_VERIFY_TLS:
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
+    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
+    https_handler = urllib.request.HTTPSHandler(context=ctx)
+    opener = urllib.request.build_opener(auth_handler, https_handler)
+
+    try:
+        with opener.open(req, timeout=5) as resp:
+            raw = resp.read().decode("utf-8").strip()
+    except Exception as e:
+        logger.error("Failed querying Splunk for anomalies: %s", e)
+        return {}
+
+    user_counts = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        result = obj.get("result") or {}
+        user = result.get("user")
+        count_str = result.get("count")
+        if user and count_str:
+            try:
+                user_counts[user] = int(count_str)
+            except Exception:
+                pass
+    return user_counts
+
+
+def update_opa_anomalies(user_counts: dict) -> None:
+    """
+    Map event counts to risk boosts and push to OPA's /v1/data/splunk/anomalies endpoint.
+    """
+    anomalies = {}
+    for user, count in user_counts.items():
+        if count >= 200:
+            boost = 20
+        elif count >= 100:
+            boost = 10
+        elif count >= 50:
+            boost = 5
+        else:
+            boost = 0
+        anomalies[user] = {"risk_boost": boost}
+
+    # Push to OPA
+    opa_url = "http://opa:8181/v1/data/splunk/anomalies"
+    req = urllib.request.Request(
+        opa_url,
+        data=json.dumps(anomalies).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            logger.info("Successfully pushed anomalies to OPA: %s", anomalies)
+    except Exception as e:
+        logger.error("Failed to push anomalies to OPA: %s", e)
+
+
+def _splunk_query_trust_registry() -> dict:
+    """
+    Query Splunk for authorized (ALLOW) historical combinations of user, device, and network_ip
+    over the last 7 days, and build a trust registry.
+    """
+    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
+    query = "search index=zta_envoy decision=ALLOW earliest=-7d | stats count by user, device, network_ip"
+    form = urllib.parse.urlencode(
+        {
+            "search": query,
+            "output_mode": "json",
+            "exec_mode": "oneshot",
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        base_url,
+        data=form,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    if not SPLUNK_SEARCH_VERIFY_TLS:
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
+    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
+    https_handler = urllib.request.HTTPSHandler(context=ctx)
+    opener = urllib.request.build_opener(auth_handler, https_handler)
+
+    try:
+        with opener.open(req, timeout=10) as resp:
+            raw = resp.read().decode("utf-8").strip()
+    except Exception as e:
+        logger.error("Failed querying Splunk for trust registry: %s", e)
+        return {}
+
+    registry = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        result = obj.get("result") or {}
+        user = result.get("user")
+        device = result.get("device")
+        ip = result.get("network_ip")
+        if user and device and ip:
+            if user not in registry:
+                registry[user] = {}
+            if device not in registry[user]:
+                registry[user][device] = []
+            if ip not in registry[user][device]:
+                registry[user][device].append(ip)
+    return registry
+
+
+def update_opa_trust_registry(registry: dict) -> None:
+    """
+    Push the historical trust registry of user-device-network combinations to OPA's
+    /v1/data/splunk/trust_registry endpoint.
+    """
+    opa_url = "http://opa:8181/v1/data/splunk/trust_registry"
+    req = urllib.request.Request(
+        opa_url,
+        data=json.dumps(registry).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            logger.info("Successfully pushed trust registry to OPA: %s keys", len(registry))
+    except Exception as e:
+        logger.error("Failed to push trust registry to OPA: %s", e)
+
+
+def sync_splunk_to_opa(stop_event: threading.Event) -> None:
+    """
+    Background sync loop to periodically fetch stats and push them to OPA.
+    """
+    logger.info("Splunk to OPA sync thread started")
+    while not stop_event.is_set():
+        if SPLUNK_PASSWORD:
+            # 1. Volumetric anomaly detection (last 15m)
+            user_counts = _splunk_query_anomalies()
+            update_opa_anomalies(user_counts)
+            
+            # 2. Historical User-Device-IP correlation registry (last 24h)
+            registry = _splunk_query_trust_registry()
+            update_opa_trust_registry(registry)
+        else:
+            logger.warning("SPLUNK_PASSWORD not configured; skipping sync")
+        stop_event.wait(timeout=10.0)
+    logger.info("Splunk to OPA sync thread stopped")
+
+
 _stop_event = threading.Event()
 _TAILER_LOCK = Path("/tmp/envoy_tailer.lock")
 
 
 def _ensure_tailer():
-    """Start the Envoy log tailer once per host (avoids duplication under Gunicorn)."""
+    """Start background sync and log tailing once per host."""
     try:
         _TAILER_LOCK.touch(exist_ok=False)
         t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
         t.start()
         logger.info("Envoy log tailer started (lock acquired)")
+
+        t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
+        t_sync.start()
+        logger.info("Splunk to OPA sync thread started (lock acquired)")
     except FileExistsError:
-        logger.debug("Envoy log tailer already running in another worker (lock exists)")
+        logger.debug("Envoy log tailer/sync already running in another worker (lock exists)")
     except Exception as e:
-        logger.error("Failed to start Envoy log tailer: %s", e)
+        logger.error("Failed to start Envoy log tailer/sync: %s", e)
 
 
 atexit.register(lambda: _TAILER_LOCK.unlink(missing_ok=True))
