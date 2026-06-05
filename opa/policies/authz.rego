@@ -125,6 +125,19 @@ allow if {
 	valid_oidc_token
 }
 
+# Allow connection establishment when the MongoDB command has not been parsed yet.
+# Once allowed, actual queries (like find, insert, drop) will be evaluated if they are
+# parsed, but since L4 ext_authz evaluates only once per connection, we ensure the client
+# is at least authorized with a valid client certificate and a registered role.
+allow if {
+	action_name == "unknown"
+	current_role in {"admin", "doctor", "billing_staff", "auditor", "receptionist"}
+}
+
+allow if {
+	action_name == "unknown"
+	cert_subject_cn in trusted_proxies
+}
 
 
 is_destructive_operation if {
@@ -262,8 +275,9 @@ get_cert_title(cert) := val if {
 }
 
 current_role := role if {
-	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem != ""
+	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem_raw != ""
+	cert_pem := urlquery.decode(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	role := get_cert_title(cert)
@@ -271,6 +285,17 @@ current_role := role if {
 } else := role if {
 	role := user_role_map[user_identity]
 } else := "unknown"
+
+debug_cert_pem := val if {
+	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	val := urlquery.decode(cert_pem_raw)
+}
+debug_parsed_certs := val if {
+	val := crypto.x509.parse_certificates(debug_cert_pem)
+}
+debug_cert_title := val if {
+	val := get_cert_title(debug_parsed_certs[0])
+}
 
 # ─── Permission Matrix (from healthcare_rls.rego) ────────────────────────────
 
@@ -719,8 +744,9 @@ get_cert_cn(cert) := val if {
 }
 
 cert_subject_cn := cn if {
-	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem != ""
+	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	cert_pem_raw != ""
+	cert_pem := urlquery.decode(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	cn := get_cert_cn(cert)
@@ -916,5 +942,50 @@ test_oidc_trusted_proxy_valid if {
 		}
 	}
 	with verify_oidc_jwt as {"sub": "paolo.roselli", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
+	with cert_subject_cn as "envoy"
+}
+
+test_unknown_action_allowed_for_valid_role if {
+	allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "paolo.roselli",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "unknown"
+		}
+	}
+	with current_role as "doctor"
+}
+
+test_unknown_action_denied_for_invalid_role if {
+	not allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "attacker.evil",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "unknown"
+		}
+	}
+	with current_role as "unknown"
+}
+
+test_unknown_action_allowed_for_trusted_proxy if {
+	allow with input as {
+		"attributes": {
+			"source": {
+				"principal": "envoy",
+				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+			}
+		},
+		"parsed_body": {
+			"command": "unknown"
+		}
+	}
 	with cert_subject_cn as "envoy"
 }

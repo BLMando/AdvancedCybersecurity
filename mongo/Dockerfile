@@ -1,7 +1,5 @@
 FROM mongodb/mongodb-enterprise-server:8.0-ubi8
 
-EXPOSE 27017
-
 USER root
 
 COPY entrypoint.sh /entrypoint.sh
