@@ -222,7 +222,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
     # 3. Async background proxy loop via PowerShell.Create (PS 5.1 runspace compat)
     $bgPs = [System.Management.Automation.PowerShell]::Create()
     $null = $bgPs.AddScript({
-        param($cn, $sessionToken, $adKey, $envoyHost, $envoyPort, $certObj)
+        param($cn, $sessionToken, $adKey, $envoyHost, $envoyPort, $certObj, $envoyCertPath)
         
         # Recupera oggetti condivisi dall'AppDomain
         $adData = [AppDomain]::CurrentDomain.GetData($adKey)
@@ -304,7 +304,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                         if ($sslStream) { $sslStream.Close() }
                         if ($envoyClient) { $envoyClient.Close() }
                     }
-                }).AddArgument($capturedClient).AddArgument($cn).AddArgument($certObj).AddArgument($envoyHost).AddArgument($envoyPort).AddArgument($ENVOY_CERT_PATH) | Out-Null
+                }).AddArgument($capturedClient).AddArgument($cn).AddArgument($certObj).AddArgument($envoyHost).AddArgument($envoyPort).AddArgument($envoyCertPath) | Out-Null
                 $connPs.BeginInvoke() | Out-Null
             }
         } catch {
@@ -314,7 +314,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
             [AppDomain]::CurrentDomain.SetData($adKey, $null)
             Write-Host "[*] Proxy TCP su localhost:$localPort fermato." -ForegroundColor Yellow
         }
-    }).AddArgument($cn).AddArgument($sessionToken).AddArgument($adKey).AddArgument($EnvoyHost).AddArgument($EnvoyPort).AddArgument($cert) | Out-Null
+    }).AddArgument($cn).AddArgument($sessionToken).AddArgument($adKey).AddArgument($EnvoyHost).AddArgument($EnvoyPort).AddArgument($cert).AddArgument($ENVOY_CERT_PATH) | Out-Null
     $bgPs.BeginInvoke() | Out-Null
 
     return @{
