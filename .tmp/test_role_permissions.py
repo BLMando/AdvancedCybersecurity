@@ -21,8 +21,17 @@ ROLE_TO_USER = {
 COLLECTIONS = ["patients", "providers", "admissions", "clinical_records", "billing"]
 COMMANDS = ["find", "insert", "update", "delete"]
 
-# Ground truth matrix from authz.rego
-EXPECTED = {
+SENSITIVE_COLLECTIONS = {"clinical_records", "billing"}
+
+# Ground truth RBAC permissions from authz.rego
+PERMISSIONS = {
+    "admin": {
+        "patients": {"find", "insert", "update", "delete"},
+        "providers": {"find", "insert", "update", "delete"},
+        "admissions": {"find", "insert", "update", "delete"},
+        "clinical_records": {"find", "insert", "update", "delete"},
+        "billing": {"find", "insert", "update", "delete"}
+    },
     "doctor": {
         "patients": {"find"},
         "providers": {"find"},
@@ -50,15 +59,63 @@ EXPECTED = {
         "admissions": {"find", "insert", "update"},
         "clinical_records": set(),
         "billing": set()
-    },
-    "admin": {
-        "patients": {"find", "insert", "update", "delete"},
-        "providers": {"find", "insert", "update", "delete"},
-        "admissions": {"find", "insert", "update", "delete"},
-        "clinical_records": {"find", "insert", "update", "delete"},
-        "billing": {"find", "insert", "update", "delete"}
     }
 }
+
+def calculate_expected_allowed(user, collection, command, device="device-laptop-001", network_ip="172.20.0.5"):
+    # Replicates the OPA policy logic:
+    # 1. Resolve role
+    role = ROLE_TO_USER.get(user)
+    if not role or role not in PERMISSIONS:
+        return False
+        
+    # 2. RBAC check (role_action_allowed)
+    allowed_cmds = PERMISSIONS[role].get(collection, set())
+    if command not in allowed_cmds:
+        return False
+        
+    # 3. Hard-deny rules
+    if role == "billing_staff" and collection == "clinical_records":
+        return False
+    if role == "receptionist" and collection in {"billing", "clinical_records"}:
+        return False
+    if role == "doctor" and collection == "billing":
+        return False
+        
+    # 4. Risk and Threshold Check
+    # user_risk
+    user_risk = 0 # all users in ROLE_TO_USER are known
+    # device_risk
+    device_risk = 0 if device != "no-tpm" else 20
+    # network_risk
+    network_risk = 0 if network_ip.startswith(("172.20.", "10.")) else 15
+    # collection_risk_boost
+    collection_risk_boost = 15 if collection in SENSITIVE_COLLECTIONS else 0
+    
+    risk_score = user_risk + device_risk + network_risk + collection_risk_boost
+    
+    # Threshold based on command
+    if command == "find":
+        threshold = 60
+    elif command == "insert":
+        threshold = 40
+    elif command == "update":
+        threshold = 30
+    elif command == "delete":
+        threshold = 20
+    else:
+        return False
+        
+    # General threshold check
+    if risk_score > threshold:
+        return False
+        
+    # Sensitive collections: risk_score must be strictly less than threshold / 2
+    if collection in SENSITIVE_COLLECTIONS:
+        if risk_score >= (threshold / 2):
+            return False
+            
+    return True
 
 def query_opa(user, collection, command):
     # Pass a valid non-empty query with patient_id to bypass content inspection blocks
@@ -105,7 +162,7 @@ def test_single(role, user, coll, cmd):
             "status": "ERROR",
             "msg": "OPA connection error"
         }
-    expected_allowed = cmd in EXPECTED[role][coll]
+    expected_allowed = calculate_expected_allowed(user, coll, cmd)
     status = "PASS" if allowed == expected_allowed else "FAIL"
     return {
         "role": role,

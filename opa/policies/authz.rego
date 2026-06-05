@@ -125,13 +125,7 @@ allow if {
 	valid_oidc_token
 }
 
-# When mongo_proxy can't decode the wire protocol (e.g. OP_MSG), the
-# parsed_body is empty and action_name becomes "unknown". Allow these
-# connections ONLY if they do not target sensitive/main collections.
-allow if {
-	action_name == "unknown"
-	not normalized_collection_name in {"clinical_records", "billing", "patients", "admissions", "providers"}
-}
+
 
 is_destructive_operation if {
 	action_name in ["drop", "delete_database"]
@@ -146,14 +140,14 @@ sensitive_collections := {
     "billing"
 }
 
-# ─── Collection Risk Boost (from healthcare_rls.rego) ────────────────────────
+
 
 collection_risk_boost := boost if {
 	normalized_collection_name in {"clinical_records", "billing"}
 	boost := 15
 } else := 0
 
-# ─── Identity Extraction (from original authz.rego) ───────────────────────────
+# ─── Identity Extraction ───────────────────────
 
 user_identity := user if {
 	user := object.get(
