@@ -1070,6 +1070,7 @@ test_unknown_action_allowed_for_trusted_proxy if {
 		}
 	}
 	with cert_subject_cn as "envoy"
+}
 # ─── HTTP Specific Tests ──────────────────────────────────────────
 
 test_http_get_patients_allowed if {
