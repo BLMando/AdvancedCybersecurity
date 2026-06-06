@@ -43,6 +43,7 @@ services:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - mongo-logs:/var/log/mongodb
     networks:
       - backend-net
 
@@ -112,6 +113,7 @@ services:
       - snort-pep-logs:/var/log/snort-pep:ro
       - snort-resource-logs:/var/log/snort-resource:ro
       - nftables-logs:/var/log/nftables:ro
+      - mongo-logs:/var/log/mongodb:ro
     depends_on:
       - splunk
     networks:
@@ -290,6 +292,7 @@ volumes:
   snort-pep-logs:
   snort-resource-logs:
   nftables-logs:
+  mongo-logs:
 
 networks:
   frontend-net:

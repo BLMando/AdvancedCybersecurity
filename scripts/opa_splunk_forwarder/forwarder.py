@@ -39,6 +39,7 @@ hec_envoy = HEClient(
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
 SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
 NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
+MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
 SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
 SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
@@ -245,19 +246,19 @@ def extract_snort_fields(log_entry: dict) -> dict:
     }
 
 
-def tail_snort_logs(stop_event: threading.Event) -> None:
-    """Background thread that tails the Snort 3 alert_json log file."""
-    logger.info("Snort log tailer started, watching: %s", SNORT_LOG_PATH)
+def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
+    """Background thread that tails a Snort 3 alert_json log file."""
+    logger.info("Snort [%s] log tailer started, watching: %s", sensor, path)
     last_position = 0
 
     while not stop_event.is_set():
         try:
-            if SNORT_LOG_PATH.exists():
-                current_size = SNORT_LOG_PATH.stat().st_size
+            if path.exists():
+                current_size = path.stat().st_size
                 if current_size < last_position:
                     last_position = 0
                 if current_size > last_position:
-                    with open(SNORT_LOG_PATH, "r") as f:
+                    with open(path, "r") as f:
                         f.seek(last_position)
                         for line in f:
                             line = line.strip()
@@ -266,22 +267,23 @@ def tail_snort_logs(stop_event: threading.Event) -> None:
                             try:
                                 log_entry = json.loads(line)
                                 fields = extract_snort_fields(log_entry)
+                                fields["sensor"] = sensor
                                 hec_envoy.send_event(
                                     fields,
                                     index="zta_snort",
                                     sourcetype="snort:alert_json",
                                 )
                             except json.JSONDecodeError:
-                                logger.warning("Skipping invalid JSON from Snort log")
+                                logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)
                         last_position = f.tell()
                     hec_envoy.flush()
             else:
-                logger.debug("Snort log file not yet available: %s", SNORT_LOG_PATH)
+                logger.debug("Snort [%s] log file not yet available: %s", sensor, path)
         except Exception as e:
-            logger.error("Error tailing Snort log: %s", e)
+            logger.error("Error tailing Snort [%s] log: %s", sensor, e)
         stop_event.wait(timeout=2.0)
 
-    logger.info("Snort log tailer stopped")
+    logger.info("Snort [%s] log tailer stopped", sensor)
 
 
 # Regex per parsare i log del kernel nftables
@@ -299,22 +301,60 @@ NFT_LOG_PATTERN = re.compile(
 
 
 def parse_nftables_line(line: str) -> dict | None:
-    """Parsa una riga di log kernel nftables in campi strutturati."""
+    """Parsa una riga di log kernel o di counter ruleset nftables."""
+    # 1. Prova prima il formato kernel standard
     match = NFT_LOG_PATTERN.search(line)
-    if not match:
-        return None
-    prefix = match.group(1)  # es. NFT_DROP, NFT_SSH_ACCEPT
-    action = "DROP" if "DROP" in prefix else "ACCEPT" if "ACCEPT" in prefix else prefix
-    return {
-        "prefix": prefix,
-        "action": action,
-        "in_iface": match.group(2) or "",
-        "src_ip": match.group(3) or "0.0.0.0",
-        "dst_ip": match.group(4) or "0.0.0.0",
-        "proto": match.group(5) or "unknown",
-        "src_port": int(match.group(6)) if match.group(6) else 0,
-        "dst_port": int(match.group(7)) if match.group(7) else 0,
-    }
+    if match:
+        prefix = match.group(1)
+        action = "DROP" if "DROP" in prefix else "ACCEPT" if "ACCEPT" in prefix else prefix
+        return {
+            "prefix": prefix,
+            "action": action,
+            "in_iface": match.group(2) or "",
+            "src_ip": match.group(3) or "0.0.0.0",
+            "dst_ip": match.group(4) or "0.0.0.0",
+            "proto": match.group(5) or "unknown",
+            "src_port": int(match.group(6)) if match.group(6) else 0,
+            "dst_port": int(match.group(7)) if match.group(7) else 0,
+        }
+
+    # 2. Prova il formato dump dei counter (es. "tcp dport 10000 ... counter packets 1 bytes 60 log prefix \"NFT_ENVOY_ACCEPT: \" accept")
+    if "counter packets" in line:
+        try:
+            # Estrae log prefix
+            prefix_match = re.search(r'log prefix "([^"]+)"', line)
+            prefix = prefix_match.group(1).strip(": ") if prefix_match else "NFT_COUNTER"
+            
+            # Estrae azione finale
+            action = "DROP" if "drop" in line.lower() else "ACCEPT" if "accept" in line.lower() else "UNKNOWN"
+            
+            # Estrae packets e bytes
+            packets_match = re.search(r'counter packets (\d+)', line)
+            packets = int(packets_match.group(1)) if packets_match else 0
+            
+            bytes_match = re.search(r'bytes (\d+)', line)
+            bytes_val = int(bytes_match.group(1)) if bytes_match else 0
+            
+            # Estrae protocollo
+            proto = "tcp" if "tcp" in line else "udp" if "udp" in line else "icmp" if "icmp" in line else "ip"
+            
+            # Estrae porta destinazione
+            dport_match = re.search(r'dport (\d+)', line)
+            dst_port = int(dport_match.group(1)) if dport_match else 0
+            
+            return {
+                "prefix": prefix,
+                "action": action,
+                "packets": packets,
+                "bytes": bytes_val,
+                "proto": proto,
+                "dst_port": dst_port,
+                "raw_rule": line.strip()
+            }
+        except Exception as e:
+            logger.warning("Error parsing counter line: %s, error: %s", line, e)
+            
+    return None
 
 
 def tail_nftables_logs(stop_event: threading.Event) -> None:
@@ -351,6 +391,60 @@ def tail_nftables_logs(stop_event: threading.Event) -> None:
         stop_event.wait(timeout=2.0)
 
     logger.info("nftables log tailer stopped")
+
+
+def extract_mongo_fields(log_entry: dict) -> dict:
+    """Estrae i campi dai log JSON nativi di MongoDB 4.4+."""
+    t_field = log_entry.get("t")
+    timestamp = t_field.get("$date") if isinstance(t_field, dict) else str(t_field) if t_field else ""
+    return {
+        "timestamp": timestamp,
+        "severity": log_entry.get("s", "I"),
+        "component": log_entry.get("c", "UNKNOWN"),
+        "id": log_entry.get("id", 0),
+        "context": log_entry.get("ctx", ""),
+        "message": log_entry.get("msg", ""),
+        "attributes": log_entry.get("attr", {}),
+    }
+
+
+def tail_mongo_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the MongoDB log file."""
+    logger.info("MongoDB log tailer started, watching: %s", MONGO_LOG_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if MONGO_LOG_PATH.exists():
+                current_size = MONGO_LOG_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(MONGO_LOG_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                fields = extract_mongo_fields(log_entry)
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_mongodb",
+                                    sourcetype="mongodb:json",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from MongoDB log")
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("MongoDB log file not yet available: %s", MONGO_LOG_PATH)
+        except Exception as e:
+            logger.error("Error tailing MongoDB log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("MongoDB log tailer stopped")
 
 
 @app.route("/health", methods=["GET"])
@@ -584,15 +678,33 @@ def _ensure_tailer():
         t_sync.start()
         logger.info("Splunk to OPA sync thread started (lock acquired)")
 
-        # Thread: Snort logs
-        t_snort = threading.Thread(target=tail_snort_logs, args=(_stop_event,), daemon=True)
-        t_snort.start()
-        logger.info("Snort log tailer started")
+        # Thread: Snort logs (PEP)
+        t_snort_pep = threading.Thread(
+            target=tail_snort_logs, 
+            args=(Path("/var/log/snort-pep/alert_json.txt"), "pep", _stop_event), 
+            daemon=True
+        )
+        t_snort_pep.start()
+        logger.info("Snort PEP log tailer started")
+
+        # Thread: Snort logs (Resource)
+        t_snort_res = threading.Thread(
+            target=tail_snort_logs, 
+            args=(Path("/var/log/snort-resource/alert_json.txt"), "resource", _stop_event), 
+            daemon=True
+        )
+        t_snort_res.start()
+        logger.info("Snort Resource log tailer started")
 
         # Thread: nftables logs
         t_nft = threading.Thread(target=tail_nftables_logs, args=(_stop_event,), daemon=True)
         t_nft.start()
         logger.info("nftables log tailer started")
+
+        # Thread: MongoDB logs
+        t_mongo = threading.Thread(target=tail_mongo_logs, args=(_stop_event,), daemon=True)
+        t_mongo.start()
+        logger.info("MongoDB log tailer started")
     except FileExistsError:
         logger.debug("Log tailer/sync already running in another worker (lock exists)")
     except Exception as e:
