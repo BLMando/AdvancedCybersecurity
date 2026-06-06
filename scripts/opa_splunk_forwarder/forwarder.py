@@ -40,6 +40,7 @@ ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
 SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
 NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
+MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
 SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
 SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
@@ -447,6 +448,44 @@ def tail_mongo_logs(stop_event: threading.Event) -> None:
     logger.info("MongoDB log tailer stopped")
 
 
+def tail_mongo_audit_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the MongoDB Audit log file."""
+    logger.info("MongoDB Audit log tailer started, watching: %s", MONGO_AUDIT_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if MONGO_AUDIT_PATH.exists():
+                current_size = MONGO_AUDIT_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(MONGO_AUDIT_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                hec_envoy.send_event(
+                                    log_entry,
+                                    index="zta_mongodb_audit",
+                                    sourcetype="mongodb:audit",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from MongoDB Audit log")
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("MongoDB Audit log file not yet available: %s", MONGO_AUDIT_PATH)
+        except Exception as e:
+            logger.error("Error tailing MongoDB Audit log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("MongoDB Audit log tailer stopped")
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -705,6 +744,11 @@ def _ensure_tailer():
         t_mongo = threading.Thread(target=tail_mongo_logs, args=(_stop_event,), daemon=True)
         t_mongo.start()
         logger.info("MongoDB log tailer started")
+
+        # Thread: MongoDB Audit logs
+        t_mongo_audit = threading.Thread(target=tail_mongo_audit_logs, args=(_stop_event,), daemon=True)
+        t_mongo_audit.start()
+        logger.info("MongoDB Audit log tailer started")
     except FileExistsError:
         logger.debug("Log tailer/sync already running in another worker (lock exists)")
     except Exception as e:

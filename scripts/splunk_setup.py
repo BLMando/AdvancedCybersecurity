@@ -196,6 +196,7 @@ def main():
     create_index(session_key, host, port, "zta_snort")
     create_index(session_key, host, port, "zta_nftables")
     create_index(session_key, host, port, "zta_mongodb")
+    create_index(session_key, host, port, "zta_mongodb_audit")
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "splunk" / "dashboards"
     dashboard_file = dashboard_dir / "zta_overview.xml"
@@ -208,9 +209,9 @@ def main():
     log("=" * 60)
     log("SPLUNK SETUP COMPLETE")
     log("=" * 60)
-    log("Indexes: zta_envoy, zta_snort, zta_nftables, zta_mongodb")
+    log("Indexes: zta_envoy, zta_snort, zta_nftables, zta_mongodb, zta_mongodb_audit")
     log("HEC token: create manually in Splunk Web (HTTP Event Collector)")
-    log("  index=zta_envoy,zta_snort,zta_nftables,zta_mongodb")
+    log("  index=zta_envoy,zta_snort,zta_nftables,zta_mongodb,zta_mongodb_audit")
     log("  then set SPLUNK_HEC_TOKEN_ENVOY in .env")
     log("=" * 60)
 
