@@ -109,7 +109,8 @@ services:
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
-      - snort-logs:/var/log/snort:ro
+      - snort-pep-logs:/var/log/snort-pep:ro
+      - snort-resource-logs:/var/log/snort-resource:ro
       - nftables-logs:/var/log/nftables:ro
     depends_on:
       - splunk
@@ -142,50 +143,71 @@ services:
     networks:
       - backend-net
 
-  # ── Snort 3 (NIDS) ────────────────────────────────
-  snort:
+  # ── Snort 3 — Sonda PEP (sidecar di Envoy) ──────────
+  # Condivide il namespace di rete con Envoy.
+  # Ispeziona il traffico post-firewall, pre-autorizzazione.
+  snort-pep:
     image: ciscotalos/snort3:latest
-    container_name: snort
+    container_name: snort-pep
     user: root
     restart: unless-stopped
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    network_mode: host
+    network_mode: "service:envoy"
+    depends_on:
+      envoy:
+        condition: service_healthy
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
-      - ./snort/rules:/etc/snort/rules:ro
-      - snort-logs:/var/log/snort
+      - ./snort/rules/pep.rules:/etc/snort/rules/local.rules:ro
+      - snort-pep-logs:/var/log/snort
     command:
       - |
-        echo "[snort] Starting Snort 3 NIDS in IDS mode..."
-        
-        # Rileva dinamicamente le interfacce disponibili (eth0, services1, br-*)
-        INTERFACES=""
-        for iface in $$(cat /proc/net/dev | cut -d: -f1 | tr -d ' '); do
-          if [ "$$iface" = "eth0" ] || [ "$$iface" = "services1" ] || echo "$$iface" | grep -q "^br-"; then
-            if [ -z "$$INTERFACES" ]; then
-              INTERFACES="$$iface"
-            else
-              INTERFACES="$$INTERFACES:$$iface"
-            fi
-          fi
-        done
-        
-        echo "[snort] Detected interfaces: $$INTERFACES"
-        echo "[snort] Log output: /var/log/snort/alert_json.txt"
-        
+        echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
         
-        # Avvia Snort 3 in modalità IDS sulle interfacce rilevate usando afpacket
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "$$INTERFACES" -l /var/log/snort 2>&1; then
-          echo "[snort] ERROR: Snort failed to start"
-          echo "[snort] Container kept alive for debugging"
+        # In sidecar mode, sniffa sull'interfaccia eth0 di Envoy
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "eth0" -l /var/log/snort 2>&1; then
+          echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── NFTables (L3/L4 Firewall) ──────────────────────
+  # ── Snort 3 — Sonda Risorsa (sidecar di MongoDB) ────
+  # Condivide il namespace di rete con MongoDB.
+  # Ispeziona il traffico autenticato e autorizzato.
+  snort-resource:
+    image: ciscotalos/snort3:latest
+    container_name: snort-resource
+    user: root
+    restart: unless-stopped
+    entrypoint: [ "/bin/sh", "-c" ]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: "service:mongo"
+    depends_on:
+      mongo:
+        condition: service_started
+    volumes:
+      - ./snort/snort.lua:/etc/snort/snort.lua:ro
+      - ./snort/rules/resource.rules:/etc/snort/rules/local.rules:ro
+      - snort-resource-logs:/var/log/snort
+    command:
+      - |
+        echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
+        mkdir -p /var/log/snort
+        
+        # In sidecar mode, sniffa sull'interfaccia eth0 di MongoDB
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "eth0" -l /var/log/snort 2>&1; then
+          echo "[snort-resource] ERROR: Snort failed to start"
+        fi
+        tail -f /dev/null
+
+  # ── NFTables (L3/L4 Firewall — sidecar di Envoy) ────
+  # Condivide il namespace di rete con Envoy.
+  # Applica regole netfilter al traffic in ingresso verso il PEP.
   nftables:
     image: alpine:latest
     container_name: nftables
@@ -195,11 +217,18 @@ services:
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
-      - SYS_ADMIN        # Necessario per leggere /proc/kmsg (dmesg)
-    network_mode: host
+    network_mode: "service:envoy"
+    depends_on:
+      envoy:
+        condition: service_healthy
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
       - nftables-logs:/var/log/nftables
+    healthcheck:
+      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
     command:
       - |
         apk add --no-cache nftables
@@ -207,11 +236,11 @@ services:
         # Crea directory log
         mkdir -p /var/log/nftables
         
-        # Applica regole nftables
+        # Applica regole nftables nel namespace di Envoy
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
           if nft -f /tmp/nftables.conf; then
-            echo "[nftables] Rules applied successfully"
+            echo "[nftables] Rules applied to Envoy namespace"
             nft list ruleset
           else
             echo "[nftables] ERROR: Rules failed to apply"
@@ -220,13 +249,14 @@ services:
           echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
         
-        # Avvia cattura log dal kernel ring buffer
-        # I log nftables con prefisso NFT_ vengono scritti su file
-        # per il forwarding a Splunk
-        echo "[nftables] Starting kernel log capture..."
-        cat /proc/kmsg 2>/dev/null | grep --line-buffered "NFT_" > /var/log/nftables/nft.log &
+        # Cattura log da nft counter (polling periodico)
+        echo "[nftables] Starting counter log capture..."
+        while true; do
+          nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
+          sleep 30
+        done &
         
-        echo "[nftables] Container ready. Logs at /var/log/nftables/nft.log"
+        echo "[nftables] Sidecar ready (Envoy namespace)"
         tail -f /dev/null
 
   splunk:
@@ -257,7 +287,8 @@ volumes:
   splunk-etc:
   mongdata:
   envoy-logs:
-  snort-logs:
+  snort-pep-logs:
+  snort-resource-logs:
   nftables-logs:
 
 networks:
