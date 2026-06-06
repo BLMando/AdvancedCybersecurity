@@ -191,7 +191,7 @@ services:
     container_name: nftables
     restart: unless-stopped
     environment:
-      APPLY_NFT_RULES: "0"
+      APPLY_NFT_RULES: "1"
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
