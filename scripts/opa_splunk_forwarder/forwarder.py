@@ -50,19 +50,19 @@ SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").l
 
 def extract_envoy_fields(log_entry: dict) -> dict:
     return {
-        "source_ip": log_entry.get("downstream_remote_address", "unknown"),
-        "downstream_local": log_entry.get("downstream_local_address", "unknown"),
-        "upstream_host": log_entry.get("upstream_host", "unknown"),
-        "duration_ms": log_entry.get("duration", "0"),
-        "bytes_sent": log_entry.get("bytes_sent", "0"),
-        "bytes_received": log_entry.get("bytes_received", "0"),
-        "user": log_entry.get("user", "unknown"),
-        "device": log_entry.get("device", "no-tpm"),
-        "network_ip": log_entry.get("network_ip", "0.0.0.0"),
-        "resource": log_entry.get("resource", "unknown"),
-        "command": log_entry.get("command", "unknown"),
-        "decision": log_entry.get("decision", "unknown"),
-        "risk_score": log_entry.get("risk_score", "0"),
+        "source_ip": log_entry.get("downstream_remote_address") or "unknown",
+        "downstream_local": log_entry.get("downstream_local_address") or "unknown",
+        "upstream_host": log_entry.get("upstream_host") or "unknown",
+        "duration_ms": log_entry.get("duration") or "0",
+        "bytes_sent": log_entry.get("bytes_sent") or "0",
+        "bytes_received": log_entry.get("bytes_received") or "0",
+        "user": log_entry.get("user") or "unknown",
+        "device": log_entry.get("device") or "no-tpm",
+        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
+        "resource": log_entry.get("resource") or "unknown",
+        "command": log_entry.get("command") or "unknown",
+        "decision": log_entry.get("decision") or "unknown",
+        "risk_score": log_entry.get("risk_score") or "0",
     }
 
 
@@ -505,118 +505,19 @@ def handle_envoy_log():
     return jsonify({"status": "queued"}), 202
 
 
-def _splunk_query_anomalies() -> dict:
-    """
-    Query Splunk for recent event counts (last 15m) grouped by user.
-    """
+def _run_splunk_search(query: str) -> list:
+    """Run a Splunk search and return the list of raw results (dict)."""
     base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
-    query = "search index=zta_envoy earliest=-15m | stats count by user"
-    form = urllib.parse.urlencode(
-        {
-            "search": query,
-            "output_mode": "json",
-            "exec_mode": "oneshot",
-        }
-    ).encode("utf-8")
+    form = urllib.parse.urlencode({
+        "search": query,
+        "output_mode": "json",
+        "exec_mode": "oneshot",
+    }).encode("utf-8")
     req = urllib.request.Request(
         base_url,
         data=form,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-    import ssl as _ssl
-    ctx = _ssl.create_default_context()
-    if not SPLUNK_SEARCH_VERIFY_TLS:
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
-
-    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
-    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
-    https_handler = urllib.request.HTTPSHandler(context=ctx)
-    opener = urllib.request.build_opener(auth_handler, https_handler)
-
-    try:
-        with opener.open(req, timeout=5) as resp:
-            raw = resp.read().decode("utf-8").strip()
-    except Exception as e:
-        logger.error("Failed querying Splunk for anomalies: %s", e)
-        return {}
-
-    user_counts = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        result = obj.get("result") or {}
-        user = result.get("user")
-        count_str = result.get("count")
-        if user and count_str:
-            try:
-                user_counts[user] = int(count_str)
-            except Exception:
-                pass
-    return user_counts
-
-
-def update_opa_anomalies(user_counts: dict) -> None:
-    """
-    Map event counts to risk boosts and push to OPA's /v1/data/splunk/anomalies endpoint.
-    """
-    anomalies = {}
-    for user, count in user_counts.items():
-        if count >= 200:
-            boost = 20
-        elif count >= 100:
-            boost = 10
-        elif count >= 50:
-            boost = 5
-        else:
-            boost = 0
-        anomalies[user] = {"risk_boost": boost}
-
-    # Push to OPA
-    opa_url = "http://opa:8181/v1/data/splunk/anomalies"
-    req = urllib.request.Request(
-        opa_url,
-        data=json.dumps(anomalies).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="PUT"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            logger.info("Successfully pushed anomalies to OPA: %s", anomalies)
-    except Exception as e:
-        logger.error("Failed to push anomalies to OPA: %s", e)
-
-
-def _splunk_query_trust_registry() -> dict:
-    """
-    Query Splunk for authorized (ALLOW) historical combinations of user, device, and network_ip
-    over the last 7 days, and build a trust registry.
-    """
-    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
-    query = "search index=zta_envoy decision=ALLOW earliest=-7d | stats count by user, device, network_ip"
-    form = urllib.parse.urlencode(
-        {
-            "search": query,
-            "output_mode": "json",
-            "exec_mode": "oneshot",
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        base_url,
-        data=form,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
     )
     import ssl as _ssl
     ctx = _ssl.create_default_context()
@@ -634,22 +535,75 @@ def _splunk_query_trust_registry() -> dict:
         with opener.open(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8").strip()
     except Exception as e:
-        logger.error("Failed querying Splunk for trust registry: %s", e)
-        return {}
+        logger.error("Failed running Splunk search: %s", e)
+        return []
 
-    registry = {}
+    results = []
     for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
+            if "result" in obj:
+                results.append(obj["result"])
         except json.JSONDecodeError:
             continue
-        result = obj.get("result") or {}
-        user = result.get("user")
-        device = result.get("device")
-        ip = result.get("network_ip")
+    return results
+
+
+def _push_to_opa(url: str, data: dict) -> None:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            logger.info("Successfully pushed to OPA %s: %s keys", url.split("/")[-1], len(data))
+    except Exception as e:
+        logger.error("Failed to push to OPA %s: %s", url, e)
+
+
+def _splunk_query_anomalies() -> dict:
+    """Query Splunk for recent event counts (last 15m) grouped by user."""
+    results = _run_splunk_search("search index=zta_envoy earliest=-15m | stats count by user")
+    user_counts = {}
+    for res in results:
+        user = res.get("user")
+        count = res.get("count")
+        if user and count:
+            try:
+                user_counts[user] = int(count)
+            except ValueError:
+                pass
+    return user_counts
+
+
+def update_opa_anomalies(user_counts: dict) -> None:
+    anomalies = {}
+    for user, count in user_counts.items():
+        if count >= 200:
+            boost = 20
+        elif count >= 100:
+            boost = 10
+        elif count >= 50:
+            boost = 5
+        else:
+            boost = 0
+        anomalies[user] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/anomalies", anomalies)
+
+
+def _splunk_query_trust_registry() -> dict:
+    """Query Splunk for authorized (ALLOW) historical combinations over the last 7 days."""
+    results = _run_splunk_search("search index=zta_envoy decision=ALLOW earliest=-7d | stats count by user, device, network_ip")
+    registry = {}
+    for res in results:
+        user = res.get("user")
+        device = res.get("device")
+        ip = res.get("network_ip")
         if user and device and ip:
             if user not in registry:
                 registry[user] = {}
@@ -661,22 +615,95 @@ def _splunk_query_trust_registry() -> dict:
 
 
 def update_opa_trust_registry(registry: dict) -> None:
-    """
-    Push the historical trust registry of user-device-network combinations to OPA's
-    /v1/data/splunk/trust_registry endpoint.
-    """
-    opa_url = "http://opa:8181/v1/data/splunk/trust_registry"
-    req = urllib.request.Request(
-        opa_url,
-        data=json.dumps(registry).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="PUT"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            logger.info("Successfully pushed trust registry to OPA: %s keys", len(registry))
-    except Exception as e:
-        logger.error("Failed to push trust registry to OPA: %s", e)
+    _push_to_opa("http://opa:8181/v1/data/splunk/trust_registry", registry)
+
+
+def _splunk_query_snort_alerts() -> dict:
+    """Query Splunk for Snort NIDS alerts (last 15m) grouped by source address."""
+    results = _run_splunk_search("search index=zta_snort earliest=-15m | stats count by src_addr")
+    ip_counts = {}
+    for res in results:
+        ip = res.get("src_addr")
+        count = res.get("count")
+        if ip and count:
+            try:
+                ip_counts[ip] = int(count)
+            except ValueError:
+                pass
+    return ip_counts
+
+
+def update_opa_snort_alerts(ip_counts: dict) -> None:
+    alerts = {}
+    for ip, count in ip_counts.items():
+        if count > 5:
+            boost = 100
+        elif count > 0:
+            boost = 30
+        else:
+            boost = 0
+        alerts[ip] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/snort_alerts", alerts)
+
+
+def _splunk_query_nftables_drops() -> dict:
+    """Query Splunk for nftables drops (last 15m) grouped by source IP."""
+    results = _run_splunk_search("search index=zta_nftables action=DROP earliest=-15m | stats count by src_ip")
+    ip_counts = {}
+    for res in results:
+        ip = res.get("src_ip")
+        count = res.get("count")
+        if ip and count:
+            try:
+                ip_counts[ip] = int(count)
+            except ValueError:
+                pass
+    return ip_counts
+
+
+def update_opa_nftables_drops(ip_counts: dict) -> None:
+    alerts = {}
+    for ip, count in ip_counts.items():
+        if count > 50:
+            boost = 60
+        elif count > 10:
+            boost = 30
+        elif count > 0:
+            boost = 10
+        else:
+            boost = 0
+        alerts[ip] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/nftables_alerts", alerts)
+
+
+def _splunk_query_mongo_failures() -> dict:
+    """Query Splunk for MongoDB authentication failures (last 15m) grouped by user."""
+    results = _run_splunk_search("search index=zta_mongodb_audit atype=authenticate result!=0 earliest=-15m | stats count by param.user")
+    user_counts = {}
+    for res in results:
+        user = res.get("param.user")
+        count = res.get("count")
+        if user and count:
+            try:
+                user_counts[user] = int(count)
+            except ValueError:
+                pass
+    return user_counts
+
+
+def update_opa_mongo_failures(user_counts: dict) -> None:
+    failures = {}
+    for user, count in user_counts.items():
+        if count > 10:
+            boost = 100
+        elif count > 3:
+            boost = 50
+        elif count > 0:
+            boost = 20
+        else:
+            boost = 0
+        failures[user] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/mongo_failures", failures)
 
 
 def sync_splunk_to_opa(stop_event: threading.Event) -> None:
@@ -686,13 +713,29 @@ def sync_splunk_to_opa(stop_event: threading.Event) -> None:
     logger.info("Splunk to OPA sync thread started")
     while not stop_event.is_set():
         if SPLUNK_PASSWORD:
-            # 1. Volumetric anomaly detection (last 15m)
-            user_counts = _splunk_query_anomalies()
-            update_opa_anomalies(user_counts)
-            
-            # 2. Historical User-Device-IP correlation registry (last 24h)
-            registry = _splunk_query_trust_registry()
-            update_opa_trust_registry(registry)
+            try:
+                # 1. Volumetric anomaly detection (last 15m)
+                user_counts = _splunk_query_anomalies()
+                update_opa_anomalies(user_counts)
+                
+                # 2. Historical User-Device-IP correlation registry (last 24h)
+                registry = _splunk_query_trust_registry()
+                update_opa_trust_registry(registry)
+
+                # 3. Snort NIDS alerts (last 15m)
+                snort_counts = _splunk_query_snort_alerts()
+                update_opa_snort_alerts(snort_counts)
+
+                # 4. nftables firewall drops (last 15m)
+                nft_counts = _splunk_query_nftables_drops()
+                update_opa_nftables_drops(nft_counts)
+
+                # 5. MongoDB failed logins (last 15m)
+                mongo_counts = _splunk_query_mongo_failures()
+                update_opa_mongo_failures(mongo_counts)
+
+            except Exception as e:
+                logger.error("Error in Splunk to OPA sync loop: %s", e)
         else:
             logger.warning("SPLUNK_PASSWORD not configured; skipping sync")
         stop_event.wait(timeout=10.0)

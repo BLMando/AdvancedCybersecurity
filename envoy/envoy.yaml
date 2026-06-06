@@ -22,13 +22,13 @@ static_resources:
                 bytes_sent: "%BYTES_SENT%"
                 bytes_received: "%BYTES_RECEIVED%"
                 upstream_host: "%UPSTREAM_HOST%"
-                user: "%RESP(x-zta-user)%"
-                device: "%RESP(x-zta-device)%"
-                network_ip: "%RESP(x-zta-network)%"
-                resource: "%RESP(x-zta-collection)%"
-                command: "%RESP(x-zta-command)%"
-                decision: "%RESP(x-zta-decision)%"
-                risk_score: "%RESP(x-zta-risk-score)%"
+                user: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-user)%"
+                device: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-device)%"
+                network_ip: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-network)%"
+                resource: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-collection)%"
+                command: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-command)%"
+                decision: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-decision)%"
+                risk_score: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-risk-score)%"
       listener_filters:
         # Run before TLS termination so Envoy can inspect the ClientHello
         # and derive the JA3 fingerprint used as a device hint.
