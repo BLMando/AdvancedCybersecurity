@@ -232,12 +232,73 @@
         errorBox.style.display = 'block';
         return;
       }
-
+      
       try {
         submitBtn.disabled = true;
-        submitBtn.textContent = '⏳ Firma in corso...';
-
-        const response = await fetch('/api/csr', {
+        
+        // Check if selected CN is hardware bound
+        const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+        const isHardware = cert ? cert.is_hardware : false;
+        
+        let queryPayload = { user, collection, filter, limit };
+        
+        if (isHardware) {
+          submitBtn.textContent = '⏳ Verifica sessione hardware...';
+          try {
+            // 1. Controlla lo status delle sessioni dell'agente
+            const statusResponse = await fetch('http://localhost:9090/proxy/status');
+            const statusData = await statusResponse.json();
+            
+            let activePort = null;
+            if (statusData && statusData.status === 'success' && statusData.sessions) {
+              const activeSession = statusData.sessions.find(s => s.common_name === user);
+              if (activeSession) {
+                activePort = activeSession.port;
+                console.log(`[ZTA] Sessione attiva trovata per ${user} sulla porta ${activePort}. Riutilizzo.`);
+              }
+            }
+            
+            // 2. Se non c'è una sessione attiva, avviala (prompterà Touch ID)
+            if (!activePort) {
+              submitBtn.textContent = '⏳ Richiesta Touch ID / Windows Hello...';
+              const agentResponse = await fetch('http://localhost:9090/proxy/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ common_name: user, ttl_seconds: 900 }) // TTL di 15 minuti
+              });
+              
+              const agentData = await agentResponse.json();
+              if (!agentResponse.ok) {
+                throw new Error(agentData.error || 'Autenticazione hardware fallita.');
+              }
+              activePort = agentData.port;
+            }
+            
+            queryPayload.local_proxy_port = activePort;
+            
+            // 3. Richiedi il token OIDC (usando l'LAContext sbloccato se la sessione è attiva/appena avviata)
+            submitBtn.textContent = '⏳ Generazione token OIDC...';
+            const oidcResponse = await fetch('http://localhost:9090/oidc/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user })
+            });
+            
+            const oidcData = await oidcResponse.json();
+            if (!oidcResponse.ok) {
+              throw new Error(oidcData.message || oidcData.error || 'Generazione OIDC fallita.');
+            }
+            
+            queryPayload.jwt_token = oidcData.token;
+            submitBtn.textContent = '⏳ Esecuzione query via hardware OIDC mTLS...';
+          } catch (agentErr) {
+            throw new Error(`Errore con l'Agente ZTA locale (porta 9090): ${agentErr.message}`);
+          }
+        } else {
+          submitBtn.textContent = '⏳ Esecuzione query in corso...';
+        }
+        
+        const response = await fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

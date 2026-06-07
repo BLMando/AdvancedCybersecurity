@@ -218,6 +218,39 @@ class LocalAPIServer {
             }
         }
     }
+
+    private func handleOidcToken(request: String, connection: NWConnection) {
+        let components = request.components(separatedBy: "\r\n\r\n")
+        guard components.count > 1, let bodyData = components[1].data(using: .utf8) else {
+            self.sendResponse(body: "{\"error\": \"Invalid Body\"}", status: "400 Bad Request", connection: connection)
+            return
+        }
+        
+        Task {
+            do {
+                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
+                let cn = json?["common_name"] ?? json?["user"] ?? "paolo.roselli"
+                
+                print("[*] Generazione token OIDC con biometric sblocco per: \(cn)")
+                let activeContext = MongoProxyManager.shared.getContextForCN(cn: cn)
+                let token = try await PKIClient.shared.getOidcToken(cn: cn, authContext: activeContext)
+                
+                let responseDict = [
+                    "status": "success",
+                    "token": token,
+                    "access_token": token
+                ]
+                
+                if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+                   let responseString = String(data: responseData, encoding: .utf8) {
+                    self.sendResponse(body: responseString, connection: connection)
+                }
+            } catch {
+                print("[!] Error generating OIDC token: \(error)")
+                self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
+            }
+        }
+    }
     
     private func sendResponse(body: String, status: String = "200 OK", connection: NWConnection) {
         let bodyData = body.data(using: .utf8) ?? Data()

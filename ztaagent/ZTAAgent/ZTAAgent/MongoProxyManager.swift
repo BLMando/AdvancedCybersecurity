@@ -8,15 +8,17 @@ class MongoProxySession {
     let sessionToken: String
     let port: UInt16
     let expiresAt: Date
+    let authContext: LAContext?
     private var listener: NWListener?
     private var activeConnections: [NWConnection] = []
     private var isStopped = false
     
-    init(cn: String, port: UInt16, ttl: TimeInterval) {
+    init(cn: String, port: UInt16, ttl: TimeInterval, authContext: LAContext?) {
         self.cn = cn
         self.sessionToken = UUID().uuidString
         self.port = port
         self.expiresAt = Date().addingTimeInterval(ttl)
+        self.authContext = authContext
     }
     
     func start() throws {
@@ -127,11 +129,14 @@ class MongoProxySession {
     }
     
     private func findIdentity(cn: String) throws -> SecIdentity {
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassCertificate,
             kSecReturnRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
+        if let context = self.authContext {
+            query[kSecUseAuthenticationContext as String] = context
+        }
         var items: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &items)
         guard status == errSecSuccess else {
@@ -208,7 +213,7 @@ class MongoProxyManager {
         }
         nextPort = port + 1
         
-        let session = MongoProxySession(cn: cn, port: port, ttl: ttl)
+        let session = MongoProxySession(cn: cn, port: port, ttl: ttl, authContext: context)
         try session.start()
         
         sessions[session.sessionToken] = session
@@ -220,6 +225,12 @@ class MongoProxyManager {
         }
         
         return (port, session.sessionToken)
+    }
+    
+    func getContextForCN(cn: String) -> LAContext? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessions.values.first(where: { $0.cn == cn })?.authContext
     }
     
     func stopSession(token: String) {
