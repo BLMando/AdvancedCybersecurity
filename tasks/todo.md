@@ -112,3 +112,10 @@ Calling `GET /api/admin/certificates` returns:
   - `[x]` Rebuild services and verify query execution from Web Console.
   - `[x]` Persist OIDC RSA signing private key in `identity_pki/oidc.py` to prevent signature mismatches on restarts.
   - `[x]` Automate MongoDB CA Trust store update at container startup via custom `mongo/entrypoint.sh` script.
+
+- `[x]` **Phase 14: Single TouchID & Biometric Context Preservation**
+  - `[x]` Refactor `MongoProxyManager.swift` (`findIdentity`) to query the identity directly via `kSecClassIdentity` with the active `LAContext`.
+  - `[x]` Refactor `PKIClient.swift` (`urlSession didReceive challenge`) to query the identity directly via `kSecClassIdentity` and inject the active `LAContext` if available.
+  - `[x]` Build and test the ZTAAgent application to ensure there are no compilation errors.
+  - `[x]` Verify that starting the proxy session prompts once for TouchID, and subsequent queries (mTLS or OIDC token) use the preserved context without prompting again.
+
