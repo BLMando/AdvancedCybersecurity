@@ -1,8 +1,11 @@
 import Foundation
 import Security
+import LocalAuthentication
+
 
 class PKIClient: NSObject, URLSessionDelegate {
     static let shared = PKIClient()
+    var activeLAContext: LAContext?
     private let serverUrl = "https://127.0.0.1:8080"
     private let envoyUrl = "https://localhost:10001"
     private var activeCNs: [URLSession: String] = [:]
@@ -27,7 +30,7 @@ class PKIClient: NSObject, URLSessionDelegate {
         
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let proofString = "ZTA-CERT-BINDING|CN=\(cn)|TIME=\(timestamp)"
-        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn)
+        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn, context: activeLAContext)
         
         let enrollUrl = URL(string: "\(serverUrl)/api/csr")!
         var request = URLRequest(url: enrollUrl)
@@ -115,7 +118,6 @@ class PKIClient: NSObject, URLSessionDelegate {
             
             print("[*] Envoy ha richiesto il certificato client (mTLS). Cerco l'identità hardware per \(expectedCN)...")
             
-            // 1. Cerchiamo il CERTIFICATO nel Keychain
             let query: [String: Any] = [
                 kSecClass as String: kSecClassCertificate,
                 kSecReturnRef as String: true,
@@ -126,35 +128,57 @@ class PKIClient: NSObject, URLSessionDelegate {
             let status = SecItemCopyMatching(query as CFDictionary, &items)
             
             if status == errSecSuccess {
-                var certificates: [SecCertificate] = []
-                
+                let certificates: [SecCertificate]
                 if CFGetTypeID(items!) == CFArrayGetTypeID() {
                     certificates = items as! [SecCertificate]
                 } else {
                     certificates = [items as! SecCertificate]
                 }
                 
-                print("[DEBUG] Trovati \(certificates.count) certificati nel Keychain.")
-                var foundIdentity: SecIdentity?
-                
+                var targetCert: SecCertificate?
                 for cert in certificates {
                     let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Senza nome"
-                    print("[DEBUG] Esamino certificato: '\(summary)'")
-                    
                     if summary == expectedCN {
-                        print("[✓] Certificato ZTA trovato! Cerco di creare l'identità (link alla chiave privata)...")
-                        
-                        // Chiediamo al sistema di trovare la chiave privata associata
-                        var identity: SecIdentity?
-                        let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
-                        
-                        if idStatus == errSecSuccess, let id = identity {
-                            foundIdentity = id
-                            print("[✓] IDENTITÀ COMPLETA CREATA CON SUCCESSO!")
-                            break
-                        } else {
-                            print("[!] Errore: Certificato trovato ma chiave privata NON associata (Status: \(idStatus))")
-                        }
+                        targetCert = cert
+                        break
+                    }
+                }
+                
+                guard let cert = targetCert else {
+                    print("[!] Certificato per \(expectedCN) non trovato nel Keychain.")
+                    completionHandler(.performDefaultHandling, nil)
+                    return
+                }
+                
+                // Cerca la chiave privata associando il contesto biometrico attivo per consentire il riutilizzo del Touch ID
+                let label = "com.zta.identity.\(expectedCN)"
+                let tag = label.data(using: .utf8)!
+                var keyQuery: [String: Any] = [
+                    kSecClass as String: kSecClassKey,
+                    kSecAttrApplicationTag as String: tag,
+                    kSecReturnRef as String: true
+                ]
+                if let context = activeLAContext {
+                    keyQuery[kSecUseAuthenticationContext as String] = context
+                }
+                
+                var keyItem: CFTypeRef?
+                let keyStatus = SecItemCopyMatching(keyQuery as CFDictionary, &keyItem)
+                
+                var foundIdentity: SecIdentity?
+                if keyStatus == errSecSuccess, let privateKey = keyItem as! SecKey?,
+                   let identity = SecIdentityCreate(nil, cert, privateKey) {
+                    print("[✓] Identità mTLS creata con successo combinando il Certificato e la SecKey con LAContext per \(expectedCN)!")
+                    foundIdentity = identity
+                } else {
+                    print("[!] Query mTLS chiave o SecIdentityCreate fallita con status \(keyStatus). Uso fallback SecIdentityCreateWithCertificate...")
+                    var identity: SecIdentity?
+                    let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
+                    if idStatus == errSecSuccess, let id = identity {
+                        print("[✓] Identità mTLS creata con successo per \(expectedCN) (fallback)!")
+                        foundIdentity = id
+                    } else {
+                        print("[!] Errore: Certificato trovato ma chiave privata NON associata (Status: \(idStatus))")
                     }
                 }
                 
@@ -162,11 +186,11 @@ class PKIClient: NSObject, URLSessionDelegate {
                     print("[*] Richiedo autorizzazione SEP per l'identità ZTA...")
                     completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
                 } else {
-                    print("[!] Nessuna identità ZTA autentica trovata. Hai cancellato i vecchi cert e rifatto l'enrollment?")
+                    print("[!] Nessuna identità ZTA autentica trovata.")
                     completionHandler(.performDefaultHandling, nil)
                 }
             } else {
-                print("[!] Nessuna identità mTLS trovata nel Keychain.")
+                print("[!] Errore nel recupero dei certificati dal Keychain (Status: \(status)).")
                 completionHandler(.performDefaultHandling, nil)
             }
             return
@@ -187,7 +211,7 @@ class PKIClient: NSObject, URLSessionDelegate {
         
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let proofString = "ZTA-CERT-BINDING|CN=\(cn)|TIME=\(timestamp)"
-        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn)
+        let signature = try await HardwareManager.shared.sign(data: proofString.data(using: .utf8)!, cn: cn, context: activeLAContext)
         
         let oidcUrl = URL(string: "\(serverUrl)/api/oidc/token")!
         var request = URLRequest(url: oidcUrl)

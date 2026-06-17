@@ -127,7 +127,7 @@ class LocalAPIServer {
                 }
                 
                 print("[*] Richiesta Firma Hardware per: \(cn)")
-                let signature = try await HardwareManager.shared.sign(data: rawData, cn: cn)
+                let signature = try await HardwareManager.shared.sign(data: rawData, cn: cn, context: PKIClient.shared.activeLAContext)
                 let pubKey = try await HardwareManager.shared.getPublicKeyDER(for: cn)
                 let pubKeyPEM = "-----BEGIN PUBLIC KEY-----\n\(pubKey.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n-----END PUBLIC KEY-----"
                 

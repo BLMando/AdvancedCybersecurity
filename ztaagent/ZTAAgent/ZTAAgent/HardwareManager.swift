@@ -2,6 +2,7 @@ import Foundation
 import Security
 import CryptoKit
 import IOKit
+import LocalAuthentication
 
 class HardwareManager {
     static let shared = HardwareManager()
@@ -146,14 +147,18 @@ class HardwareManager {
         return key.derRepresentation
     }
     
-    func sign(data: Data, cn: String) throws -> Data {
+    func sign(data: Data, cn: String, context: LAContext? = nil) throws -> Data {
         let label = "com.zta.identity.\(cn)"
         let tag = label.data(using: .utf8)!
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag,
             kSecReturnRef as String: true
         ]
+        
+        if let context = context {
+            query[kSecUseAuthenticationContext as String] = context
+        }
         
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)

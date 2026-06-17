@@ -6,6 +6,10 @@ import Security
 import AppKit
 #endif
 
+@_silgen_name("SecIdentityCreate")
+func SecIdentityCreate(_ allocator: CFAllocator?, _ certificate: SecCertificate, _ privateKey: SecKey) -> SecIdentity?
+
+
 class MongoProxySession {
     let cn: String
     let sessionToken: String
@@ -144,10 +148,12 @@ class MongoProxySession {
             kSecReturnRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
+        
         var items: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &items)
         guard status == errSecSuccess else {
-            throw NSError(domain: "ZTA", code: 1, userInfo: [NSLocalizedDescriptionKey: "Keychain vuoto"])
+            print("[DEBUG] SecItemCopyMatching fallito con status: \(status)")
+            throw NSError(domain: "ZTA", code: 1, userInfo: [NSLocalizedDescriptionKey: "Keychain vuoto o accesso negato"])
         }
         
         let certificates: [SecCertificate]
@@ -157,17 +163,48 @@ class MongoProxySession {
             certificates = [items as! SecCertificate]
         }
         
+        var targetCert: SecCertificate?
         for cert in certificates {
-            let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? ""
+            let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Senza nome"
             if summary == cn {
-                var identity: SecIdentity?
-                let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
-                if idStatus == errSecSuccess, let id = identity {
-                    return id
-                }
+                targetCert = cert
+                break
             }
         }
-        throw NSError(domain: "ZTA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Identità per \(cn) non trovata nel Keychain"])
+        
+        guard let cert = targetCert else {
+            throw NSError(domain: "ZTA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Identità per \(cn) non trovata nel Keychain"])
+        }
+        
+        // Cerca la chiave privata associando il contesto biometrico attivo per consentire il riutilizzo del Touch ID
+        let label = "com.zta.identity.\(cn)"
+        let tag = label.data(using: .utf8)!
+        var keyQuery: [String: Any] = [
+            kSecClass as String: kSecClassKey,
+            kSecAttrApplicationTag as String: tag,
+            kSecReturnRef as String: true
+        ]
+        if let context = PKIClient.shared.activeLAContext {
+            keyQuery[kSecUseAuthenticationContext as String] = context
+        }
+        
+        var keyItem: CFTypeRef?
+        let keyStatus = SecItemCopyMatching(keyQuery as CFDictionary, &keyItem)
+        
+        if keyStatus == errSecSuccess, let privateKey = keyItem as! SecKey?,
+           let identity = SecIdentityCreate(nil, cert, privateKey) {
+            print("[✓] Identità mTLS creata con successo combinando il Certificato e la SecKey con LAContext per \(cn)!")
+            return identity
+        } else {
+            print("[!] Query chiave o SecIdentityCreate fallita con status \(keyStatus). Uso fallback SecIdentityCreateWithCertificate...")
+            var identity: SecIdentity?
+            let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
+            if idStatus == errSecSuccess, let id = identity {
+                print("[✓] Identità creata con successo per \(cn) (fallback)!")
+                return id
+            }
+            throw NSError(domain: "ZTA", code: 3, userInfo: [NSLocalizedDescriptionKey: "Impossibile creare identità per \(cn) (status \(idStatus))"])
+        }
     }
     
     private func buildTLSParameters(for cn: String) throws -> NWParameters {
@@ -198,6 +235,7 @@ class MongoProxyManager {
     func startSession(cn: String, ttl: TimeInterval) async throws -> (port: UInt16, token: String) {
         // Gating biometrico: prompt Touch ID / password
         let context = LAContext()
+        context.touchIDAuthenticationAllowableReuseDuration = 60.0
         var error: NSError?
         
         if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
@@ -211,6 +249,7 @@ class MongoProxyManager {
             guard success else {
                 throw NSError(domain: "ZTA", code: 401, userInfo: [NSLocalizedDescriptionKey: "Autenticazione biometrica fallita"])
             }
+            PKIClient.shared.activeLAContext = context
         } else {
             print("[*] Biometria non configurata o disponibile sul sistema. Procedo in bypass (contesto dev).")
         }
@@ -246,6 +285,11 @@ class MongoProxyManager {
         if let session = sessions[token] {
             session.stop()
             sessions.removeValue(forKey: token)
+        }
+        
+        if sessions.isEmpty {
+            PKIClient.shared.activeLAContext = nil
+            print("[*] Nessuna sessione attiva, contesto biometrico rimosso.")
         }
     }
     
