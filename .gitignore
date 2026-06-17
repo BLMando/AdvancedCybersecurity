@@ -1,3 +1,4 @@
+CLAUDE.md
 *.log
 .env
 .agents/
@@ -24,3 +25,4 @@ DerivedData/
 
 __pycache__/
 *.pyc
+
