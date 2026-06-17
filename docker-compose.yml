@@ -35,6 +35,8 @@ services:
       dockerfile: Dockerfile
     container_name: mongo
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
@@ -43,6 +45,7 @@ services:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - mongo-logs:/var/log/mongodb
     networks:
       - backend-net
 
@@ -109,6 +112,10 @@ services:
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
+      - snort-pep-logs:/var/log/snort-pep:ro
+      - snort-resource-logs:/var/log/snort-resource:ro
+      - nftables-logs:/var/log/nftables:ro
+      - mongo-logs:/var/log/mongodb:ro
     depends_on:
       - splunk
     networks:
@@ -140,50 +147,120 @@ services:
     networks:
       - backend-net
 
-  # ── Snort 3 (NIDS) ────────────────────────────────
-  snort:
+  # ── Snort 3 — Sonda PEP (sidecar di Envoy) ──────────
+  # Condivide il namespace di rete con Envoy.
+  # Ispeziona il traffico post-firewall, pre-autorizzazione.
+  snort-pep:
     image: ciscotalos/snort3:latest
-    container_name: snort
+    container_name: snort-pep
+    user: root
     restart: unless-stopped
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    network_mode: host
+    network_mode: "service:envoy"
+    depends_on:
+      envoy:
+        condition: service_healthy
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
-      - ./snort/rules:/etc/snort/rules:ro
-      - ./volumes/snort/logs:/var/log/snort
+      - ./snort/rules/pep.rules:/etc/snort/rules/local.rules:ro
+      - snort-pep-logs:/var/log/snort
     command:
       - |
-        if ! snort -i eth0 -c /etc/snort/snort.lua --alert-before-pass -A alert_json -l /var/log/snort; then
-          echo "snort failed to start, container kept alive for debugging"
+        echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
+        mkdir -p /var/log/snort
+        
+        # In sidecar mode, sniffa sull'interfaccia eth0 di Envoy
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "eth0" -l /var/log/snort 2>&1; then
+          echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── NFTables (L3/L4 Firewall) ──────────────────────
-  nftables:
-    image: alpine:latest
-    container_name: nftables
+  # ── Snort 3 — Sonda Risorsa (sidecar di MongoDB) ────
+  # Condivide il namespace di rete con MongoDB.
+  # Ispeziona il traffico autenticato e autorizzato.
+  snort-resource:
+    image: ciscotalos/snort3:latest
+    container_name: snort-resource
+    user: root
     restart: unless-stopped
     entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
-    network_mode: host
+      - NET_RAW
+    network_mode: "service:mongo"
+    depends_on:
+      mongo:
+        condition: service_started
+    volumes:
+      - ./snort/snort.lua:/etc/snort/snort.lua:ro
+      - ./snort/rules/resource.rules:/etc/snort/rules/local.rules:ro
+      - snort-resource-logs:/var/log/snort
+    command:
+      - |
+        echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
+        mkdir -p /var/log/snort
+        
+        # In sidecar mode, sniffa sull'interfaccia eth0 di MongoDB
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket -i "eth0" -l /var/log/snort 2>&1; then
+          echo "[snort-resource] ERROR: Snort failed to start"
+        fi
+        tail -f /dev/null
+
+  # ── NFTables (L3/L4 Firewall — sidecar di Envoy) ────
+  # Condivide il namespace di rete con Envoy.
+  # Applica regole netfilter al traffic in ingresso verso il PEP.
+  nftables:
+    image: alpine:latest
+    container_name: nftables
+    restart: unless-stopped
+    environment:
+      APPLY_NFT_RULES: "1"
+    entrypoint: [ "/bin/sh", "-c" ]
+    cap_add:
+      - NET_ADMIN
+    network_mode: "service:envoy"
+    depends_on:
+      envoy:
+        condition: service_healthy
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
-      - ./volumes/nftables/logs:/var/log/nftables
+      - nftables-logs:/var/log/nftables
+    healthcheck:
+      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
     command:
       - |
         apk add --no-cache nftables
+        
+        # Crea directory log
+        mkdir -p /var/log/nftables
+        
+        # Applica regole nftables nel namespace di Envoy
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
-          if ! nft -f /tmp/nftables.conf; then
-            echo "nftables rules failed, container kept alive for debugging"
+          if nft -f /tmp/nftables.conf; then
+            echo "[nftables] Rules applied to Envoy namespace"
+            nft list ruleset
+          else
+            echo "[nftables] ERROR: Rules failed to apply"
           fi
         else
-          echo "nftables safe mode: rules not applied (set APPLY_NFT_RULES=1 to enable)"
+          echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
+        
+        # Cattura log da nft counter (polling periodico)
+        echo "[nftables] Starting counter log capture..."
+        while true; do
+          nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
+          sleep 30
+        done &
+        
+        echo "[nftables] Sidecar ready (Envoy namespace)"
         tail -f /dev/null
 
   splunk:
@@ -214,6 +291,10 @@ volumes:
   splunk-etc:
   mongdata:
   envoy-logs:
+  snort-pep-logs:
+  snort-resource-logs:
+  nftables-logs:
+  mongo-logs:
 
 networks:
   frontend-net:

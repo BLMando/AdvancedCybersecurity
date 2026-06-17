@@ -2,7 +2,7 @@
 Splunk Zero Trust Architecture Setup Script
 
 Configures Splunk for ZTA integration:
-  1. Creates index: zta_envoy
+  1. Creates indexes: zta_envoy, zta_snort, zta_nftables
   2. Imports/updates ZTA monitoring dashboard (Simple XML version 1.1)
 
 HEC tokens must be created manually in Splunk Web:
@@ -193,6 +193,10 @@ def main():
     session_key = splunk_login(host, port, username, password)
 
     create_index(session_key, host, port, "zta_envoy")
+    create_index(session_key, host, port, "zta_snort")
+    create_index(session_key, host, port, "zta_nftables")
+    create_index(session_key, host, port, "zta_mongodb")
+    create_index(session_key, host, port, "zta_mongodb_audit")
 
     dashboard_dir = Path(__file__).resolve().parent.parent / "splunk" / "dashboards"
     dashboard_file = dashboard_dir / "zta_overview.xml"
@@ -205,8 +209,10 @@ def main():
     log("=" * 60)
     log("SPLUNK SETUP COMPLETE")
     log("=" * 60)
+    log("Indexes: zta_envoy, zta_snort, zta_nftables, zta_mongodb, zta_mongodb_audit")
     log("HEC token: create manually in Splunk Web (HTTP Event Collector)")
-    log("  index=zta_envoy, then set SPLUNK_HEC_TOKEN_ENVOY in .env")
+    log("  index=zta_envoy,zta_snort,zta_nftables,zta_mongodb,zta_mongodb_audit")
+    log("  then set SPLUNK_HEC_TOKEN_ENVOY in .env")
     log("=" * 60)
 
 

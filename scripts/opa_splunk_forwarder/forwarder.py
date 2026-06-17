@@ -3,7 +3,9 @@ Envoy-to-Splunk Forwarder + Stats API for OPA
 
 Responsibilities:
   1) Forward Envoy access logs to Splunk HEC.
-  2) Expose a lightweight stats endpoint that OPA can query to enrich
+  2) Forward Snort 3 IDS alert logs to Splunk HEC.
+  3) Forward nftables firewall logs to Splunk HEC.
+  4) Expose a lightweight stats endpoint that OPA can query to enrich
      risk evaluation with recent activity from Splunk.
 
 OPA must not send decision logs to Splunk.
@@ -13,6 +15,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import threading
 import urllib.parse
 import urllib.request
@@ -34,6 +37,10 @@ hec_envoy = HEClient(
 )
 
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
+SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
+NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
+MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
+MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
 SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
 SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
@@ -43,19 +50,19 @@ SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").l
 
 def extract_envoy_fields(log_entry: dict) -> dict:
     return {
-        "source_ip": log_entry.get("downstream_remote_address", "unknown"),
-        "downstream_local": log_entry.get("downstream_local_address", "unknown"),
-        "upstream_host": log_entry.get("upstream_host", "unknown"),
-        "duration_ms": log_entry.get("duration", "0"),
-        "bytes_sent": log_entry.get("bytes_sent", "0"),
-        "bytes_received": log_entry.get("bytes_received", "0"),
-        "user": log_entry.get("user", "unknown"),
-        "device": log_entry.get("device", "no-tpm"),
-        "network_ip": log_entry.get("network_ip", "0.0.0.0"),
-        "resource": log_entry.get("resource", "unknown"),
-        "command": log_entry.get("command", "unknown"),
-        "decision": log_entry.get("decision", "unknown"),
-        "risk_score": log_entry.get("risk_score", "0"),
+        "source_ip": log_entry.get("downstream_remote_address") or "unknown",
+        "downstream_local": log_entry.get("downstream_local_address") or "unknown",
+        "upstream_host": log_entry.get("upstream_host") or "unknown",
+        "duration_ms": log_entry.get("duration") or "0",
+        "bytes_sent": log_entry.get("bytes_sent") or "0",
+        "bytes_received": log_entry.get("bytes_received") or "0",
+        "user": log_entry.get("user") or "unknown",
+        "device": log_entry.get("device") or "no-tpm",
+        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
+        "resource": log_entry.get("resource") or "unknown",
+        "command": log_entry.get("command") or "unknown",
+        "decision": log_entry.get("decision") or "unknown",
+        "risk_score": log_entry.get("risk_score") or "0",
     }
 
 
@@ -222,6 +229,263 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
     logger.info("Envoy log tailer stopped")
 
 
+def extract_snort_fields(log_entry: dict) -> dict:
+    """Estrae i campi rilevanti dal JSON nativo di Snort 3."""
+    return {
+        "timestamp": log_entry.get("timestamp", ""),
+        "msg": log_entry.get("msg", "unknown"),
+        "src_addr": log_entry.get("src_addr", "0.0.0.0"),
+        "src_port": log_entry.get("src_port", 0),
+        "dst_addr": log_entry.get("dst_addr", "0.0.0.0"),
+        "dst_port": log_entry.get("dst_port", 0),
+        "proto": log_entry.get("proto", "unknown"),
+        "action": log_entry.get("action", "alert"),
+        "gid": log_entry.get("gid", 1),
+        "sid": log_entry.get("sid", 0),
+        "rev": log_entry.get("rev", 0),
+        "priority": log_entry.get("priority", 0),
+    }
+
+
+def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
+    """Background thread that tails a Snort 3 alert_json log file."""
+    logger.info("Snort [%s] log tailer started, watching: %s", sensor, path)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if path.exists():
+                current_size = path.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(path, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                fields = extract_snort_fields(log_entry)
+                                fields["sensor"] = sensor
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_snort",
+                                    sourcetype="snort:alert_json",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("Snort [%s] log file not yet available: %s", sensor, path)
+        except Exception as e:
+            logger.error("Error tailing Snort [%s] log: %s", sensor, e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("Snort [%s] log tailer stopped", sensor)
+
+
+# Regex per parsare i log del kernel nftables
+# Formato: <N>NFT_DROP: IN=eth0 OUT= MAC=... SRC=1.2.3.4 DST=5.6.7.8
+#          LEN=52 ... PROTO=TCP SPT=12345 DPT=27017 ...
+NFT_LOG_PATTERN = re.compile(
+    r"(NFT_\w+):\s+"
+    r".*?IN=(\S*)\s+"
+    r".*?SRC=(\S+)\s+"
+    r".*?DST=(\S+)\s+"
+    r".*?PROTO=(\S+)\s*"
+    r"(?:.*?SPT=(\d+))?\s*"
+    r"(?:.*?DPT=(\d+))?"
+)
+
+
+def parse_nftables_line(line: str) -> dict | None:
+    """Parsa una riga di log kernel o di counter ruleset nftables."""
+    # 1. Prova prima il formato kernel standard
+    match = NFT_LOG_PATTERN.search(line)
+    if match:
+        prefix = match.group(1)
+        action = "DROP" if "DROP" in prefix else "ACCEPT" if "ACCEPT" in prefix else prefix
+        return {
+            "prefix": prefix,
+            "action": action,
+            "in_iface": match.group(2) or "",
+            "src_ip": match.group(3) or "0.0.0.0",
+            "dst_ip": match.group(4) or "0.0.0.0",
+            "proto": match.group(5) or "unknown",
+            "src_port": int(match.group(6)) if match.group(6) else 0,
+            "dst_port": int(match.group(7)) if match.group(7) else 0,
+        }
+
+    # 2. Prova il formato dump dei counter (es. "tcp dport 10000 ... counter packets 1 bytes 60 log prefix \"NFT_ENVOY_ACCEPT: \" accept")
+    if "counter packets" in line:
+        try:
+            # Estrae log prefix
+            prefix_match = re.search(r'log prefix "([^"]+)"', line)
+            prefix = prefix_match.group(1).strip(": ") if prefix_match else "NFT_COUNTER"
+            
+            # Estrae azione finale
+            action = "DROP" if "drop" in line.lower() else "ACCEPT" if "accept" in line.lower() else "UNKNOWN"
+            
+            # Estrae packets e bytes
+            packets_match = re.search(r'counter packets (\d+)', line)
+            packets = int(packets_match.group(1)) if packets_match else 0
+            
+            bytes_match = re.search(r'bytes (\d+)', line)
+            bytes_val = int(bytes_match.group(1)) if bytes_match else 0
+            
+            # Estrae protocollo
+            proto = "tcp" if "tcp" in line else "udp" if "udp" in line else "icmp" if "icmp" in line else "ip"
+            
+            # Estrae porta destinazione
+            dport_match = re.search(r'dport (\d+)', line)
+            dst_port = int(dport_match.group(1)) if dport_match else 0
+            
+            return {
+                "prefix": prefix,
+                "action": action,
+                "packets": packets,
+                "bytes": bytes_val,
+                "proto": proto,
+                "dst_port": dst_port,
+                "raw_rule": line.strip()
+            }
+        except Exception as e:
+            logger.warning("Error parsing counter line: %s, error: %s", line, e)
+            
+    return None
+
+
+def tail_nftables_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails nftables kernel log output."""
+    logger.info("nftables log tailer started, watching: %s", NFTABLES_LOG_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if NFTABLES_LOG_PATH.exists():
+                current_size = NFTABLES_LOG_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(NFTABLES_LOG_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            fields = parse_nftables_line(line)
+                            if fields:
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_nftables",
+                                    sourcetype="nftables:log",
+                                )
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("nftables log file not yet available: %s", NFTABLES_LOG_PATH)
+        except Exception as e:
+            logger.error("Error tailing nftables log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("nftables log tailer stopped")
+
+
+def extract_mongo_fields(log_entry: dict) -> dict:
+    """Estrae i campi dai log JSON nativi di MongoDB 4.4+."""
+    t_field = log_entry.get("t")
+    timestamp = t_field.get("$date") if isinstance(t_field, dict) else str(t_field) if t_field else ""
+    return {
+        "timestamp": timestamp,
+        "severity": log_entry.get("s", "I"),
+        "component": log_entry.get("c", "UNKNOWN"),
+        "id": log_entry.get("id", 0),
+        "context": log_entry.get("ctx", ""),
+        "message": log_entry.get("msg", ""),
+        "attributes": log_entry.get("attr", {}),
+    }
+
+
+def tail_mongo_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the MongoDB log file."""
+    logger.info("MongoDB log tailer started, watching: %s", MONGO_LOG_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if MONGO_LOG_PATH.exists():
+                current_size = MONGO_LOG_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(MONGO_LOG_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                fields = extract_mongo_fields(log_entry)
+                                hec_envoy.send_event(
+                                    fields,
+                                    index="zta_mongodb",
+                                    sourcetype="mongodb:json",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from MongoDB log")
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("MongoDB log file not yet available: %s", MONGO_LOG_PATH)
+        except Exception as e:
+            logger.error("Error tailing MongoDB log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("MongoDB log tailer stopped")
+
+
+def tail_mongo_audit_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the MongoDB Audit log file."""
+    logger.info("MongoDB Audit log tailer started, watching: %s", MONGO_AUDIT_PATH)
+    last_position = 0
+
+    while not stop_event.is_set():
+        try:
+            if MONGO_AUDIT_PATH.exists():
+                current_size = MONGO_AUDIT_PATH.stat().st_size
+                if current_size < last_position:
+                    last_position = 0
+                if current_size > last_position:
+                    with open(MONGO_AUDIT_PATH, "r") as f:
+                        f.seek(last_position)
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                log_entry = json.loads(line)
+                                hec_envoy.send_event(
+                                    log_entry,
+                                    index="zta_mongodb_audit",
+                                    sourcetype="mongodb:audit",
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("Skipping invalid JSON from MongoDB Audit log")
+                        last_position = f.tell()
+                    hec_envoy.flush()
+            else:
+                logger.debug("MongoDB Audit log file not yet available: %s", MONGO_AUDIT_PATH)
+        except Exception as e:
+            logger.error("Error tailing MongoDB Audit log: %s", e)
+        stop_event.wait(timeout=2.0)
+
+    logger.info("MongoDB Audit log tailer stopped")
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -241,118 +505,19 @@ def handle_envoy_log():
     return jsonify({"status": "queued"}), 202
 
 
-def _splunk_query_anomalies() -> dict:
-    """
-    Query Splunk for recent event counts (last 15m) grouped by user.
-    """
+def _run_splunk_search(query: str) -> list:
+    """Run a Splunk search and return the list of raw results (dict)."""
     base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
-    query = "search index=zta_envoy earliest=-15m | stats count by user"
-    form = urllib.parse.urlencode(
-        {
-            "search": query,
-            "output_mode": "json",
-            "exec_mode": "oneshot",
-        }
-    ).encode("utf-8")
+    form = urllib.parse.urlencode({
+        "search": query,
+        "output_mode": "json",
+        "exec_mode": "oneshot",
+    }).encode("utf-8")
     req = urllib.request.Request(
         base_url,
         data=form,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-    import ssl as _ssl
-    ctx = _ssl.create_default_context()
-    if not SPLUNK_SEARCH_VERIFY_TLS:
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
-
-    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
-    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
-    https_handler = urllib.request.HTTPSHandler(context=ctx)
-    opener = urllib.request.build_opener(auth_handler, https_handler)
-
-    try:
-        with opener.open(req, timeout=5) as resp:
-            raw = resp.read().decode("utf-8").strip()
-    except Exception as e:
-        logger.error("Failed querying Splunk for anomalies: %s", e)
-        return {}
-
-    user_counts = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        result = obj.get("result") or {}
-        user = result.get("user")
-        count_str = result.get("count")
-        if user and count_str:
-            try:
-                user_counts[user] = int(count_str)
-            except Exception:
-                pass
-    return user_counts
-
-
-def update_opa_anomalies(user_counts: dict) -> None:
-    """
-    Map event counts to risk boosts and push to OPA's /v1/data/splunk/anomalies endpoint.
-    """
-    anomalies = {}
-    for user, count in user_counts.items():
-        if count >= 200:
-            boost = 20
-        elif count >= 100:
-            boost = 10
-        elif count >= 50:
-            boost = 5
-        else:
-            boost = 0
-        anomalies[user] = {"risk_boost": boost}
-
-    # Push to OPA
-    opa_url = "http://opa:8181/v1/data/splunk/anomalies"
-    req = urllib.request.Request(
-        opa_url,
-        data=json.dumps(anomalies).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="PUT"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            logger.info("Successfully pushed anomalies to OPA: %s", anomalies)
-    except Exception as e:
-        logger.error("Failed to push anomalies to OPA: %s", e)
-
-
-def _splunk_query_trust_registry() -> dict:
-    """
-    Query Splunk for authorized (ALLOW) historical combinations of user, device, and network_ip
-    over the last 7 days, and build a trust registry.
-    """
-    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
-    query = "search index=zta_envoy decision=ALLOW earliest=-7d | stats count by user, device, network_ip"
-    form = urllib.parse.urlencode(
-        {
-            "search": query,
-            "output_mode": "json",
-            "exec_mode": "oneshot",
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        base_url,
-        data=form,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
     )
     import ssl as _ssl
     ctx = _ssl.create_default_context()
@@ -370,22 +535,75 @@ def _splunk_query_trust_registry() -> dict:
         with opener.open(req, timeout=10) as resp:
             raw = resp.read().decode("utf-8").strip()
     except Exception as e:
-        logger.error("Failed querying Splunk for trust registry: %s", e)
-        return {}
+        logger.error("Failed running Splunk search: %s", e)
+        return []
 
-    registry = {}
+    results = []
     for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
+            if "result" in obj:
+                results.append(obj["result"])
         except json.JSONDecodeError:
             continue
-        result = obj.get("result") or {}
-        user = result.get("user")
-        device = result.get("device")
-        ip = result.get("network_ip")
+    return results
+
+
+def _push_to_opa(url: str, data: dict) -> None:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            logger.info("Successfully pushed to OPA %s: %s keys", url.split("/")[-1], len(data))
+    except Exception as e:
+        logger.error("Failed to push to OPA %s: %s", url, e)
+
+
+def _splunk_query_anomalies() -> dict:
+    """Query Splunk for recent event counts (last 15m) grouped by user."""
+    results = _run_splunk_search("search index=zta_envoy earliest=-15m | stats count by user")
+    user_counts = {}
+    for res in results:
+        user = res.get("user")
+        count = res.get("count")
+        if user and count:
+            try:
+                user_counts[user] = int(count)
+            except ValueError:
+                pass
+    return user_counts
+
+
+def update_opa_anomalies(user_counts: dict) -> None:
+    anomalies = {}
+    for user, count in user_counts.items():
+        if count >= 200:
+            boost = 20
+        elif count >= 100:
+            boost = 10
+        elif count >= 50:
+            boost = 5
+        else:
+            boost = 0
+        anomalies[user] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/anomalies", anomalies)
+
+
+def _splunk_query_trust_registry() -> dict:
+    """Query Splunk for authorized (ALLOW) historical combinations over the last 7 days."""
+    results = _run_splunk_search("search index=zta_envoy decision=ALLOW earliest=-7d | stats count by user, device, network_ip")
+    registry = {}
+    for res in results:
+        user = res.get("user")
+        device = res.get("device")
+        ip = res.get("network_ip")
         if user and device and ip:
             if user not in registry:
                 registry[user] = {}
@@ -397,22 +615,95 @@ def _splunk_query_trust_registry() -> dict:
 
 
 def update_opa_trust_registry(registry: dict) -> None:
-    """
-    Push the historical trust registry of user-device-network combinations to OPA's
-    /v1/data/splunk/trust_registry endpoint.
-    """
-    opa_url = "http://opa:8181/v1/data/splunk/trust_registry"
-    req = urllib.request.Request(
-        opa_url,
-        data=json.dumps(registry).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="PUT"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            logger.info("Successfully pushed trust registry to OPA: %s keys", len(registry))
-    except Exception as e:
-        logger.error("Failed to push trust registry to OPA: %s", e)
+    _push_to_opa("http://opa:8181/v1/data/splunk/trust_registry", registry)
+
+
+def _splunk_query_snort_alerts() -> dict:
+    """Query Splunk for Snort NIDS alerts (last 15m) grouped by source address."""
+    results = _run_splunk_search("search index=zta_snort earliest=-15m | stats count by src_addr")
+    ip_counts = {}
+    for res in results:
+        ip = res.get("src_addr")
+        count = res.get("count")
+        if ip and count:
+            try:
+                ip_counts[ip] = int(count)
+            except ValueError:
+                pass
+    return ip_counts
+
+
+def update_opa_snort_alerts(ip_counts: dict) -> None:
+    alerts = {}
+    for ip, count in ip_counts.items():
+        if count > 5:
+            boost = 100
+        elif count > 0:
+            boost = 30
+        else:
+            boost = 0
+        alerts[ip] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/snort_alerts", alerts)
+
+
+def _splunk_query_nftables_drops() -> dict:
+    """Query Splunk for nftables drops (last 15m) grouped by source IP."""
+    results = _run_splunk_search("search index=zta_nftables action=DROP earliest=-15m | stats count by src_ip")
+    ip_counts = {}
+    for res in results:
+        ip = res.get("src_ip")
+        count = res.get("count")
+        if ip and count:
+            try:
+                ip_counts[ip] = int(count)
+            except ValueError:
+                pass
+    return ip_counts
+
+
+def update_opa_nftables_drops(ip_counts: dict) -> None:
+    alerts = {}
+    for ip, count in ip_counts.items():
+        if count > 50:
+            boost = 60
+        elif count > 10:
+            boost = 30
+        elif count > 0:
+            boost = 10
+        else:
+            boost = 0
+        alerts[ip] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/nftables_alerts", alerts)
+
+
+def _splunk_query_mongo_failures() -> dict:
+    """Query Splunk for MongoDB authentication failures (last 15m) grouped by user."""
+    results = _run_splunk_search("search index=zta_mongodb_audit atype=authenticate result!=0 earliest=-15m | stats count by param.user")
+    user_counts = {}
+    for res in results:
+        user = res.get("param.user")
+        count = res.get("count")
+        if user and count:
+            try:
+                user_counts[user] = int(count)
+            except ValueError:
+                pass
+    return user_counts
+
+
+def update_opa_mongo_failures(user_counts: dict) -> None:
+    failures = {}
+    for user, count in user_counts.items():
+        if count > 10:
+            boost = 100
+        elif count > 3:
+            boost = 50
+        elif count > 0:
+            boost = 20
+        else:
+            boost = 0
+        failures[user] = {"risk_boost": boost}
+    _push_to_opa("http://opa:8181/v1/data/splunk/mongo_failures", failures)
 
 
 def sync_splunk_to_opa(stop_event: threading.Event) -> None:
@@ -422,13 +713,29 @@ def sync_splunk_to_opa(stop_event: threading.Event) -> None:
     logger.info("Splunk to OPA sync thread started")
     while not stop_event.is_set():
         if SPLUNK_PASSWORD:
-            # 1. Volumetric anomaly detection (last 15m)
-            user_counts = _splunk_query_anomalies()
-            update_opa_anomalies(user_counts)
-            
-            # 2. Historical User-Device-IP correlation registry (last 24h)
-            registry = _splunk_query_trust_registry()
-            update_opa_trust_registry(registry)
+            try:
+                # 1. Volumetric anomaly detection (last 15m)
+                user_counts = _splunk_query_anomalies()
+                update_opa_anomalies(user_counts)
+                
+                # 2. Historical User-Device-IP correlation registry (last 24h)
+                registry = _splunk_query_trust_registry()
+                update_opa_trust_registry(registry)
+
+                # 3. Snort NIDS alerts (last 15m)
+                snort_counts = _splunk_query_snort_alerts()
+                update_opa_snort_alerts(snort_counts)
+
+                # 4. nftables firewall drops (last 15m)
+                nft_counts = _splunk_query_nftables_drops()
+                update_opa_nftables_drops(nft_counts)
+
+                # 5. MongoDB failed logins (last 15m)
+                mongo_counts = _splunk_query_mongo_failures()
+                update_opa_mongo_failures(mongo_counts)
+
+            except Exception as e:
+                logger.error("Error in Splunk to OPA sync loop: %s", e)
         else:
             logger.warning("SPLUNK_PASSWORD not configured; skipping sync")
         stop_event.wait(timeout=10.0)
@@ -443,17 +750,52 @@ def _ensure_tailer():
     """Start background sync and log tailing once per host."""
     try:
         _TAILER_LOCK.touch(exist_ok=False)
+        # Thread: Envoy logs
         t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
         t.start()
         logger.info("Envoy log tailer started (lock acquired)")
 
+        # Thread: Splunk ↔ OPA sync
         t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
         t_sync.start()
         logger.info("Splunk to OPA sync thread started (lock acquired)")
+
+        # Thread: Snort logs (PEP)
+        t_snort_pep = threading.Thread(
+            target=tail_snort_logs, 
+            args=(Path("/var/log/snort-pep/alert_json.txt"), "pep", _stop_event), 
+            daemon=True
+        )
+        t_snort_pep.start()
+        logger.info("Snort PEP log tailer started")
+
+        # Thread: Snort logs (Resource)
+        t_snort_res = threading.Thread(
+            target=tail_snort_logs, 
+            args=(Path("/var/log/snort-resource/alert_json.txt"), "resource", _stop_event), 
+            daemon=True
+        )
+        t_snort_res.start()
+        logger.info("Snort Resource log tailer started")
+
+        # Thread: nftables logs
+        t_nft = threading.Thread(target=tail_nftables_logs, args=(_stop_event,), daemon=True)
+        t_nft.start()
+        logger.info("nftables log tailer started")
+
+        # Thread: MongoDB logs
+        t_mongo = threading.Thread(target=tail_mongo_logs, args=(_stop_event,), daemon=True)
+        t_mongo.start()
+        logger.info("MongoDB log tailer started")
+
+        # Thread: MongoDB Audit logs
+        t_mongo_audit = threading.Thread(target=tail_mongo_audit_logs, args=(_stop_event,), daemon=True)
+        t_mongo_audit.start()
+        logger.info("MongoDB Audit log tailer started")
     except FileExistsError:
-        logger.debug("Envoy log tailer/sync already running in another worker (lock exists)")
+        logger.debug("Log tailer/sync already running in another worker (lock exists)")
     except Exception as e:
-        logger.error("Failed to start Envoy log tailer/sync: %s", e)
+        logger.error("Failed to start log tailer/sync: %s", e)
 
 
 atexit.register(lambda: _TAILER_LOCK.unlink(missing_ok=True))
