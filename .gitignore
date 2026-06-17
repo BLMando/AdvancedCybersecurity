@@ -3,7 +3,6 @@
 .agents/
 .venv/
 .python-version
-docs/
 plan/
 volumes/certs/client
 volumes/certs/ca/issued/**/private_key.pem
