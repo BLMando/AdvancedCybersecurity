@@ -1,11 +1,11 @@
 <dashboard version="1.1">
   <label>ZTA - Zero Trust Architecture Overview</label>
   <description>Real-time monitoring of Envoy access logs, Snort IDS alerts, and nftables firewall activity (indexes: zta_envoy, zta_snort, zta_nftables)</description>
-  <fieldset submitButton="false">
+  <fieldset submitButton="true">
     <input type="time" token="timerange">
       <label>Time Range</label>
       <default>
-        <earliest>-30m</earliest>
+        <earliest>-24h</earliest>
         <latest>now</latest>
       </default>
     </input>
@@ -19,8 +19,8 @@
           <query>index=zta_envoy sourcetype="envoy:access"
             | timechart span=1m count by decision
             | sort _time</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
@@ -54,8 +54,8 @@
                 1=1, "46+ (Critical)"
               )
             | stats count by risk_bucket</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">bar</option>
       </chart>
@@ -69,8 +69,8 @@
             | stats avg(risk_num) as avg_risk by user
             | sort -avg_risk
             | head 10</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">horizontal_bar</option>
       </chart>
@@ -85,8 +85,8 @@
           <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
             | top limit=10 user
             | table user count percent</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">bar</option>
       </chart>
@@ -95,11 +95,17 @@
       <title>Top Motivi di Blocco</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
-            | top limit=10 command
-            | table command count percent</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <query><![CDATA[index=zta_envoy sourcetype="envoy:access" decision="DENY"
+            | eval reason = case(
+                match(user, "urn:device:"), "Certificato Non Registrato",
+                device == "no-tpm", "Dispositivo Non Sotto Controllo (No TPM)",
+                risk_score > 15, "Risk Score Superiore alla Soglia",
+                1=1, "Violazione Policy Accesso"
+              )
+            | top limit=10 reason
+            | table reason count percent]]></query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">bar</option>
       </chart>
@@ -111,12 +117,23 @@
       <title>Collection Access Heatmap (Utente x Collection)</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
+          <query><![CDATA[index=zta_mongodb (component=COMMAND OR component=ACCESS)
+            | spath
+            | eval ctx = mvindex(context, 0)
+            | eval temp_user = replace(mvindex('attributes.user', 0), "oidc/", "")
+            | sort 0 timestamp
+            | streamstats current=t last(temp_user) as user_by_ctx by ctx
+            | eval final_user = coalesce(user_by_ctx, temp_user)
+            | where component="COMMAND" AND mvindex('attributes.isFromUserConnection', 0)="true" AND isnotnull(final_user) AND final_user != "" AND final_user != "unknown"
+            | eval ns = mvindex('attributes.ns', 0)
+            | eval resource=mvindex(split(ns, "."), 1)
+            | where resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views"
+            | rename final_user as user
             | stats count by user, resource
             | sort -count
-            | head 50</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+            | head 50]]></query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">heatmap</option>
       </chart>
@@ -128,11 +145,26 @@
       <title>Distribuzione Comandi MongoDB</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
+          <query><![CDATA[index=zta_mongodb component="COMMAND"
+            | spath
+            | where mvindex('attributes.isFromUserConnection', 0)="true"
+            | eval ns = mvindex('attributes.ns', 0)
+            | eval resource=mvindex(split(ns, "."), 1)
+            | where resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views"
+            | eval command=case(
+                isnotnull(mvindex('attributes.command.find', 0)), "find",
+                isnotnull(mvindex('attributes.command.insert', 0)), "insert",
+                isnotnull(mvindex('attributes.command.update', 0)), "update",
+                isnotnull(mvindex('attributes.command.delete', 0)), "delete",
+                isnotnull(mvindex('attributes.command.aggregate', 0)), "aggregate",
+                isnotnull(mvindex('attributes.command.count', 0)), "count",
+                isnotnull(mvindex('attributes.command.drop', 0)), "drop",
+                1=1, "unknown"
+              )
             | stats count by command
-            | sort -count</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+            | sort -count]]></query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">pie</option>
       </chart>
@@ -145,8 +177,8 @@
             | eval device_type = if(device="no-tpm", "No TPM (Software)", "Hardware-Bound")
             | stats count by device_type decision
             | table device_type decision count</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
@@ -159,12 +191,38 @@
       <title>Eventi Recenti</title>
       <table>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | sort -_time
-            | head 25
-            | table _time user resource command decision risk_score device network_ip</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <query><![CDATA[(index=zta_mongodb (component=COMMAND OR component=ACCESS)) OR (index=zta_envoy sourcetype="envoy:access")
+            | spath
+            | eval ctx = mvindex(context, 0)
+            | eval temp_user = if(index="zta_envoy", mvindex(user, 0), replace(mvindex('attributes.user', 0), "oidc/", ""))
+            | sort 0 _time timestamp
+            | streamstats current=t last(temp_user) as user_by_ctx by ctx
+            | eval final_user = coalesce(user_by_ctx, temp_user)
+            | eval event_type = if(index="zta_envoy", "envoy", "mongo")
+            | sort 0 -_time event_type
+            | streamstats current=t last(device) as device, last(network_ip) as network_ip, last(risk_score) as risk_score, last(decision) as decision by final_user
+            | sort 0 -_time
+            | where (index="zta_mongodb" AND component="COMMAND" AND mvindex('attributes.isFromUserConnection', 0)="true") OR (index="zta_envoy" AND decision="DENY")
+            | eval ns = mvindex('attributes.ns', 0)
+            | eval resource = if(index="zta_envoy", "N/A", mvindex(split(ns, "."), 1))
+            | eval command = case(
+                index="zta_envoy", "N/A",
+                isnotnull(mvindex('attributes.command.find', 0)), "find",
+                isnotnull(mvindex('attributes.command.insert', 0)), "insert",
+                isnotnull(mvindex('attributes.command.update', 0)), "update",
+                isnotnull(mvindex('attributes.command.delete', 0)), "delete",
+                isnotnull(mvindex('attributes.command.aggregate', 0)), "aggregate",
+                isnotnull(mvindex('attributes.command.count', 0)), "count",
+                isnotnull(mvindex('attributes.command.drop', 0)), "drop",
+                1=1, "unknown"
+              )
+            | where isnotnull(final_user) AND final_user != "" AND final_user != "unknown"
+            | where index="zta_envoy" OR (resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views")
+            | rename final_user as user
+            | table _time user resource command decision risk_score device network_ip
+            | head 25]]></query>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="wrap">false</option>
         <option name="rowNumbers">true</option>
@@ -180,8 +238,8 @@
         <search>
           <query>index=zta_snort sourcetype="snort:alert_json"
             | timechart span=5m count by msg</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
@@ -194,8 +252,8 @@
           <query>index=zta_snort sourcetype="snort:alert_json"
             | top limit=10 msg
             | table msg count percent</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">pie</option>
       </chart>
@@ -210,8 +268,8 @@
         <search>
           <query>index=zta_nftables sourcetype="nftables:log"
             | timechart span=5m count by action</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
@@ -224,8 +282,8 @@
           <query>index=zta_nftables sourcetype="nftables:log" action="DROP"
             | top limit=10 src_ip
             | table src_ip count percent</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="charting.chart">bar</option>
       </chart>
@@ -245,8 +303,8 @@
             | stats count by src event_type
             | sort -count
             | head 20</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
+          <earliest>-24h</earliest>
+          <latest>now</latest>
         </search>
         <option name="wrap">false</option>
         <option name="rowNumbers">true</option>

@@ -182,4 +182,8 @@ process = {
     daemon = false,
 }
 
+daq = {
+    snaplen = 65535
+}
+
 print("Snort 3 ZTA configuration loaded successfully (fully loaded defaults)")
