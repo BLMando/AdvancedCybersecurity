@@ -1,1 +1,56 @@
 http_test_listener serve solo a validare la parte mTLS crittografica/hardware isolandola dal database -> è possibile elimimare il filtro lua  file (l7_firewall.lua)
+
+
+
+ATTUALE FLUSSO:
+
+### Diagramma di Flusso delle Operazioni
+
+```mermaid
+    sequenceDiagram
+        autonumber
+        actor Utente as Utente (Browser)
+        participant Agent as ZTA Local Agent (:9090)
+        participant Flask as Flask Backend (app.py)
+        participant Envoy as Envoy Proxy (:10000)
+        participant OPA as OPA Engine (:9002)
+        participant Fwd as OPA-Splunk Forwarder (:5000)
+        participant Splunk as Splunk Enterprise
+        participant Mongo as MongoDB
+
+        Utente->>Flask: 1. Click "Invia Query mTLS" (Payload query + JWT OIDC)
+        Note over Utente, Agent: Se Hardware-Bound:<br/>Javascript richiede Touch ID/Hello<br/>e ottiene il JWT OIDC dall'Agente locale.
+
+        rect rgb(20, 30, 45)
+            Note over Flask: RLS & Vista Translation
+            Flask->>Flask: Decodifica JWT, estrae il Ruolo<br/>e mappa la collezione in una vista RLS<br/>(es. clinical_records -> v_clinical_doctor)
+        end
+
+        Flask->>Envoy: 2. Invia query mTLS (con Client Cert e JWT)
+
+        rect rgb(30, 20, 20)
+            Note over Envoy: Intercettazione PEP L4/L7
+            Envoy->>Envoy: Termina mTLS (Valida contro ca.crt)<br/>mongo_proxy decodifica il comando BSON
+            Envoy->>OPA: 3. gRPC CheckRequest (Metadati, Cert, Comando)
+        end
+
+        rect rgb(20, 40, 30)
+            Note over OPA, Fwd: Valutazione Rischio in tempo reale
+            OPA->>Fwd: 4. HTTP POST /api/stats (Chiamata sincrona http.send)
+            Fwd->>Splunk: 5. Query REST Oneshot (Log degli ultimi 15m)
+            Splunk-->>Fwd: Ritorna allarmi Snort, drop nftables, fallimenti Mongo, dinieghi Envoy
+            Fwd-->>OPA: 6. Ritorna risk_boost aggregato
+            OPA->>OPA: Calcola risk_score finale contro la soglia adattiva
+        end
+
+        OPA-->>Envoy: 7. gRPC CheckResponse (Decisione: ALLOW/DENY)
+
+        alt OPA ALLOW
+            Envoy->>Mongo: 8a. Inoltra connessione TCP (tcp_proxy)
+            Mongo-->>Flask: Risultati della query (sulla vista RLS)
+            Flask-->>Utente: Mostra i dati in Tabella / JSON
+        else OPA DENY
+            Envoy-->>Flask: 8b. Connessione TCP rifiutata
+            Flask-->>Utente: Mostra Errore 403 (Accesso negato da OPA)
+        end
+```
