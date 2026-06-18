@@ -5,56 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Identity PKI Console - CSR Enrollment & Query Console</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <style>
-    /* Mode Toggles */
-    .tab-btn.active {
-      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      color: #03111f;
-      border-color: transparent;
-    }
-    
-    /* Badges */
-    .badge {
-      display: inline-flex;
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-size: 0.8em;
-      font-weight: 700;
-    }
-    .badge-success {
-      background: rgba(34, 197, 94, 0.15);
-      color: #bff5cd;
-      border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-    .badge-danger {
-      background: rgba(251, 113, 133, 0.15);
-      color: #fecdd3;
-      border: 1px solid rgba(251, 113, 133, 0.3);
-    }
-    .badge-warning {
-      background: rgba(245, 158, 11, 0.15);
-      color: #fef3c7;
-      border: 1px solid rgba(245, 158, 11, 0.3);
-    }
-    .badge-muted {
-      background: rgba(148, 163, 184, 0.15);
-      color: #e2e8f0;
-      border: 1px solid rgba(148, 163, 184, 0.3);
-    }
-
-    /* Table styles */
-    #query-output-table tr:hover {
-      background: rgba(148, 163, 184, 0.05);
-    }
-    
-    #query-output-table th, #query-output-table td {
-      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-    }
-    
-    #query-output-table th {
-      background: rgba(8, 15, 27, 0.5);
-    }
-  </style>
 </head>
 <body>
   <main class="shell">
@@ -94,12 +44,12 @@
           <div id="success-box" class="success-box" style="display: none;"></div>
 
           <form id="csr-form" class="form-grid">
-            <label style="grid-column: span 2;">
+            <label for="user" style="grid-column: span 2;">
               <span>Utente (CN)</span>
               <input type="text" id="user" placeholder="dr_mario_rossi" required>
             </label>
 
-            <label style="grid-column: span 2;">
+            <label for="role" style="grid-column: span 2;">
               <span>Ruolo</span>
               <select id="role">
                 {% for key, role in roles.items() %}
@@ -108,7 +58,7 @@
               </select>
             </label>
 
-            <label style="grid-column: span 2;">
+            <label for="department" style="grid-column: span 2;">
               <span>Reparto / OU</span>
               <input type="text" id="department" placeholder="Cardiologia">
             </label>
@@ -143,7 +93,7 @@
           <div id="query-success-box" class="success-box" style="display: none;"></div>
 
           <form id="query-form" class="form-grid">
-            <label style="grid-column: span 2;">
+            <label for="query-user" style="grid-column: span 2;">
               <span>Seleziona Identità Client (CN)</span>
               <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
                 <select id="query-user" required style="flex-grow: 1; min-width: 200px;">
@@ -154,7 +104,7 @@
               <small>Mostra gli utenti registrati con certificati attivi in volumes/certs/client/</small>
             </label>
 
-            <label>
+            <label for="query-collection">
               <span>Collezione</span>
               <select id="query-collection" required>
                 <option value="patients">patients (Anagrafica pazienti)</option>
@@ -165,7 +115,7 @@
               </select>
             </label>
 
-            <label>
+            <label for="query-limit">
               <span>Limite Risultati</span>
               <input type="number" id="query-limit" value="5" min="1" max="50">
             </label>
