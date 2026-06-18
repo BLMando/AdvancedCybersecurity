@@ -423,6 +423,7 @@ test_unknown_action_unseen_device_denied if {
 			"device-laptop-001": ["172.20.0.5"]
 		}
 	}
+	with http.send as mock_http_send_high_risk
 }
 
 # ─── HTTP Specific Tests ──────────────────────────────────────────────────────
@@ -754,4 +755,19 @@ test_mongodb_metadata_extraction_where_blocked if {
 	}
 	with data.envoy.authz.identity.current_role as "doctor"
 	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}
+
+# Helper mocks per http.send
+mock_http_send_high_risk(req) := {
+	"status_code": 200,
+	"body": {
+		"risk_boost": 100
+	}
+}
+
+mock_http_send_safe(req) := {
+	"status_code": 200,
+	"body": {
+		"risk_boost": 0
+	}
 }

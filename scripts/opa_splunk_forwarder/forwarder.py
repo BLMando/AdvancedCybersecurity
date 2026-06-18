@@ -162,28 +162,86 @@ def handle_stats_query():
         logger.error("SPLUNK_PASSWORD is not configured; cannot query Splunk stats")
         return jsonify({"error": "splunk credentials not configured"}), 500
 
+    # Costruiamo una singola query di aggregazione che copre tutti i vettori di rischio degli ultimi 15m
+    esc = lambda s: s.replace('"', '\\"')
+    splunk_query = (
+        f'search (index=zta_envoy earliest=-15m) '
+        f'OR (index=zta_snort src_addr="{esc(network_ip)}" earliest=-15m) '
+        f'OR (index=zta_nftables action=DROP src_ip="{esc(network_ip)}" earliest=-15m) '
+        f'OR (index=zta_mongodb_audit atype=authenticate result!=0 param.user="{esc(user)}" earliest=-15m) '
+        f'| eval type=case('
+        f'  index="zta_envoy" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
+        f'  index="zta_envoy" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
+        f'  index="zta_snort", "snort_alerts",'
+        f'  index="zta_nftables", "nftables_drops",'
+        f'  index="zta_mongodb_audit", "mongo_failures"'
+        f') '
+        f'| stats count by type'
+    )
+
+    # Inizializziamo i contatori a zero
+    counts = {
+        "user_allows": 0,
+        "user_denies": 0,
+        "snort_alerts": 0,
+        "nftables_drops": 0,
+        "mongo_failures": 0
+    }
+
     try:
-        search = _build_stats_search(user, network_ip, device, resource, command)
-        event_count_15m = _splunk_query_count(search)
+        results = _run_splunk_search(splunk_query)
+        for res in results:
+            t = res.get("type")
+            c = res.get("count")
+            if t in counts and c:
+                try:
+                    counts[t] = int(c)
+                except ValueError:
+                    pass
     except Exception as e:
         logger.error("Failed querying Splunk stats: %s", e)
         return jsonify({"error": "splunk query failed"}), 502
 
-    # Simple risk boost model driven by observed recent frequency.
-    if event_count_15m >= 200:
-        risk_boost = 20
-    elif event_count_15m >= 100:
-        risk_boost = 10
-    elif event_count_15m >= 50:
-        risk_boost = 5
-    else:
-        risk_boost = 0
+    # Calcolo del risk boost combinato (multi-vettore)
+    risk_boost = 0
+
+    # 1. Impatto Frequenza (Allows)
+    if counts["user_allows"] >= 200:
+        risk_boost += 15
+    elif counts["user_allows"] >= 100:
+        risk_boost += 8
+
+    # 2. Impatto Richieste Negate (Denies)
+    if counts["user_denies"] >= 10:
+        risk_boost += 30
+    elif counts["user_denies"] >= 5:
+        risk_boost += 15
+
+    # 3. Impatto Snort Alerts (Intrusione L7)
+    if counts["snort_alerts"] >= 5:
+        risk_boost += 60
+    elif counts["snort_alerts"] >= 1:
+        risk_boost += 30
+
+    # 4. Impatto nftables Firewall Drops (Scansione Rete)
+    if counts["nftables_drops"] >= 50:
+        risk_boost += 20
+    elif counts["nftables_drops"] >= 10:
+        risk_boost += 10
+
+    # 5. Impatto MongoDB Login Failures (Brute Force)
+    if counts["mongo_failures"] >= 10:
+        risk_boost += 40
+    elif counts["mongo_failures"] >= 3:
+        risk_boost += 20
+
+    # Cap del risk boost a un massimo di 100
+    if risk_boost > 100:
+        risk_boost = 100
 
     return jsonify(
         {
-            "stats": {
-                "event_count_15m": event_count_15m,
-            },
+            "stats": counts,
             "risk_boost": risk_boost,
         }
     ), 200
@@ -755,10 +813,10 @@ def _ensure_tailer():
         t.start()
         logger.info("Envoy log tailer started (lock acquired)")
 
-        # Thread: Splunk ↔ OPA sync
-        t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
-        t_sync.start()
-        logger.info("Splunk to OPA sync thread started (lock acquired)")
+        # Thread: Splunk ↔ OPA sync (Disabilitato per comunicazione sincrona tramite /api/stats)
+        # t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
+        # t_sync.start()
+        # logger.info("Splunk to OPA sync thread started (lock acquired)")
 
         # Thread: Snort logs (PEP)
         t_snort_pep = threading.Thread(

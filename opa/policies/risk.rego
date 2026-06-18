@@ -71,42 +71,29 @@ content_risk := 0 if {
 	identity.is_empty_query
 } else := 0
 
-# Anomaly Risk Dimension (20% weight) - Splunk sidecar statistics (Asynchronous In-Memory)
+# Anomaly Risk Dimension (20% weight) - Query sincrona a Splunk via sidecar forwarder
 anomaly_risk := boost if {
-	# If we have a trust registry in OPA and the user is present in it
-	user_history := data.splunk.trust_registry[identity.user_identity]
-	
-	# If the current device was never used by this user in the last 24h
-	not user_history[identity.device_identity]
-	
-	boost := 100
-} else := boost if {
-	# If the user is present, and the device is known, but the network IP's /24 prefix is unseen for this device
-	user_history := data.splunk.trust_registry[identity.user_identity]
-	ips := user_history[identity.device_identity]
-	
-	allowed_prefixes := { p | ip := ips[_]; p := subnet_24(ip) }
-	not subnet_24(identity.network_identity_str) in allowed_prefixes
-	
-	boost := 60
-} else := boost if {
-	# Combine standard anomalies with Snort alerts, nftables drops, and MongoDB failed logins
-	boosts := [
-		object.get(data.splunk.anomalies, [identity.user_identity, "risk_boost"], 0),
-		object.get(data.splunk.snort_alerts, [identity.network_identity_str, "risk_boost"], 0),
-		object.get(data.splunk.nftables_alerts, [identity.network_identity_str, "risk_boost"], 0),
-		object.get(data.splunk.mongo_failures, [identity.user_identity, "risk_boost"], 0)
-	]
-	max_boost := max(boosts)
-	max_boost > 0
-	boost := max_boost
-} else := 0
+	# Evitiamo chiamate esterne per i comandi di sistema esclusi (bypass)
+	not identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo", "ping", "getLog", "getCmdLineOpts", "serverStatus"}
 
-subnet_24(ip) := prefix if {
-	parts := split(ip, ".")
-	count(parts) == 4
-	prefix := concat(".", [parts[0], parts[1], parts[2]])
-} else := ip
+	# Effettua la richiesta sincrona a Splunk tramite il forwarder locale
+	resp := http.send({
+		"method": "POST",
+		"url": "http://opa-splunk-forwarder:5000/api/stats",
+		"headers": {"Content-Type": "application/json"},
+		"body": {
+			"user": identity.user_identity,
+			"network_ip": identity.network_identity_str,
+			"device": identity.device_identity,
+			"resource": identity.normalized_collection_name,
+			"command": identity.action_name
+		},
+		"timeout": "500000000" # 500ms in nanosecondi
+	})
+
+	resp.status_code == 200
+	boost := resp.body.risk_boost
+} else := 0
 
 # ─── Adaptive Thresholds ──────────────────────────────────────────────────────
 
