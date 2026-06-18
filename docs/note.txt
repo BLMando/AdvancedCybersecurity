@@ -1,0 +1,1 @@
+http_test_listener serve solo a validare la parte mTLS crittografica/hardware isolandola dal database -> è possibile elimimare il filtro lua  file (l7_firewall.lua)

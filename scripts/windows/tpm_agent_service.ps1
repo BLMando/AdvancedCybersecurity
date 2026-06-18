@@ -4,7 +4,7 @@
 # Gestisce l'enrollment, le firme TPM e il proxy mTLS MongoDB tramite Schannel.
 #
 # Avvio:
-#   powershell.exe -ExecutionPolicy Bypass -File scripts/windows/tpm_agent_service.ps1
+#   powershell -ExecutionPolicy Bypass -File .\scripts\windows\tpm_agent_service.ps1
 #
 
 param (

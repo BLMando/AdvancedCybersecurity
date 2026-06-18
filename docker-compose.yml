@@ -76,7 +76,7 @@ services:
         condition: service_started
     ports:
       - "10000:10000"
-      - "10001:10001"
+      # - "10001:10001" # Commentato poiché il listener HTTP di test in envoy.yaml è disabilitato
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
