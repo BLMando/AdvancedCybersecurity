@@ -1,6 +1,12 @@
+TODO:
+- resource e command unknown
+- complete mediation 
+
+
+
 http_test_listener serve solo a validare la parte mTLS crittografica/hardware isolandola dal database -> è possibile elimimare il filtro lua  file (l7_firewall.lua)
 
-
+Gli eventi UNKNOWN del firewall l4 rappresentano semplicemente traffico in uscita consentito che è stato registrato a fini di audit e monitoraggio.   
 
 ATTUALE FLUSSO:
 
@@ -54,3 +60,7 @@ ATTUALE FLUSSO:
             Flask-->>Utente: Mostra Errore 403 (Accesso negato da OPA)
         end
 ```
+
+
+
+
