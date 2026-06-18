@@ -6,6 +6,7 @@ import future.keywords
 import data.envoy.authz.identity
 import data.envoy.authz.criteria
 import data.envoy.authz.risk
+import data.envoy.authz.policy
 
 # ─── Hybrid ZTA Decision Rule ─────────────────────────────────────────────────
 
@@ -14,13 +15,15 @@ default allow := false
 allow if {
 	criteria.criteria_allow
 	risk.risk_score_allow
+	not policy.is_malicious
 }
 
 main := {
 	"allowed": allow,
 	"response_headers_to_add": response_headers,
 	"denied_response_headers_to_add": response_headers,
-	"dynamic_metadata": response_headers
+	"dynamic_metadata": response_headers,
+	"response_metadata": response_metadata
 }
 
 # OPA Bypass Rules for database system commands
@@ -77,6 +80,14 @@ response_headers := object.union_n([
 	{"x-zta-eff-risk": sprintf("%d", [risk.risk_score])},
 	{"x-zta-command": identity.action_name}
 ])
+
+response_metadata := {
+	"x-zta-user": identity.user_identity,
+	"x-zta-device": identity.device_identity,
+	"x-zta-command": identity.action_name,
+	"x-zta-collection": identity.collection_name,
+	"x-zta-decision": decision_label
+}
 
 decision_label := "ALLOW" if {
 	allow

@@ -1,14 +1,14 @@
--- Firewall L7 locale in Envoy: rileva NoSQL injection e query dannose in-memory
+-- Firewall L7 locale in Envoy (Corretto per la sintassi dei pattern Lua)
 local blocked_patterns = {
-    "%$where",
-    "%$function",
-    "%$gt",
-    "%$ne",
-    "%$regex",
-    "%$nin",
-    "%$or",
-    "sleep%(",
-    "while%s*%(",
+    "%$where",       -- Cerca letteralmente "$where"
+    "%$function",    -- Cerca letteralmente "$function"
+    "%$gt",          -- Cerca letteralmente "$gt"
+    "%$ne",          -- Cerca letteralmente "$ne"
+    "%$regex",       -- Cerca letteralmente "$regex"
+    "%$nin",         -- Cerca letteralmente "$nin"
+    "%$or",          -- Cerca letteralmente "$or"
+    "sleep%(",       -- % escape per la parentesi tonda aperta
+    "while%s*%(",    -- %s* zero o più spazi seguiti da (
     "settimeout%("
 }
 
@@ -37,8 +37,11 @@ function envoy_on_request(request_handle)
         return
     end
 
+    -- Estrazione del payload sicuro convertito in stringa
     local payload = body:getBytes(0, body:length()):lower()
+    
     for _, pattern in ipairs(blocked_patterns) do
+        -- Usiamo string.find (o payload:find) che interpreta i pattern sopra definiti
         if payload:find(pattern) then
             request_handle:logWarn("L7 Local WAF Blocked: Rilevato pattern " .. pattern)
             request_handle:respond(

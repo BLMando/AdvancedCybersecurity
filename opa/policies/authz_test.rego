@@ -655,3 +655,103 @@ test_mongo_failures_raises_risk_and_denies if {
 	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
 	with data.splunk.mongo_failures as {"mario.rossi": {"risk_boost": 100}}
 }
+
+# ─── NoSQL Injection & WAF Tests ──────────────────────────────────────────────
+
+test_nosql_injection_where_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "patients",
+			"query": "{\"$where\": \"this.age > 30\"}"
+		}
+	}
+	with data.envoy.authz.identity.current_role as "doctor"
+	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}
+
+test_nosql_injection_function_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "patients",
+			"query": "{\"$function\": \"function() { return true; }\"}"
+		}
+	}
+	with data.envoy.authz.identity.current_role as "doctor"
+	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}
+
+test_nosql_injection_sleep_denied if {
+	deny with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "patients",
+			"query": "{\"name\": \"test; sleep(5000);\"}"
+		}
+	}
+	with data.envoy.authz.identity.current_role as "doctor"
+	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}
+
+test_mongodb_metadata_extraction_find_allowed if {
+	allow with input as {
+		"attributes": {
+			"source": {"principal": "mario.rossi"},
+			"metadata_context": {
+				"filter_metadata": {
+					"envoy.filters.network.mongo_proxy": {
+						"zta_db.patients": {
+							"find": {
+								"filter": {"patient_id": "P001"}
+							}
+						}
+					}
+				}
+			}
+		},
+		"parsed_body": {
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5"
+		}
+	}
+	with data.envoy.authz.identity.current_role as "doctor"
+	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}
+
+test_mongodb_metadata_extraction_where_blocked if {
+	deny with input as {
+		"attributes": {
+			"source": {"principal": "mario.rossi"},
+			"metadata_context": {
+				"filter_metadata": {
+					"envoy.filters.network.mongo_proxy": {
+						"zta_db.patients": {
+							"find": {
+								"filter": {"$where": "this.age > 30"}
+							}
+						}
+					}
+				}
+			}
+		},
+		"parsed_body": {
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5"
+		}
+	}
+	with data.envoy.authz.identity.current_role as "doctor"
+	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
+}

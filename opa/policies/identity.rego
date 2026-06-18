@@ -266,7 +266,52 @@ is_valid_token_binding(claims, cert_subject_cn) if {
 
 # ─── Request Attributes extraction ───────────────────────────────────────────
 
+# Estrazione dei metadati di MongoDB da envoy.filters.network.mongo_proxy
+extracted_mongo_ops contains info if {
+	mongo_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})["envoy.filters.network.mongo_proxy"]
+	some db_coll, op_details in mongo_meta
+	contains(db_coll, ".")
+	parts := split(db_coll, ".")
+	coll := parts[1]
+	some cmd_name, cmd_details in op_details
+	query := object.get(cmd_details, "query", object.get(cmd_details, "filter", {}))
+	info := {
+		"command": cmd_name,
+		"collection": coll,
+		"query": query
+	}
+}
+
+extracted_mongo_ops contains info if {
+	mongo_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})["envoy.filters.network.mongo_proxy"]
+	req := mongo_meta.request
+	cmd := req.command
+	coll := req.collection
+	query := object.get(req, "query", object.get(req, "filter", {}))
+	info := {
+		"command": cmd,
+		"collection": coll,
+		"query": query
+	}
+}
+
+extracted_mongo_op := val if {
+	count(extracted_mongo_ops) > 0
+	val := any_val(extracted_mongo_ops)
+} else := {
+	"command": "unknown",
+	"collection": "unknown",
+	"query": {}
+}
+
+any_val(s) := v if {
+	v := s[_]
+}
+
 action_name := cmd if {
+	extracted_mongo_op.command != "unknown"
+	cmd := extracted_mongo_op.command
+} else := cmd if {
 	cmd := object.get(input.parsed_body, "command", "")
 	cmd != ""
 } else := "find" if {
@@ -296,6 +341,9 @@ action_name := cmd if {
 } else := "unknown"
 
 collection_name := coll if {
+	extracted_mongo_op.collection != "unknown"
+	coll := extracted_mongo_op.collection
+} else := coll if {
 	coll := object.get(input.parsed_body, "collection", "")
 	coll != ""
 } else := coll if {
@@ -331,6 +379,9 @@ query_raw := q if {
 } else := "{}"
 
 query_doc := parsed if {
+	extracted_mongo_op.command != "unknown"
+	parsed := extracted_mongo_op.query
+} else := parsed if {
 	json.is_valid(query_raw)
 	parsed := json.unmarshal(query_raw)
 } else := parsed if {
