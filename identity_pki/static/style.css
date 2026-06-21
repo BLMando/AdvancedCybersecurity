@@ -31,7 +31,7 @@ body {
 }
 
 .shell {
-  width: min(1160px, calc(100vw - 32px));
+  width: min(1400px, calc(100vw - 16px));
   margin: 0 auto;
   padding: 32px 0 48px;
 }
@@ -602,9 +602,18 @@ button:disabled {
 
 /* ── Tab query goes full width ──────────────────────────────────── */
 #tab-query > .panel {
-  padding: 28px 32px;
+  padding: 24px 28px;
 }
 
+#tab-query #query-output-table-container {
+  /* let the table breathe — cells can be slightly more compact */
+  font-size: 0.84em;
+}
+
+#tab-query #query-output-table td,
+#tab-query #query-output-table th {
+  padding: 10px 12px;
+}
 
 /* ── Filter chips row ───────────────────────────────────────────── */
 .filter-chips-row {
