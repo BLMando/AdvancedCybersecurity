@@ -43,33 +43,68 @@
           <div id="error-box" class="error-box" style="display: none;"></div>
           <div id="success-box" class="success-box" style="display: none;"></div>
 
-          <form id="csr-form" class="form-grid">
-            <label for="user" style="grid-column: span 2;">
-              <span>Utente (CN)</span>
-              <input type="text" id="user" placeholder="dr_mario_rossi" required>
-            </label>
+          <!-- STEP 1: AD Login Form -->
+          <div id="enroll-step-login">
+            <h3 style="margin-bottom: 1rem; color: var(--accent);">Fase 1: Autenticazione Active Directory Aziendale (SSO)</h3>
+            <form id="login-form" class="form-grid">
+              <label for="login-email" style="grid-column: span 2;">
+                <span>Email Aziendale</span>
+                <select id="login-email" required>
+                  <option value="dr.mario.rossi@ospedale.it">dr.mario.rossi@ospedale.it (Dr. Mario Rossi - Medico)</option>
+                  <option value="anna.verdi@ospedale.it">anna.verdi@ospedale.it (Anna Verdi - Amministrazione)</option>
+                  <option value="giulia.bianchi@ospedale.it">giulia.bianchi@ospedale.it (Giulia Bianchi - Audit/Auditor)</option>
+                  <option value="luca.ferrari@ospedale.it">luca.ferrari@ospedale.it (Luca Ferrari - Accettazione/Receptionist)</option>
+                  <option value="paolo.roselli@ospedale.it">paolo.roselli@ospedale.it (Paolo Roselli - Medico/Doctor)</option>
+                </select>
+              </label>
 
-            <label for="role" style="grid-column: span 2;">
-              <span>Ruolo</span>
-              <select id="role">
-                {% for key, role in roles.items() %}
-                <option value="{{ key }}">{{ role.label }}</option>
-                {% endfor %}
-              </select>
-            </label>
+              <label for="login-password" style="grid-column: span 2;">
+                <span>Password Directory</span>
+                <input type="password" id="login-password" value="password123" required>
+              </label>
 
-            <label for="department" style="grid-column: span 2;">
-              <span>Reparto / OU</span>
-              <input type="text" id="department" placeholder="Cardiologia">
-            </label>
+              <div class="actions" style="grid-column: span 2; margin-top: 1rem;">
+                <button type="submit" id="login-btn" style="width: 100%;">Accedi con Single Sign-On</button>
+              </div>
+            </form>
+          </div>
 
-            <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px; margin-top: 1rem;">
-              <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">⚡ Avvia Auto-Enroll (Local Agent)</button>
-              <p style="margin-top: 10px;">
-                <strong>Nota:</strong> Questa operazione contatterà l'Agente ZTA locale (porta 9090) in esecuzione sul tuo dispositivo per generare la chiave hardware nel Secure Enclave/TPM e registrarla.
-              </p>
+          <!-- STEP 2: MFA OTP Verification Form -->
+          <div id="enroll-step-otp" style="display: none;">
+            <h3 style="margin-bottom: 1rem; color: var(--accent);">Fase 2: Multi-Factor Authentication (OTP)</h3>
+            <div id="otp-simulation-banner" class="success-box" style="background: rgba(30, 41, 59, 0.7); border-color: var(--accent); margin-bottom: 1.5rem; display: block;">
+              <!-- Will show the simulated OTP code -->
             </div>
-          </form>
+            <form id="otp-form" class="form-grid">
+              <label for="otp-code" style="grid-column: span 2;">
+                <span>Codice di Verifica OTP (MFA)</span>
+                <input type="text" id="otp-code" placeholder="------" required maxlength="6" style="text-align: center; font-size: 1.5em; letter-spacing: 0.2em; font-family: monospace;">
+              </label>
+
+              <div class="actions" style="grid-column: span 2; margin-top: 1rem;">
+                <button type="submit" id="otp-btn" style="width: 100%;">Verifica OTP e Associa Dispositivo</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- STEP 3: Auto-Enroll Trigger Form -->
+          <div id="enroll-step-trigger" style="display: none;">
+            <h3 style="margin-bottom: 1rem; color: var(--accent);">Fase 3: Attestazione Hardware & Emissione Certificato</h3>
+            <div class="query-meta" style="margin-bottom: 1.5rem; background: rgba(14, 25, 44, 0.6); padding: 16px; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.15); display: flex; flex-direction: column; gap: 8px;">
+              <div>Utente (CN) Verificato: <strong id="verified-cn" style="color: var(--accent);"></strong></div>
+              <div>Ruolo Autorizzato: <strong id="verified-role" style="color: var(--accent);"></strong></div>
+              <div>Reparto / OU: <strong id="verified-dept" style="color: var(--accent);"></strong></div>
+            </div>
+            
+            <form id="csr-form" class="form-grid">
+              <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px;">
+                <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">⚡ Avvia Auto-Enroll (Local Agent)</button>
+                <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.85;">
+                  <strong>Nota:</strong> Questa operazione contatterà l'Agente ZTA locale (porta 9090) in esecuzione sul tuo dispositivo per generare la chiave hardware nel Secure Enclave/TPM, associare l'identità autenticata ed emettere il certificato X.509 firmato dalla PKI.
+                </p>
+              </div>
+            </form>
+          </div>
         </section>
 
         <section class="panel info-panel">
@@ -112,6 +147,15 @@
                 <option value="billing">billing (Fatturazione)</option>
                 <option value="providers">providers (Medici / Ospedali)</option>
                 <option value="admissions">admissions (Ricoveri)</option>
+              </select>
+            </label>
+
+            <label for="query-action">
+              <span>Operazione MongoDB</span>
+              <select id="query-action" required>
+                <option value="find" selected>find (Lettura - Standard)</option>
+                <option value="update">update (Modifica - Richiede Step-Up)</option>
+                <option value="delete">delete (Eliminazione - Richiede Step-Up)</option>
               </select>
             </label>
 
@@ -164,7 +208,7 @@
           </p>
           <ul>
             <li><strong>Autenticazione hardware:</strong> Envoy convalida il certificato mTLS.</li>
-            <li><strong>Decisione OPA:</strong> Open Policy Agent valuta il ruolo, la collezione e l'IP sorgente per calcolare il punteggio di rischio.</li>
+          <li><strong>Decisione OPA:</strong> Open Policy Agent valuta il ruolo, la collezione e l'IP sorgente per calcolare il punteggio di rischio.</li>
             <li><strong>Tracciamento Splunk:</strong> Ogni decisione di policy (ALLOW/DENY) viene registrata con il CN dell'utente reale.</li>
             <li><strong>Row-Level Security (RLS):</strong> La collezione viene tradotta dinamicamente nella vista MongoDB associata al ruolo dell'utente prima dell'esecuzione.</li>
           </ul>
@@ -172,6 +216,53 @@
       </section>
     </div>
   </main>
+
+  <!-- Modal for Primary AD Auth + OTP -->
+  <div id="primary-auth-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 style="margin: 0; font-size: 1.25rem;">🔒 Autenticazione Primaria Richiesta</h2>
+        <button type="button" class="modal-close" onclick="closePrimaryAuthModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-error-box" class="error-box" style="display: none;"></div>
+        
+        <!-- STEP 1: Login -->
+        <div id="modal-step-login">
+          <p style="margin-bottom: 1.5rem; opacity: 0.85; font-size: 0.9em; line-height: 1.5;">
+            La sessione primaria è scaduta o è richiesta una Step-Up Authentication per eseguire l'operazione sensibile. Effettua l'accesso alla Directory Aziendale.
+          </p>
+          <form id="modal-login-form" class="form-grid">
+            <label for="modal-login-email" style="grid-column: span 2;">
+              <span>Email Aziendale</span>
+              <input type="email" id="modal-login-email" readonly style="opacity: 0.7; background: rgba(8,15,27,0.4);">
+            </label>
+            <label for="modal-login-password" style="grid-column: span 2;">
+              <span>Password Directory</span>
+              <input type="password" id="modal-login-password" value="password123" required>
+            </label>
+            <div class="actions" style="grid-column: span 2; margin-top: 1rem;">
+              <button type="submit" id="modal-login-btn" style="width: 100%;">Accedi con Single Sign-On</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- STEP 2: OTP -->
+        <div id="modal-step-otp" style="display: none;">
+          <div id="modal-otp-simulation-banner" class="success-box" style="background: rgba(30, 41, 59, 0.7); border-color: var(--accent); margin-bottom: 1.5rem; display: block;"></div>
+          <form id="modal-otp-form" class="form-grid">
+            <label for="modal-otp-code" style="grid-column: span 2;">
+              <span>Codice di Verifica OTP (MFA)</span>
+              <input type="text" id="modal-otp-code" placeholder="------" required maxlength="6" style="text-align: center; font-size: 1.5em; letter-spacing: 0.2em; font-family: monospace;">
+            </label>
+            <div class="actions" style="grid-column: span 2; margin-top: 1rem;">
+              <button type="submit" id="modal-otp-btn" style="width: 100%;">Verifica OTP</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     // Tab switching function
@@ -624,26 +715,99 @@
       }
     }
 
+    let currentAuthEmail = '';
+    let enrollmentSessionToken = '';
+
+    // Handle AD Login Form submission
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      const errorBox = document.getElementById('error-box');
+      const loginBtn = document.getElementById('login-btn');
+
+      errorBox.style.display = 'none';
+
+      try {
+        loginBtn.disabled = true;
+        loginBtn.textContent = '⏳ Autenticazione in corso...';
+
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Credenziali non valide');
+        }
+
+        currentAuthEmail = email;
+        document.getElementById('otp-simulation-banner').innerHTML = `✉️ <strong>Codice di verifica inviato!</strong><br>Inserisci il seguente codice OTP simulato per completare il secondo fattore:<br><span style="font-size: 1.5em; letter-spacing: 0.1em; color: var(--accent); font-weight: 900;">${data.simulated_otp}</span>`;
+        document.getElementById('enroll-step-login').style.display = 'none';
+        document.getElementById('enroll-step-otp').style.display = 'block';
+      } catch (error) {
+        errorBox.textContent = `❌ Accesso AD fallito: ${error.message}`;
+        errorBox.style.display = 'block';
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Accedi con Single Sign-On';
+      }
+    });
+
+    // Handle OTP Form submission
+    document.getElementById('otp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const otp = document.getElementById('otp-code').value.trim();
+      const errorBox = document.getElementById('error-box');
+      const otpBtn = document.getElementById('otp-btn');
+
+      errorBox.style.display = 'none';
+
+      try {
+        otpBtn.disabled = true;
+        otpBtn.textContent = '⏳ Verifica codice OTP...';
+
+        const response = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentAuthEmail, otp: otp })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'OTP non valido o scaduto');
+        }
+
+        enrollmentSessionToken = data.enrollment_session_token;
+        
+        document.getElementById('verified-cn').textContent = data.user_info.cn;
+        document.getElementById('verified-role').textContent = data.user_info.role;
+        document.getElementById('verified-dept').textContent = data.user_info.department || 'N/A';
+
+        document.getElementById('enroll-step-otp').style.display = 'none';
+        document.getElementById('enroll-step-trigger').style.display = 'block';
+      } catch (error) {
+        errorBox.textContent = `❌ Verifica OTP fallita: ${error.message}`;
+        errorBox.style.display = 'block';
+      } finally {
+        otpBtn.disabled = false;
+        otpBtn.textContent = 'Verifica OTP e Associa Dispositivo';
+      }
+    });
+
     // Handle Auto-Enroll form submission
     document.getElementById('csr-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       
-      const user = document.getElementById('user').value.trim();
-      const role = document.getElementById('role').value;
-      const department = document.getElementById('department').value.trim();
-
+      const cn = document.getElementById('verified-cn').textContent;
       const errorBox = document.getElementById('error-box');
       const successBox = document.getElementById('success-box');
       const autoBtn = document.getElementById('auto-enroll-btn');
 
       errorBox.style.display = 'none';
       successBox.style.display = 'none';
-
-      if (!user) {
-        errorBox.textContent = '❌ Inserisci l\'Utente (CN)';
-        errorBox.style.display = 'block';
-        return;
-      }
 
       try {
         autoBtn.disabled = true;
@@ -653,9 +817,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            common_name: user,
-            role: role,
-            department: department
+            enrollment_session_token: enrollmentSessionToken
           })
         });
 
@@ -665,7 +827,7 @@
           throw new Error(data.message || 'L\'agente locale ha restituito un errore');
         }
 
-        successBox.textContent = `✓ Enrollment Hardware Completato! Il certificato per ${user} è stato generato e salvato nel Keychain/Certificate Store di sistema.`;
+        successBox.textContent = `✓ Enrollment Hardware Completato! Il certificato per ${cn} è stato generato e salvato nel Keychain/Certificate Store di sistema.`;
         successBox.style.display = 'block';
 
         // Disabilita form
@@ -685,22 +847,132 @@
       }
     });
 
+    // CN to Corporate Email Map for Query Auth Modal
+    const cnToEmailMap = {
+      "mario.rossi": "dr.mario.rossi@ospedale.it",
+      "anna.verdi": "anna.verdi@ospedale.it",
+      "giulia.bianchi": "giulia.bianchi@ospedale.it",
+      "luca.ferrari": "luca.ferrari@ospedale.it",
+      "paolo.roselli": "paolo.roselli@ospedale.it"
+    };
+
+    let primaryAuthCallbacks = null;
+
+    function promptPrimaryAuth(email) {
+      return new Promise((resolve, reject) => {
+        document.getElementById('modal-login-email').value = email;
+        document.getElementById('modal-login-password').value = 'password123';
+        document.getElementById('modal-otp-code').value = '';
+        document.getElementById('modal-error-box').style.display = 'none';
+        document.getElementById('modal-step-login').style.display = 'block';
+        document.getElementById('modal-step-otp').style.display = 'none';
+        document.getElementById('primary-auth-modal').style.display = 'flex';
+        
+        primaryAuthCallbacks = { resolve, reject };
+      });
+    }
+
+    function closePrimaryAuthModal() {
+      document.getElementById('primary-auth-modal').style.display = 'none';
+      if (primaryAuthCallbacks) {
+        primaryAuthCallbacks.reject(new Error('Autenticazione primaria annullata.'));
+        primaryAuthCallbacks = null;
+      }
+    }
+
+    // Modal AD Login submission
+    document.getElementById('modal-login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('modal-login-email').value;
+      const password = document.getElementById('modal-login-password').value;
+      const errorBox = document.getElementById('modal-error-box');
+      const btn = document.getElementById('modal-login-btn');
+
+      errorBox.style.display = 'none';
+      try {
+        btn.disabled = true;
+        btn.textContent = '⏳ Invio credenziali...';
+
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Credenziali non valide');
+        }
+
+        document.getElementById('modal-otp-simulation-banner').innerHTML = `✉️ <strong>Codice OTP simulato:</strong><br><span style="font-size: 1.5em; letter-spacing: 0.1em; color: var(--accent); font-weight: 900;">${data.simulated_otp}</span>`;
+        document.getElementById('modal-step-login').style.display = 'none';
+        document.getElementById('modal-step-otp').style.display = 'block';
+      } catch (error) {
+        errorBox.textContent = `❌ Errore login: ${error.message}`;
+        errorBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Accedi con Single Sign-On';
+      }
+    });
+
+    // Modal OTP Verification
+    document.getElementById('modal-otp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('modal-login-email').value;
+      const otp = document.getElementById('modal-otp-code').value.trim();
+      const errorBox = document.getElementById('modal-error-box');
+      const btn = document.getElementById('modal-otp-btn');
+
+      errorBox.style.display = 'none';
+      try {
+        btn.disabled = true;
+        btn.textContent = '⏳ Verifica OTP...';
+
+        const response = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, otp })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Codice OTP errato');
+        }
+
+        document.getElementById('primary-auth-modal').style.display = 'none';
+        if (primaryAuthCallbacks) {
+          primaryAuthCallbacks.resolve(data.enrollment_session_token);
+          primaryAuthCallbacks = null;
+        }
+      } catch (error) {
+        errorBox.textContent = `❌ Errore OTP: ${error.message}`;
+        errorBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Verifica OTP';
+      }
+    });
+
     // Handle Query Form Submission
     document.getElementById('query-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       
       const user = document.getElementById('query-user').value;
       const collection = document.getElementById('query-collection').value;
+      const action = document.getElementById('query-action').value;
       const limit = document.getElementById('query-limit').value;
       const filter = getFilterPayload();
       
       const errBox = document.getElementById('query-error-box');
+      const successBox = document.getElementById('query-success-box');
       const resSection = document.getElementById('query-result-section');
       const submitBtn = document.getElementById('query-submit-btn');
       const outputBox = document.getElementById('query-output-json');
       const mainPanel = document.querySelector('#tab-query .panel');
       
       errBox.style.display = 'none';
+      successBox.style.display = 'none';
       resSection.style.display = 'none';
       mainPanel.classList.remove('forbidden-card');
       
@@ -718,46 +990,92 @@
         const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
         const isHardware = cert ? cert.is_hardware : false;
         
-        let queryPayload = { user, collection, filter, limit };
+        let queryPayload = { user, collection, action, filter, limit };
+        
+        // Determine if Step-up is required
+        let needsStepUp = (action === 'update' || action === 'delete');
+        if (!needsStepUp && collection === 'billing') {
+          try {
+            const parsedFilter = JSON.parse(filter);
+            for (let k in parsedFilter) {
+              if (k === 'billing_amount' || k === 'billing_amount_approx') {
+                const val = parsedFilter[k];
+                if (typeof val === 'number' && val > 5000) {
+                  needsStepUp = true;
+                } else if (typeof val === 'object' && val !== null) {
+                  for (let op in val) {
+                    if (typeof val[op] === 'number' && val[op] > 5000) {
+                      needsStepUp = true;
+                    }
+                  }
+                }
+              }
+            }
+          } catch(e) {}
+        }
         
         if (isHardware) {
-          submitBtn.textContent = '⏳ Richiesta Touch ID / Windows Hello...';
-          try {
-            const agentResponse = await fetch('http://localhost:9090/proxy/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
-            });
-            
-            const agentData = await agentResponse.json();
-            if (!agentResponse.ok) {
-              throw new Error(agentData.error || 'Autenticazione hardware fallita.');
+          submitBtn.textContent = needsStepUp ? '⏳ Richiesta Touch ID (Step-Up Richiesto)...' : '⏳ Richiesta Touch ID / Windows Hello...';
+          
+          let tokenResult = null;
+          let retryCount = 0;
+          
+          while (!tokenResult && retryCount < 2) {
+            try {
+              const oidcResponse = await fetch('http://localhost:9090/oidc/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ common_name: user, step_up: needsStepUp })
+              });
+              
+              const oidcData = await oidcResponse.json();
+              
+              if (oidcResponse.status === 401 && oidcData.error === 'primary_auth_required') {
+                submitBtn.textContent = '⏳ Autenticazione primaria in corso...';
+                const email = cnToEmailMap[user] || `${user}@ospedale.it`;
+                await promptPrimaryAuth(email);
+                
+                retryCount++;
+                submitBtn.textContent = needsStepUp ? '⏳ Richiesta Touch ID (Step-Up Richiesto)...' : '⏳ Richiesta Touch ID / Windows Hello...';
+                continue;
+              }
+              
+              if (!oidcResponse.ok) {
+                throw new Error(oidcData.message || oidcData.error || 'Generazione OIDC fallita.');
+              }
+              
+              tokenResult = oidcData.token;
+            } catch (oidcErr) {
+              if (oidcErr.message === 'Autenticazione primaria annullata.') {
+                throw oidcErr;
+              }
+              if (retryCount >= 1) {
+                throw oidcErr;
+              }
+              throw oidcErr;
             }
-            
-            queryPayload.local_proxy_port = agentData.port;
-            proxyToken = agentData.session_token;
-            
-            submitBtn.textContent = '⏳ Sblocco biometrico per token OIDC...';
-            
-            const oidcResponse = await fetch('http://localhost:9090/oidc/token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ common_name: user })
-            });
-            
-            const oidcData = await oidcResponse.json();
-            if (!oidcResponse.ok) {
-              throw new Error(oidcData.message || oidcData.error || 'Generazione OIDC fallita.');
-            }
-            
-            queryPayload.jwt_token = oidcData.token;
-            
-            submitBtn.textContent = '⏳ Esecuzione query via hardware OIDC mTLS...';
-          } catch (agentErr) {
-            throw new Error(`Impossibile comunicare con l'Agente ZTA locale (porta 9090): ${agentErr.message}`);
           }
+          
+          queryPayload.jwt_token = tokenResult;
+          
+          submitBtn.textContent = '⏳ Avvio proxy locale...';
+          const agentResponse = await fetch('http://localhost:9090/proxy/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
+          });
+          
+          const agentData = await agentResponse.json();
+          if (!agentResponse.ok) {
+            throw new Error(agentData.error || 'Autenticazione hardware fallita.');
+          }
+          
+          queryPayload.local_proxy_port = agentData.port;
+          proxyToken = agentData.session_token;
+          
+          submitBtn.textContent = '⏳ Esecuzione operazione via hardware OIDC mTLS...';
         } else {
-          submitBtn.textContent = '⏳ Esecuzione query in corso...';
+          submitBtn.textContent = '⏳ Esecuzione operazione in corso...';
         }
         
         const response = await fetch('/api/query', {
@@ -790,8 +1108,13 @@
         document.getElementById('query-resp-view').textContent = data.translated_collection;
         document.getElementById('query-resp-count').textContent = data.count;
         
+        if (data.message && data.message !== 'Success') {
+          successBox.textContent = `✓ ${data.message}`;
+          successBox.style.display = 'block';
+        }
+        
         // Render JSON
-        outputBox.textContent = JSON.stringify(data.results, null, 2);
+        outputBox.textContent = JSON.stringify(data.results || data, null, 2);
         
         // Render Table
         renderQueryResults(data.results, collection);

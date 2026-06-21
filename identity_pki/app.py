@@ -13,6 +13,47 @@ from .pki import PKIService
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 import json
+import random
+import uuid
+from datetime import datetime, timedelta, timezone
+
+# Simulated Active Directory / HR database for ZTA Identity Verification
+AD_USERS = {
+    "dr.mario.rossi@ospedale.it": {
+        "cn": "mario.rossi",
+        "role": "doctor",
+        "department": "Cardiologia",
+        "password": "password123"
+    },
+    "anna.verdi@ospedale.it": {
+        "cn": "anna.verdi",
+        "role": "billing_staff",
+        "department": "Amministrazione",
+        "password": "password123"
+    },
+    "giulia.bianchi@ospedale.it": {
+        "cn": "giulia.bianchi",
+        "role": "auditor",
+        "department": "Audit",
+        "password": "password123"
+    },
+    "luca.ferrari@ospedale.it": {
+        "cn": "luca.ferrari",
+        "role": "receptionist",
+        "department": "Accettazione",
+        "password": "password123"
+    },
+    "paolo.roselli@ospedale.it": {
+        "cn": "paolo.roselli",
+        "role": "doctor",
+        "department": "Cardiologia",
+        "password": "password123"
+    }
+}
+
+PENDING_OTPS = {}          # email -> {"otp": "123456", "expires_at": datetime, "user_info": dict}
+ENROLLMENT_SESSIONS = {}   # token -> {"cn": cn, "role": role, "department": department, "expires_at": datetime}
+PRIMARY_SESSIONS = {}      # cn -> {"login_time": datetime, "last_mfa_time": datetime}
 
 # Load ZTA roles
 try:
@@ -112,6 +153,23 @@ def create_app(data_dir=None) -> Flask:
     def api_sign_csr():
         """Sign a CSR with Hardware Attestation."""
         payload = request.get_json(silent=True) or {}
+        session_token = payload.get("enrollment_session_token")
+        
+        if not session_token:
+            return error_response("Enrollment session token is required", 401)
+            
+        session = ENROLLMENT_SESSIONS.get(session_token)
+        if not session:
+            return error_response("Invalid enrollment session", 401)
+            
+        if datetime.now(timezone.utc) > session["expires_at"]:
+            ENROLLMENT_SESSIONS.pop(session_token, None)
+            return error_response("Enrollment session has expired", 401)
+            
+        user = session["cn"]
+        role = session["role"]
+        department = session["department"]
+
         csr_pem = payload.get("csr", "")
         challenge_id = payload.get("challenge_id")
         signature_b64 = payload.get("attestation_sig_b64")
@@ -121,10 +179,6 @@ def create_app(data_dir=None) -> Flask:
         
         if not csr_pem and not is_hw and not proof_string:
             return error_response("CSR required", 400)
-
-        role = payload.get("role")
-        if role and role not in VALID_ROLE_NAMES:
-            return error_response(f"Role '{role}' is invalid. Valid roles are: {VALID_ROLE_NAMES}", 400)
         
         print(f"[DEBUG] CSR Payload ricevuto: {list(payload.keys())}")
         print(f"[DEBUG] MAC: {payload.get('mac_address')}, CPU: {payload.get('cpu_id')}")
@@ -140,7 +194,7 @@ def create_app(data_dir=None) -> Flask:
             user_mac = payload.get("mac_address") or payload.get("mac")
             user_cpu = payload.get("cpu_id") or payload.get("cpu")
             
-            print(f"[DEBUG] Tentativo Enrollment per {payload.get('user')} con MAC={user_mac}, CPU={user_cpu}")
+            print(f"[DEBUG] Tentativo Enrollment per {user} con MAC={user_mac}, CPU={user_cpu}")
 
             cert_pem = service.issue_hardware_bound_certificate(
                 csr_pem=effective_csr,
@@ -149,15 +203,15 @@ def create_app(data_dir=None) -> Flask:
                 public_key_pem=payload.get("public_key_pem"),
                 is_hardware_csr=is_hw,
                 proof_string=payload.get("proof_string"),
-                user=payload.get("user"),
-                role=payload.get("role"),
-                department=payload.get("department"),
+                user=user,
+                role=role,
+                department=department,
                 mac=user_mac,
                 cpu=user_cpu
             )
             
             # Auto-provision user in MongoDB
-            provision_mongo_user(payload.get("user"), payload.get("role"))
+            provision_mongo_user(user, role)
                 
             return jsonify({
                 "status": "signed",
@@ -173,24 +227,39 @@ def create_app(data_dir=None) -> Flask:
     def api_issue_certificate():
         """Issue a certificate without hardware attestation (lab mode)."""
         payload = request.get_json(silent=True) or {}
-        user_cn = payload.get("user")
+        session_token = payload.get("enrollment_session_token")
+        
+        if session_token:
+            session = ENROLLMENT_SESSIONS.get(session_token)
+            if not session:
+                return error_response("Invalid enrollment session", 401)
+            if datetime.now(timezone.utc) > session["expires_at"]:
+                ENROLLMENT_SESSIONS.pop(session_token, None)
+                return error_response("Enrollment session has expired", 401)
+            user_cn = session["cn"]
+            role = session["role"]
+            department = session["department"]
+        else:
+            user_cn = payload.get("user")
+            role = payload.get("role")
+            department = payload.get("department")
+
         if not user_cn:
             return error_response("User CN is required", 400)
 
-        role = payload.get("role")
         if role and role not in VALID_ROLE_NAMES:
             return error_response(f"Role '{role}' is invalid. Valid roles are: {VALID_ROLE_NAMES}", 400)
         try:
             bundle = service.issue_certificate(
                 user=user_cn,
-                role=payload.get("role"),
-                department=payload.get("department"),
+                role=role,
+                department=department,
                 hardware_mode=payload.get("hardware_mode", "manual"),
                 mac=payload.get("mac"),
                 cpu=payload.get("cpu"),
             )
             # Auto-provision user in MongoDB
-            provision_mongo_user(user_cn, payload.get("role"))
+            provision_mongo_user(user_cn, role)
         except ValueError as exc:
             return error_response(str(exc), 400)
 
@@ -206,16 +275,109 @@ def create_app(data_dir=None) -> Flask:
             }
         )
 
+    @app.post("/api/auth/login")
+    def api_auth_login():
+        """Simulate Active Directory login and send OTP."""
+        payload = request.get_json(silent=True) or {}
+        email = payload.get("email", "").strip()
+        password = payload.get("password", "")
+
+        if not email or not password:
+            return error_response("Email and Password are required", 400)
+
+        user_info = AD_USERS.get(email)
+        if not user_info or user_info["password"] != password:
+            return error_response("Invalid email or password", 401)
+
+        # Generate 6-digit OTP
+        otp = f"{random.randint(100000, 999999)}"
+        # Store in pending
+        PENDING_OTPS[email] = {
+            "otp": otp,
+            "user_info": user_info,
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5)
+        }
+
+        app.logger.info(f"Simulated AD Login Success for {email}. OTP Code Generated: {otp}")
+        return jsonify({
+            "status": "otp_required",
+            "message": f"Simulated MFA OTP generated for {email}",
+            "email": email,
+            "simulated_otp": otp  # Returned for ease of testing in lab UI
+        })
+
+    @app.post("/api/auth/verify-otp")
+    def api_auth_verify_otp():
+        """Verify the OTP and issue an enrollment session token."""
+        payload = request.get_json(silent=True) or {}
+        email = payload.get("email", "").strip()
+        otp = payload.get("otp", "").strip()
+
+        if not email or not otp:
+            return error_response("Email and OTP are required", 400)
+
+        pending = PENDING_OTPS.get(email)
+        if not pending:
+            return error_response("No pending authentication session found", 400)
+
+        if datetime.now(timezone.utc) > pending["expires_at"]:
+            PENDING_OTPS.pop(email, None)
+            return error_response("OTP has expired", 401)
+
+        if pending["otp"] != otp:
+            return error_response("Invalid OTP code", 401)
+
+        # Success: generate session token
+        token = str(uuid.uuid4())
+        user_cn = pending["user_info"]["cn"]
+        ENROLLMENT_SESSIONS[token] = {
+            "cn": user_cn,
+            "role": pending["user_info"]["role"],
+            "department": pending["user_info"]["department"],
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10)
+        }
+
+        # Establish/Refresh Primary Auth Session (valid for 12 hours)
+        now = datetime.now(timezone.utc)
+        PRIMARY_SESSIONS[user_cn] = {
+            "login_time": now,
+            "last_mfa_time": now
+        }
+
+        # Clean up pending
+        PENDING_OTPS.pop(email, None)
+
+        app.logger.info(f"MFA Verified for {email}. Enrollment session token issued: {token}")
+        return jsonify({
+            "status": "success",
+            "enrollment_session_token": token,
+            "user_info": {
+                "cn": ENROLLMENT_SESSIONS[token]["cn"],
+                "role": ENROLLMENT_SESSIONS[token]["role"],
+                "department": ENROLLMENT_SESSIONS[token]["department"]
+            }
+        })
+
     @app.post("/api/enroll")
     def api_enroll_delegated():
         """Delegate hardware enrollment request to the host local agent."""
         payload = request.get_json(silent=True) or {}
-        user = payload.get("common_name") or payload.get("user")
-        role = payload.get("role")
-        department = payload.get("department")
+        session_token = payload.get("enrollment_session_token")
         
-        if not user:
-            return error_response("User CN is required", 400)
+        if not session_token:
+            return error_response("Enrollment session token is required", 401)
+            
+        session = ENROLLMENT_SESSIONS.get(session_token)
+        if not session:
+            return error_response("Invalid enrollment session", 401)
+            
+        if datetime.now(timezone.utc) > session["expires_at"]:
+            ENROLLMENT_SESSIONS.pop(session_token, None)
+            return error_response("Enrollment session has expired", 401)
+            
+        user = session["cn"]
+        role = session["role"]
+        department = session["department"]
             
         import urllib.request
         import urllib.error
@@ -224,7 +386,8 @@ def create_app(data_dir=None) -> Flask:
         agent_payload = {
             "common_name": user,
             "role": role,
-            "department": department
+            "department": department,
+            "enrollment_session_token": session_token
         }
         
         from urllib.parse import urlparse
@@ -321,6 +484,7 @@ def create_app(data_dir=None) -> Flask:
         signature_b64 = payload.get("signature")
         public_key_pem = payload.get("public_key_pem")
         proof_string = payload.get("proof_string")
+        step_up = payload.get("step_up", False)
         
         if not challenge_id or not signature_b64:
             return error_response("challenge_id and signature are required", 400)
@@ -337,6 +501,29 @@ def create_app(data_dir=None) -> Flask:
             
         user_cn = identity["user"]
         role = identity["role"]
+        
+        # Check if user is revoked
+        if os.path.exists(os.path.join(service.revoked_dir, f"{user_cn}.rev")):
+            return error_response("Identity is revoked", 401)
+
+        # Primary Authentication Session Gating (valid for 12 hours)
+        session = PRIMARY_SESSIONS.get(user_cn)
+        now = datetime.now(timezone.utc)
+        
+        if not session or (now - session["login_time"]) > timedelta(hours=12):
+            return jsonify({
+                "error": "primary_auth_required",
+                "reason": "session_expired",
+                "message": "Autenticazione primaria scaduta o non trovata. Esegui il login AD + MFA."
+            }), 401
+            
+        if step_up:
+            if (now - session["last_mfa_time"]) > timedelta(seconds=120):
+                return jsonify({
+                    "error": "primary_auth_required",
+                    "reason": "step_up",
+                    "message": "Step-up Authentication richiesta. Reinserisci la password e l'OTP."
+                }), 401
         
         # Load cert fingerprint
         cert_path = os.path.join(service.cert_dir, "client", f"{user_cn}.crt")
@@ -355,7 +542,7 @@ def create_app(data_dir=None) -> Flask:
                 cert = x509.load_pem_x509_certificate(f.read())
             
             cert_fingerprint = cert.fingerprint(hashes.SHA256()).hex()
-            token = issue_jwt(user_cn, role, cert_fingerprint)
+            token = issue_jwt(user_cn, role, cert_fingerprint, step_up=step_up)
             
             return jsonify({
                 "access_token": token,
@@ -430,15 +617,20 @@ def create_app(data_dir=None) -> Flask:
         query_filter_str = payload.get("filter", "{}")
         limit = int(payload.get("limit", 10))
         jwt_token = payload.get("jwt_token")
+        mongo_action = payload.get("action", "find")
+
+        if not user_cn or not collection_name:
+            return error_response("User CN and Collection name are required", 400)
+
+        # Check if user is revoked
+        if os.path.exists(os.path.join(service.revoked_dir, f"{user_cn}.rev")):
+            return error_response("Identity is revoked", 401)
 
         if not jwt_token:
             return error_response(
                 "Autenticazione OIDC obbligatoria. L'autenticazione legacy (SCRAM/Password) è disabilitata.",
                 401
             )
-
-        if not user_cn or not collection_name:
-            return error_response("User CN and Collection name are required", 400)
 
         try:
             query_filter = json.loads(query_filter_str) if query_filter_str else {}
@@ -626,19 +818,43 @@ def create_app(data_dir=None) -> Flask:
                     )
 
             db = client[mongo_db_name]
-            cursor = db[view_name].find(query_filter).limit(limit)
             
-            from bson import json_util
-            results = list(cursor)
-            results_json = json.loads(json_util.dumps(results))
+            results_json = []
+            count = 0
+            message = "Success"
+            target_collection = view_name if mongo_action == "find" else collection_name
+            
+            if mongo_action == "find":
+                cursor = db[target_collection].find(query_filter).limit(limit)
+                from bson import json_util
+                results = list(cursor)
+                results_json = json.loads(json_util.dumps(results))
+                count = len(results_json)
+            elif mongo_action == "update":
+                update_payload = {"$set": {
+                    "updated_at": datetime.now(timezone.utc),
+                    "status_note": "ZTA Verified Step-Up Update"
+                }}
+                res = db[target_collection].update_many(query_filter, update_payload)
+                count = res.modified_count
+                message = f"Successfully updated {count} documents in {target_collection}"
+            elif mongo_action == "delete":
+                res = db[target_collection].delete_many(query_filter)
+                count = res.deleted_count
+                message = f"Successfully deleted {count} documents in {target_collection}"
+            else:
+                client.close()
+                return error_response(f"Unsupported action: {mongo_action}", 400)
+                
             client.close()
 
             return jsonify({
                 "status": "success",
                 "role": role,
-                "translated_collection": view_name,
-                "count": len(results_json),
-                "results": results_json
+                "translated_collection": target_collection,
+                "count": count,
+                "results": results_json,
+                "message": message
             })
 
         except OperationFailure as e:

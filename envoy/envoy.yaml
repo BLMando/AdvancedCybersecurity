@@ -54,6 +54,8 @@ static_resources:
                   # PRO-TIP: Use SDS to fetch the CA bundle dynamically.
                   trusted_ca:
                     filename: /etc/certs/ca/ca.crt
+                  crl:
+                    filename: /etc/certs/ca/ca.crl
               # Fail closed: the connection is rejected if the client does not
               # present a valid certificate.
               require_client_certificate: true

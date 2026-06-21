@@ -1,10 +1,12 @@
 # Zero Trust Architecture — Technical Blueprint
 
-This document details the modern, hardware-bound Zero Trust implementation for macOS, leveraging the Secure Enclave (SEP) and a native agent for end-to-end security.
+This document details the modern, hardware-bound Zero Trust implementation for macOS and Windows, leveraging the Secure Enclave (SEP) / TPM 2.0 and a native agent for end-to-end security.
+
+> **Last Updated**: 2026-06-21 — Added 4-Layer Authentication Model (Primary Session Gating + Step-Up Auth).
 
 ## 1. High-Level Architecture
 
-The system is built on a **Three-Layer Security Model**:
+The system is built on a **Four-Layer Security Model**:
 
 ```mermaid
 graph TD
@@ -34,9 +36,10 @@ graph TD
 4.  **Certificate Issuance**: The PKI server verifies the signature, stores the hardware metadata, and issues an X.509 certificate linked to the hardware key's public part.
 
 ### Phase 2: Multi-Layer Authentication
-*   **Layer 1 (Identity Verification)**: Before any network activity, the client must prove its identity to the PKI server by signing a fresh challenge. This unlocks the use of the identity for the current session.
-*   **Layer 2 (Perimeter Gate - mTLS)**: All traffic to protected resources must pass through Envoy. Envoy requires a client certificate. The Native Agent performs the mTLS handshake, using **Touch ID / Bio-metrics** to authorize the use of the Secure Enclave key.
-*   **Layer 3 (Policy Gate - OPA)**: Envoy extracts the identity from the certificate and the intent from the protocol (e.g., MongoDB BSON). OPA evaluates the risk based on user role, hardware health, and network location.
+*   **Layer 0 (Primary Session Gate)**: Before any token can be issued, the server verifies an active human session. The user must authenticate via AD Login + OTP (simulated IdP). Sessions last 12 hours; sensitive operations (`update`, `delete`, billing > 5000) additionally require Step-Up MFA with a 120-second freshness window.
+*   **Layer 1 (Identity Verification)**: The client proves possession of its hardware-bound key by signing a fresh challenge from the PKI server. This unlocks the use of the identity for the current session.
+*   **Layer 2 (Perimeter Gate - mTLS)**: All traffic to protected resources must pass through Envoy. Envoy requires a client certificate. The Native Agent performs the mTLS handshake, using **Touch ID / Bio-metrics** to authorize the use of the Secure Enclave / TPM key.
+*   **Layer 3 (Policy Gate - OPA)**: Envoy extracts the identity from the certificate and the intent from the protocol (e.g., MongoDB BSON). OPA evaluates the risk based on user role, hardware health, network location, and RFC 8705 Token Binding (cnf claim verification).
 
 ## 3. Native Agent Components
 
@@ -53,7 +56,10 @@ graph TD
 
 ## 4. Security Principles
 
-1.  **Hardware Roots of Trust**: Private keys are non-exportable and protected by Apple's Secure Enclave.
-2.  **Bio-metric Authorization**: Sensitive operations (mTLS handshake) can be tied to Touch ID.
-3.  **Protocol-Aware Inspection**: Envoy decodes the MongoDB protocol, allowing OPA to make decisions based on specific collections or commands (e.g., "Allow 'find' but deny 'drop'").
-4.  **Fail-Closed**: If any layer (Agent, PKI, OPA) is unavailable, access is denied by default.
+1.  **Hardware Roots of Trust**: Private keys are non-exportable and protected by Apple's Secure Enclave (macOS) or TPM 2.0 (Windows).
+2.  **Human Session Lifecycle**: Certificate validity ≠ session validity. A 12-hour server-side primary session ensures a human operator authenticated recently, independent of the cryptographic certificate's expiry.
+3.  **Progressive MFA (Step-Up Auth)**: Sensitive operations trigger a mandatory 120-second freshness check, requiring a fresh OTP verification before destructive or high-value actions proceed.
+4.  **Bio-metric Authorization**: The mTLS handshake is tied to Touch ID / Windows Hello, proving physical presence of the authorized operator. A single biometric authorization is shared across all mTLS connections in a session.
+5.  **Protocol-Aware Inspection**: Envoy decodes the MongoDB protocol, allowing OPA to make decisions based on specific collections or commands (e.g., "Allow 'find' but deny 'drop'").
+6.  **RFC 8705 Token Binding**: OIDC JWTs embed a cryptographic hash of the client certificate (`cnf` claim). OPA verifies this binding on every request, preventing token theft from being exploited from a different machine.
+7.  **Fail-Closed**: If any layer (Agent, PKI, OPA, Primary Session) is unavailable or expired, access is denied by default.

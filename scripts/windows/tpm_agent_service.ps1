@@ -16,11 +16,105 @@ param (
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
     Add-Type -TypeDefinition '
+        using System;
         using System.Net;
+        using System.Security.Cryptography;
         using System.Security.Cryptography.X509Certificates;
+        using System.Text;
+        using System.Collections;
+
         public class SSLBypass {
             public static void Bypass() {
                 ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
+            }
+        }
+
+        public class RSASoftKeyHelper {
+            private static byte[] EncodeInteger(byte[] bytes) {
+                int left = 0;
+                while (left < bytes.Length && bytes[left] == 0) left++;
+                int len = bytes.Length - left;
+                if (len == 0) return new byte[] { 0x02, 0x01, 0x00 };
+                
+                bool pad = (bytes[left] & 0x80) != 0;
+                int datalen = len + (pad ? 1 : 0);
+                
+                byte[] lenBytes;
+                if (datalen < 128) {
+                    lenBytes = new byte[] { (byte)datalen };
+                } else if (datalen <= 255) {
+                    lenBytes = new byte[] { 0x81, (byte)datalen };
+                } else {
+                    lenBytes = new byte[] { 0x82, (byte)(datalen >> 8), (byte)(datalen & 0xff) };
+                }
+                
+                byte[] res = new byte[1 + lenBytes.Length + datalen];
+                res[0] = 0x02;
+                Buffer.BlockCopy(lenBytes, 0, res, 1, lenBytes.Length);
+                int writePos = 1 + lenBytes.Length;
+                if (pad) {
+                    res[writePos] = 0x00;
+                    writePos++;
+                }
+                Buffer.BlockCopy(bytes, left, res, writePos, len);
+                return res;
+            }
+
+            private static byte[] EncodeSequence(byte[] d1, byte[] d2, byte[] d3, byte[] d4, byte[] d5, byte[] d6, byte[] d7, byte[] d8, byte[] d9) {
+                int totalLen = d1.Length + d2.Length + d3.Length + d4.Length + d5.Length + d6.Length + d7.Length + d8.Length + d9.Length;
+                byte[] lenBytes;
+                if (totalLen < 128) {
+                    lenBytes = new byte[] { (byte)totalLen };
+                } else if (totalLen <= 255) {
+                    lenBytes = new byte[] { 0x81, (byte)totalLen };
+                } else {
+                    lenBytes = new byte[] { 0x82, (byte)(totalLen >> 8), (byte)(totalLen & 0xff) };
+                }
+                
+                byte[] res = new byte[1 + lenBytes.Length + totalLen];
+                res[0] = 0x30;
+                Buffer.BlockCopy(lenBytes, 0, res, 1, lenBytes.Length);
+                int writePos = 1 + lenBytes.Length;
+                
+                byte[][] parts = new byte[][] { d1, d2, d3, d4, d5, d6, d7, d8, d9 };
+                foreach (var p in parts) {
+                    Buffer.BlockCopy(p, 0, res, writePos, p.Length);
+                    writePos += p.Length;
+                }
+                return res;
+            }
+
+            public static Hashtable GenerateSoftwareKeyPair(string cn, string timestamp) {
+                using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(2048)) {
+                    RSAParameters p = rsa.ExportParameters(true);
+                    
+                    byte[] d1 = EncodeInteger(new byte[] { 0x00 });
+                    byte[] d2 = EncodeInteger(p.Modulus);
+                    byte[] d3 = EncodeInteger(p.Exponent);
+                    byte[] d4 = EncodeInteger(p.D);
+                    byte[] d5 = EncodeInteger(p.P);
+                    byte[] d6 = EncodeInteger(p.Q);
+                    byte[] d7 = EncodeInteger(p.DP);
+                    byte[] d8 = EncodeInteger(p.DQ);
+                    byte[] d9 = EncodeInteger(p.InverseQ);
+                    
+                    byte[] der = EncodeSequence(d1, d2, d3, d4, d5, d6, d7, d8, d9);
+                    string privB64 = Convert.ToBase64String(der, Base64FormattingOptions.InsertLineBreaks);
+                    string privPem = "-----BEGIN RSA PRIVATE KEY-----\r\n" + privB64 + "\r\n-----END RSA PRIVATE KEY-----";
+
+                    string proofString = "ZTA-CERT-BINDING|CN=" + cn + "|TIME=" + timestamp;
+                    byte[] dataToSign = Encoding.UTF8.GetBytes(proofString);
+                    byte[] signature = rsa.SignData(dataToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                    string sigB64 = Convert.ToBase64String(signature);
+
+                    Hashtable result = new Hashtable();
+                    result["private_key_pem"] = privPem;
+                    result["modulus_b64"] = Convert.ToBase64String(p.Modulus);
+                    result["exponent_b64"] = Convert.ToBase64String(p.Exponent);
+                    result["proof_string"] = proofString;
+                    result["signature_b64"] = sigB64;
+                    return result;
+                }
             }
         }
     '
@@ -428,8 +522,21 @@ function Start-HttpServer {
                     if (-not $role) { $role = "doctor" }
                     $dept = $jsonBody.department
                     if (-not $dept) { $dept = "Cardiologia" }
-                    Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept" -ForegroundColor Gray
+                    $sessionToken = $jsonBody.enrollment_session_token
+                    Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept, Token=$sessionToken" -ForegroundColor Gray
                     
+                    # Inizializza mac e cpu per l'utilizzo anche nel blocco catch di fallback
+                    $mac = ""
+                    try {
+                        $mac = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1).MacAddress
+                    } catch {}
+                    if (-not $mac) { $mac = "00:11:22:33:44:55" }
+                    
+                    $cpu = "Windows-PC"
+                    try {
+                        $cpu = (Get-CimInstance Win32_Processor).Name.Trim()
+                    } catch {}
+
                     try {
                         # 1. Recupera challenge dal server PKI
                         $challengeUrl = "https://localhost:8080/api/challenge"
@@ -440,18 +547,6 @@ function Start-HttpServer {
                         $hwScript = Join-Path (Split-Path $PSCommandPath -Parent) "hw_attestation.ps1"
                         $hwRes = & $hwScript -CN $cn
                         $hwData = ConvertFrom-Json $hwRes
-                        
-                        # Rileva MAC e CPU
-                        $mac = ""
-                        try {
-                            $mac = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1).MacAddress
-                        } catch {}
-                        if (-not $mac) { $mac = "00:11:22:33:44:55" }
-                        
-                        $cpu = "Windows-PC"
-                        try {
-                            $cpu = (Get-CimInstance Win32_Processor).Name.Trim()
-                        } catch {}
                         
                         # Costruisci PEM della chiave pubblica (usa la funzione custom compatibile con .NET Framework)
                         $modRaw = [Convert]::FromBase64String($hwData.modulus_b64)
@@ -471,6 +566,7 @@ function Start-HttpServer {
                             is_hardware_csr = $false
                             mac = $mac
                             cpu = $cpu
+                            enrollment_session_token = $sessionToken
                         }
                         
                         $enrollResp = Invoke-RestMethod -Uri $enrollUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $enrollPayload -Compress) -TimeoutSec 30
@@ -500,9 +596,53 @@ function Start-HttpServer {
                         }
                         Write-Host "[API] /enroll completato con successo per CN=$cn" -ForegroundColor Green
                     } catch {
-                        $statusCode = 500
-                        $responseObj = @{ status = "error"; message = $_.Exception.Message }
-                        Write-Host "[API] /enroll fallito per CN=$cn : $_" -ForegroundColor Red
+                        Write-Host "[API] Enrollment TPM/Store fallito per CN=$cn : $_. Provo fallback software file-based..." -ForegroundColor Yellow
+                        try {
+                            $timestamp = (Get-Date -uformat "%Y-%m-%dT%H:%M:%SZ")
+                            $softKeyData = [RSASoftKeyHelper]::GenerateSoftwareKeyPair($cn, $timestamp)
+                            
+                            $modRaw = [Convert]::FromBase64String($softKeyData.modulus_b64)
+                            $expRaw = [Convert]::FromBase64String($softKeyData.exponent_b64)
+                            $pubKeyPem = Export-SpkiPublicKeyPem $modRaw $expRaw
+                            
+                            $challengeUrl = "https://localhost:8080/api/challenge"
+                            $challengeResp = Invoke-RestMethod -Uri $challengeUrl -Method Get -TimeoutSec 10
+                            $challengeId = $challengeResp.challenge_id
+                            
+                            $enrollUrl = "https://localhost:8080/api/csr"
+                            $enrollPayload = @{
+                                user = $cn
+                                role = $role
+                                department = $dept
+                                challenge_id = $challengeId
+                                proof_string = $softKeyData.proof_string
+                                attestation_sig_b64 = $softKeyData.signature_b64
+                                public_key_pem = $pubKeyPem
+                                is_hardware_csr = $false
+                                mac = $mac
+                                cpu = $cpu
+                                enrollment_session_token = $sessionToken
+                            }
+                            
+                            $enrollResp = Invoke-RestMethod -Uri $enrollUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $enrollPayload -Compress) -TimeoutSec 30
+                            $certPem = $enrollResp.certificate_pem
+                            
+                            # Scrivi copia del cert e della chiave nella cartella dei certificati client
+                            $certOutPath = Join-Path $CERT_DIR "$cn.crt"
+                            $keyOutPath = Join-Path $CERT_DIR "$cn.key"
+                            [System.IO.File]::WriteAllText($certOutPath, $certPem)
+                            [System.IO.File]::WriteAllText($keyOutPath, $softKeyData.private_key_pem)
+                            
+                            $responseObj = @{
+                                status = "success"
+                                message = "Enrollment completato (Fallback Software File-based)!"
+                            }
+                            Write-Host "[API] /enroll software fallback completato per CN=$cn" -ForegroundColor Green
+                        } catch {
+                            $statusCode = 500
+                            $responseObj = @{ status = "error"; message = "TPM enrollment e software fallback falliti entrambi: $($_.Exception.Message)" }
+                            Write-Host "[API] /enroll fallback software fallito per CN=$cn : $_" -ForegroundColor Red
+                        }
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/proxy/start") {
@@ -540,7 +680,9 @@ function Start-HttpServer {
                     $cn = $jsonBody.common_name
                     if (-not $cn) { $cn = $jsonBody.user }
                     if (-not $cn) { $cn = "paolo.roselli" }
-                    Write-Host "[API] Ricevuto /oidc/token per CN=$cn" -ForegroundColor Gray
+                    $stepUp = $jsonBody.step_up
+                    if ($stepUp -eq "true" -or $stepUp -eq $true) { $stepUp = $true } else { $stepUp = $false }
+                    Write-Host "[API] Ricevuto /oidc/token per CN=$cn, StepUp=$stepUp" -ForegroundColor Gray
                     
                     try {
                         # 1. Recupera challenge dal server PKI
@@ -548,13 +690,24 @@ function Start-HttpServer {
                         $challengeResp = Invoke-RestMethod -Uri $challengeUrl -Method Get -TimeoutSec 10
                         $challengeId = $challengeResp.challenge_id
                         
-                        # 2. Trova il certificato nel Windows Store
+                        # 2. Trova il certificato nel Windows Store (con fallback su file)
                         $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
                         if (-not $cert) {
-                            throw "Certificato non trovato in Windows Store per CN=$cn"
+                            Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
+                            $cert = Get-FileCertWithKey $cn
+                            if (-not $cert) {
+                                throw "Certificato non trovato in Windows Store né su disco per CN=$cn"
+                            }
+                        } elseif (-not $cert.HasPrivateKey) {
+                            Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
+                            $fileCert = Get-FileCertWithKey $cn
+                            if ($fileCert) {
+                                $cert = $fileCert
+                                Write-Host "[API] Cert+key caricati da file per CN=$cn" -ForegroundColor Green
+                            }
                         }
                         
-                        # 3. Costruisci il proof_string e firmalo con la chiave TPM
+                        # 3. Costruisci il proof_string e firmalo con la chiave TPM/Software
                         $timestamp = (Get-Date -uformat "%Y-%m-%dT%H:%M:%SZ")
                         $proofString = "ZTA-CERT-BINDING|CN=$cn|TIME=$timestamp"
                         $proofBytes = [System.Text.Encoding]::UTF8.GetBytes($proofString)
@@ -576,6 +729,7 @@ function Start-HttpServer {
                             signature = $sigB64
                             public_key_pem = $pubKeyPem
                             proof_string = $proofString
+                            step_up = $stepUp
                         }
                         
                         $oidcResp = Invoke-RestMethod -Uri $oidcUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $oidcPayload -Compress) -TimeoutSec 15
@@ -589,6 +743,17 @@ function Start-HttpServer {
                     } catch {
                         $statusCode = 500
                         $responseObj = @{ status = "error"; message = $_.Exception.Message }
+                        if ($_.Exception -and $_.Exception.Response) {
+                            try {
+                                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                                $responseBody = $reader.ReadToEnd()
+                                $reader.Close()
+                                $statusCode = [int]$_.Exception.Response.StatusCode
+                                $responseObj = ConvertFrom-Json $responseBody
+                            } catch {
+                                # Fallback if parsing fails
+                            }
+                        }
                         Write-Host "[API] /oidc/token fallito per CN=$cn : $_" -ForegroundColor Red
                     }
                 }
@@ -599,17 +764,34 @@ function Start-HttpServer {
                     Write-Host "[API] Ricevuto /sign per CN=$cn" -ForegroundColor Gray
                     
                     $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                    if (-not $cert) {
+                        Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
+                        $cert = Get-FileCertWithKey $cn
+                    } elseif (-not $cert.HasPrivateKey) {
+                        Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
+                        $fileCert = Get-FileCertWithKey $cn
+                        if ($fileCert) { $cert = $fileCert }
+                    }
+                    
                     if ($cert) {
-                        $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
-                        $dataBytes = [Convert]::FromBase64String($dataB64)
-                        
-                        # Esegue la firma crittografica delegando a Schannel/TPM
-                        $sigBytes = $rsa.SignData($dataBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-                        $sigB64 = [Convert]::ToBase64String($sigBytes)
-                        
-                        $responseObj = @{
-                            signature_b64 = $sigB64
-                            pub_key_pem = Get-PublicKeyPem $cert
+                        try {
+                            $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+                            if (-not $rsa) {
+                                throw "Impossibile recuperare la chiave privata per la firma per CN=$cn"
+                            }
+                            $dataBytes = [Convert]::FromBase64String($dataB64)
+                            
+                            # Esegue la firma crittografica
+                            $sigBytes = $rsa.SignData($dataBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                            $sigB64 = [Convert]::ToBase64String($sigBytes)
+                            
+                            $responseObj = @{
+                                signature_b64 = $sigB64
+                                pub_key_pem = Get-PublicKeyPem $cert
+                            }
+                        } catch {
+                            $statusCode = 500
+                            $responseObj = @{ error = $_.Exception.Message }
                         }
                     } else {
                         $statusCode = 404

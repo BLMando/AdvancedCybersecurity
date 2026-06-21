@@ -12,9 +12,49 @@ ssl_context.verify_mode = ssl.CERT_NONE
 def main():
     print("=== Testing Trusted Proxy OIDC Query Flow ===")
     
+    server_url = "https://localhost:8080"
+    user_email = "paolo.roselli@ospedale.it"
+    user_cn = "paolo.roselli"
+    
+    # Step 0: Perform Primary AD Authentication + MFA
+    print(f"\n[*] Step 0: Simulating Primary Auth (AD Login) for {user_email}...")
+    login_url = f"{server_url}/api/auth/login"
+    login_payload = {"email": user_email, "password": "password123"}
+    
+    req_login = urllib.request.Request(
+        login_url,
+        data=json.dumps(login_payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    
+    try:
+        with urllib.request.urlopen(req_login, context=ssl_context, timeout=10) as resp:
+            login_data = json.loads(resp.read().decode('utf-8'))
+            otp = login_data.get("simulated_otp")
+            print(f"[✓] Login successful. Simulated OTP received: {otp}")
+            
+            # Verify OTP
+            print(f"[*] Verifying MFA OTP for {user_email}...")
+            verify_url = f"{server_url}/api/auth/verify-otp"
+            verify_payload = {"email": user_email, "otp": otp}
+            
+            req_verify = urllib.request.Request(
+                verify_url,
+                data=json.dumps(verify_payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req_verify, context=ssl_context, timeout=10) as verify_resp:
+                verify_data = json.loads(verify_resp.read().decode('utf-8'))
+                print(f"[✓] MFA Verified! Primary session token: {verify_data.get('enrollment_session_token')}")
+    except Exception as e:
+        print(f"[✗] Primary Authentication failed: {e}")
+        sys.exit(1)
+
     # 1. Start proxy session and get OIDC token from the local agent
     agent_url = "http://localhost:9090/oidc/token"
-    payload = {"common_name": "paolo.roselli"}
+    payload = {"common_name": user_cn}
     
     print(f"\n[*] Fetching OIDC JWT token from local agent at {agent_url}...")
     req = urllib.request.Request(

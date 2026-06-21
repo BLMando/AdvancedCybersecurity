@@ -45,19 +45,60 @@ Questo documento documenta le modifiche architetturali, i bug fix e i refactorin
 
 ---
 
+### G. Primary Session Gating lato Server (12h) e Step-Up Authentication (120s)
+* **File Modificati**: [`app.py`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/identity_pki/app.py), [`oidc.py`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/identity_pki/oidc.py)
+* **Problema**: Dopo l'enrollment, qualsiasi agente con un certificato valido poteva richiedere un token OIDC senza che il server avesse mai verificato la sessione dell'operatore umano. Non esisteva un meccanismo di "scadenza sessione" indipendente dalla validità del certificato X.509, né un controllo di "freschezza" aggiuntivo per operazioni sensibili (update, delete, billing ad alto valore).
+* **Soluzione**: È stato introdotto il dizionario in-memory `PRIMARY_SESSIONS` in `app.py`:
+  ```python
+  PRIMARY_SESSIONS = {}  # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+  ```
+  L'endpoint `/api/oidc/token` applica due livelli di gating:
+  1. **Primary Session Gate (12h)**: Se `PRIMARY_SESSIONS` non contiene una sessione attiva per il `cn` richiedente, oppure se la sessione è scaduta (> 12 ore dal `login_time`), il server risponde con `401 Unauthorized` e il payload `{"reason": "primary_session_required"}`. Il client deve re-autenticarsi tramite il flusso AD Login + OTP prima di poter ricevere un nuovo token.
+  2. **Step-Up Freshness Gate (120s)**: Quando il client richiede il token con `step_up: true` (necessario per `update`, `delete`, o query billing > 5000), il server verifica che `last_mfa_time` della sessione corrente sia stata registrata meno di 120 secondi prima. Se la finestra di freschezza è scaduta, il server risponde con `401` e `{"reason": "step_up_required"}`. Il client deve eseguire un nuovo ciclo OTP prima di procedere.
+  Il login AD con OTP riuscito aggiorna sia `login_time` che `last_mfa_time` in `PRIMARY_SESSIONS[cn]`, resettando entrambe le finestre temporali.
+
+### H. Propagazione degli Errori 401 dagli Agenti Locali alla Web Console
+* **File Modificati**: [`LocalAPIServer.swift`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/ztaagent/ZTAAgent/ZTAAgent/LocalAPIServer.swift), [`tpm_agent_service.ps1`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/scripts/windows/tpm_agent_service.ps1)
+* **Problema**: Quando il server PKI rispondeva con `401 Unauthorized`, gli agenti locali assorbivano l'errore HTTP a livello di rete e restituivano al browser un payload di errore generico (es. `"error": "request failed"`), perdendo l'informazione critica sul `reason` del rifiuto. La Web Console non era quindi in grado di distinguere tra un errore di rete e un errore di sessione scaduta, impedendo il workflow di riautenticazione automatica.
+* **Soluzione (macOS)**: L'handler HTTP in `LocalAPIServer.swift` è stato aggiornato per leggere lo `statusCode` della risposta ricevuta dall'upstream PKI server. Se lo `statusCode` è `401`, il server locale rispedisce al browser esattamente lo stesso status code e lo stesso body JSON ricevuto dalla PKI, mantenendo intatto il campo `reason`. In questo modo il browser riceve un `401` con `{"reason": "primary_session_required"}` o `{"reason": "step_up_required"}` e può reagire di conseguenza.
+* **Soluzione (Windows)**: In `tpm_agent_service.ps1`, il blocco `try-catch` che gestisce le `WebException` (errori HTTP non-2xx) è stato aggiornato per estrarre sia lo `StatusCode` che il body testuale della risposta di errore, replicando lo stesso status code e il body JSON nel Response dell'agente locale verso il browser.
+
+### I. Primary Auth Modal e Auto-Retry nella Web Console
+* **File Modificati**: [`index.html`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/identity_pki/templates/index.html), [`style.css`](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/identity_pki/static/style.css)
+* **Problema**: Anche con la corretta propagazione del `401`, il browser non aveva un meccanismo per raccogliere le credenziali dell'utente (AD Login + OTP), re-autenticarsi e poi riprovare automaticamente la query originale che aveva fallito.
+* **Soluzione**: È stato introdotto il componente `primary-auth-modal` nell'interfaccia web:
+  1. **Modal di Riautenticazione**: Un modale overlay (`#primary-auth-modal`) con form AD Login (email + password) e campo OTP viene visualizzato automaticamente quando il gestore della risposta della query rileva un `401` con `reason` di tipo `primary_session_required` o `step_up_required`.
+  2. **Promise-based Workflow**: La logica JS utilizza una `Promise` (`promptPrimaryAuth()`) che si risolve solo quando il ciclo AD Login + OTP completa con successo. Il form di submit della query viene sospeso in attesa di tale Promise.
+  3. **Auto-Retry**: Non appena la Promise si risolve (sessione ripristinata), il handler originale della query viene rieseguito automaticamente con gli stessi parametri, in modo trasparente per l'utente e senza richiedere un secondo click.
+
+---
+
 ## 2. Flusso di Controllo Aggiornato (Fine-a-Fine)
 
-Il flusso di autenticazione e interrogazione a ciclo di vita breve avviene ora secondo questa sequenza ad ogni click/richiesta:
+Il flusso completo di autenticazione e interrogazione avviene ora secondo questa sequenza ad ogni click/richiesta:
 
 ```
+╔══════════════════════════════════════════════════════════════════╗
+║  LAYER 0: PRIMARY SESSION GATE (12h) — SERVER-SIDE              ║
+║  Richiede login AD + OTP al primo accesso o dopo scadenza        ║
+║  → Aggiorna PRIMARY_SESSIONS[cn] con login_time + last_mfa_time  ║
+╚══════════════════════════════════════════════════════════════════╝
+                              │
+                              ▼
 [ Browser / Web Console :8080 ]
           │
           │ (1) POST /proxy/start (Avvia proxy locale con TTL 60s)
           │
           ├──► [ ZTA Agent ] ──► Prompt Touch ID (1 sola volta, sblocca LAContext)
           │
-          │ (2) POST /oidc/token
-          ├──► [ ZTA Agent ] ──► Genera token OIDC (0 Touch ID: Riutilizza LAContext sbloccato)
+          │ (2) POST /oidc/token  [→ PKI: controlla PRIMARY_SESSIONS]
+          │    ├─ Se sessione scaduta (> 12h) → 401 primary_session_required
+          │    │   └─► [ Browser ] mostra modal → AD Login + OTP → auto-retry
+          │    ├─ Se step_up=true e last_mfa_time > 120s → 401 step_up_required
+          │    │   └─► [ Browser ] mostra modal → OTP → auto-retry
+          │    └─ Sessione valida → JWT emesso (cnf RFC 8705 bound)
+          │
+          ├──► [ ZTA Agent ] ──► Firma challenge OIDC (0 Touch ID: Riutilizza LAContext)
           │
           │ (3) Connessione TCP del pool MongoDB a Local Proxy
           ▼
@@ -65,7 +106,7 @@ Il flusso di autenticazione e interrogazione a ciclo di vita breve avviene ora s
           │
           │ (4) Handshake mTLS multipli (0 Touch ID: Riutilizzano LAContext)
           ▼
-[ Envoy PEP :10000 ] ◄──► [ OPA Engine :9002 ] (Controllo OIDC + Token Binding RFC 8705)
+[ Envoy PEP :10000 ] ◄──► [ OPA Engine :9002 ] (Controllo JWT + cnf Token Binding RFC 8705)
           │
           ▼ (5) Connessione TLS interna con Proxy Impersonation (PROXY_USER)
 [ MongoDB :27017 ] (Esecuzione query ed applicazione viste RLS)

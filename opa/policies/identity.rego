@@ -246,6 +246,28 @@ verify_oidc_jwt(token) := claims if {
 	[_, claims, _] := io.jwt.decode(token)
 }
 
+# Helpers for Step-Up Authentication status
+token_claims := claims if {
+	payload_val := oidc_payload_field
+	payload_val != ""
+	token := extract_jwt_from_payload(payload_val)
+	token != "unknown"
+	claims := verify_oidc_jwt(token)
+}
+
+token_has_step_up if {
+	claims := token_claims
+	claims.step_up == true
+}
+
+token_step_up_fresh if {
+	claims := token_claims
+	claims.step_up == true
+	now_seconds := time.now_ns() / 1000000000
+	now_seconds - claims.step_up_time < 120
+}
+
+
 is_valid_token_binding(claims, cert_subject_cn) if {
 	# Direct client: CN matches sub, cert fingerprint matches cnf
 	cert_subject_cn == claims.sub

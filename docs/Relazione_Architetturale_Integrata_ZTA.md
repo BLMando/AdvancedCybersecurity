@@ -478,3 +478,124 @@ In OPA [authz.rego](file:///Users/paoloroselli/Projects/AdvancedCybersecurity/op
 Per far sì che MongoDB Enterprise si fidi del certificato autofirmato dell'IdP Flask durante l'interrogazione dell'endpoint JWKS, il container MongoDB esegue all'avvio uno script `entrypoint.sh` che importa la CA all'interno del database di trust di sistema (`/etc/pki/ca-trust/source/anchors/zta-ca.crt`) e aggiorna le ancore di sistema con `update-ca-trust`.
 
 La correttezza di questo flusso è stata validata con successo sia tramite test unitari dedicati in OPA (23/23 passanti) che tramite il superamento della suite di test in Python, dimostrando la robustezza e la stabilità dell'architettura contro attacchi di deviazione o furto del token.
+
+---
+
+## 10. Session Hardening Finale: Primary Session Gating e Step-Up Authentication
+
+### 10.1 Il Problema: Assenza di un Ciclo di Vita della Sessione Umana
+
+Nella configurazione precedente, il possesso di un certificato hardware-bound valido era sufficiente per ottenere un token OIDC e avviare query. Questo lasciava aperto un vettore di attacco: un certificato valido ma non ancora scaduto su un dispositivo non presidiato avrebbe potuto essere usato da terze parti. Analogamente, operazioni distruttive (delete) o finanziariamente rilevanti (billing > 5000) non richiedevano una verifica di autenticità recente dell'operatore.
+
+Il design finale aggiunge due layer di sicurezza **ortogonali** rispetto alla validità crittografica del certificato:
+
+| Layer | Meccanismo | Finestra | Trigger |
+|-------|------------|----------|---------|
+| **Primary Session** | AD Login + OTP (MFA simulato) | 12 ore | Primo accesso, scadenza, nuovo dispositivo |
+| **Step-Up Auth** | OTP aggiuntivo (freschezza MFA) | 120 secondi | `update`, `delete`, billing > 5000 |
+
+Questo realizza un modello di autenticazione **progressivo e contestuale**, in cui la barriera di accesso si adatta dinamicamente alla sensibilità dell'operazione richiesta.
+
+### 10.2 Implementazione: `PRIMARY_SESSIONS` in `app.py`
+
+```python
+PRIMARY_SESSIONS = {}  # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+```
+
+L'endpoint `/api/oidc/token` gestisce il gating in due fasi sequenziali:
+
+```
+/api/oidc/token ricevuto
+        │
+        ├─ [1] cn in PRIMARY_SESSIONS?
+        │   └─ NO o login_time > 12h → 401 {"reason": "primary_session_required"}
+        │                                   └─ client mostra modal AD Login
+        │
+        └─ [2] step_up==true?
+            └─ SI → last_mfa_time < 120s?
+                └─ NO → 401 {"reason": "step_up_required"}
+                         └─ client mostra modal OTP
+```
+
+Il flusso di AD Login + OTP (`/api/auth/login` → `/api/auth/verify-otp`) aggiorna entrambi i timestamp al completamento, ripristinando entrambe le finestre:
+
+```python
+PRIMARY_SESSIONS[cn] = {
+    "login_time": datetime.now(timezone.utc),
+    "last_mfa_time": datetime.now(timezone.utc)
+}
+```
+
+### 10.3 Propagazione del Codice 401 attraverso gli Agenti Locali
+
+Per permettere alla Web Console di distinguere tra errori di rete e errori di sessione, gli agenti locali sono stati aggiornati per fare **trasparente forward** dell'errore HTTP:
+
+**macOS (`LocalAPIServer.swift`)**:
+```swift
+// Se il server PKI risponde 401, propaga lo stesso status code e body al browser
+if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+    respond(status: .unauthorized, body: data)
+    return
+}
+```
+
+**Windows (`tpm_agent_service.ps1`)**:
+```powershell
+# Cattura WebException per errori HTTP non-2xx
+$statusCode = [int]$ex.Response.StatusCode
+$responseBody = (New-Object System.IO.StreamReader($ex.Response.GetResponseStream())).ReadToEnd()
+$context.Response.StatusCode = $statusCode
+$buffer = [System.Text.Encoding]::UTF8.GetBytes($responseBody)
+$context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+```
+
+### 10.4 Primary Auth Modal nella Web Console (UX Auto-Retry)
+
+La Web Console implementa un workflow di riautenticazione trasparente basato su Promise JavaScript:
+
+```
+Query inviata
+     │
+     └─ Risposta 401 ricevuta
+           │
+           ├─ reason == "primary_session_required" → mostra Primary Auth Modal
+           │   (AD email + password + OTP sequenziale)
+           │
+           └─ reason == "step_up_required" → mostra Step-Up OTP Modal
+               (solo campo OTP)
+                     │
+                     ▼ OTP verificato con successo
+               Promise risolta → auto-retry query originale
+                     │
+                     ▼
+               Risposta query visualizzata all'utente
+```
+
+Il componente `promptPrimaryAuth()` è una `Promise` che blocca il flusso di esecuzione JS finché l'autenticazione non è completata, dopodiché la query originale viene rieseguita senza richiedere alcun intervento dell'utente.
+
+### 10.5 Modello di Sicurezza Complessivo (4 Layer)
+
+La versione finale dell'architettura implementa **quattro livelli di autenticazione indipendenti** che si sommano moltiplicativamente alla sicurezza complessiva:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  LAYER 0: Sessione Primaria (Server-Side, 12h)            │
+│  AD Login + OTP verificato su registro identitativo       │
+│  → Separa l'autenticazione umana dalla validità del cert   │
+├───────────────────────────────────────────────────────────┤
+│  LAYER 1: Hardware-Bound Certificate (Crittografico)      │
+│  Secure Enclave / TPM — chiave non esportabile            │
+│  → Prova di possesso del dispositivo fisico               │
+├───────────────────────────────────────────────────────────┤
+│  LAYER 2: Biometrica (Presenza Fisica, per query)         │
+│  Touch ID / Windows Hello — singolo per sessione proxy    │
+│  → Prova di presenza dell'operatore autorizzato           │
+├───────────────────────────────────────────────────────────┤
+│  LAYER 3: Step-Up MFA (Contestuale, 120s freshness)       │
+│  OTP aggiuntivo per operazioni distruttive/finanziarie    │
+│  → Riduce la finestra di opportunità per insider threats  │
+└───────────────────────────────────────────────────────────┘
+```
+
+Questo modello soddisfa i requisiti NIST SP 800-207 per un sistema ZTA di livello Enterprise, in cui ogni transazione è valutata rispetto all'identità dell'utente, allo stato del dispositivo, al contesto della sessione e alla sensibilità dell'operazione richiesta.
+

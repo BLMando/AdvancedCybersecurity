@@ -119,3 +119,33 @@ Calling `GET /api/admin/certificates` returns:
   - `[x]` Build and test the ZTAAgent application to ensure there are no compilation errors.
   - `[x]` Verify that starting the proxy session prompts once for TouchID, and subsequent queries (mTLS or OIDC token) use the preserved context without prompting again.
 
+- `[x]` **Phase 15: External Identity Verification & MFA (OTP) during Enrollment**
+  - `[x]` Implement standard in-memory AD users database in `app.py`.
+  - `[x]` Expose `/api/auth/login` and `/api/auth/verify-otp` endpoints in `app.py`.
+  - `[x]` Modify `/api/enroll` and `/api/csr` in `app.py` to validate `enrollment_session_token`.
+  - `[x]` Restructure "Hardware CSR Enrollment" panel in `index.html` to integrate AD login and OTP input.
+
+- `[x]` **Phase 16: Step-up Authentication in OPA & Flask**
+  - `[x]` Update `/api/oidc/token` in `app.py` to generate Step-up claims in the JWT when requested.
+  - `[x]` Update `/api/query` in `app.py` to support `update` and `delete` actions via PyMongo.
+  - `[x]` Modify `identity.rego` to support JWT Step-up claims and 120s freshness checks.
+  - `[x]` Modify `criteria.rego` to block write actions or high-billing-value queries if fresh step-up is missing.
+  - `[x]` Update `index.html` query form to support operations select and trigger local agent `/oidc/token` with step-up.
+
+- `[x]` **Phase 17: Certificate Revocation List (CRL) Integration**
+  - `[x]` Implement `generate_crl()` in `pki.py` and call it on startup.
+  - `[x]` Re-generate CRL immediately upon `revoke_certificate()` in `pki.py`.
+  - `[x]` Reject OIDC token requests and queries in `app.py` if user CN is revoked.
+  - `[x]` Configure `crl` file check in Envoy `DownstreamTlsContext` in `envoy.yaml`.
+
+- `[x]` **Phase 18: Agent Updates & E2E Verification**
+  - `[x]` Update macOS agent `PKIClient.swift` and `LocalAPIServer.swift` to handle enrollment session token and step-up flag.
+  - `[x]` Update Windows agent `tpm_agent_service.ps1` to handle enrollment session token, step-up flag, and software key fallback.
+  - `[x]` Rebuild and restart the Docker stack, run end-to-end verifications, and document results.
+
+- `[x]` **Phase 19: Final Documentation Update**
+  - `[x]` Update `docs/ZTA_AGENT_UPDATES_2026.md` with sections G (Primary Session Gating), H (401 Propagation from agents), I (Primary Auth Modal + auto-retry). Updated E2E control flow diagram to include the new Layer 0.
+  - `[x]` Update `docs/Relazione_Architetturale_Integrata_ZTA.md` with Section 10 (Session Hardening Finale): tables, code snippets, 4-layer model ASCII diagram, NIST SP 800-207 alignment statement.
+  - `[x]` Update `docs/ARCHITECTURE.md`: four-layer model, Windows TPM mention, 7 Security Principles (added Human Session Lifecycle, Progressive MFA, RFC 8705 Token Binding).
+  - `[x]` Update `docs/README.md`: Key Features (4-layer auth, TPM agent, CRL, RFC 8705), Quick Start Step 5 (Web Console flow), Security Principles (session gating, step-up MFA, token binding).
+
