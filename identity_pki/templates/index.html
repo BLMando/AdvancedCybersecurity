@@ -121,98 +121,94 @@
 
     <!-- Query Tab Content -->
     <div id="tab-query" class="tab-content">
-      <section class="panel-grid">
-        <section class="panel">
-          <h2>ZTA MongoDB Query Console</h2>
-          <div id="query-error-box" class="error-box" style="display: none;"></div>
-          <div id="query-success-box" class="success-box" style="display: none;"></div>
+      <section class="panel" style="margin-bottom: 0;">
 
-          <form id="query-form" class="form-grid">
-            <label for="query-user" style="grid-column: span 2;">
-              <span>Seleziona Identità Client (CN)</span>
-              <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                <select id="query-user" required style="flex-grow: 1; min-width: 200px;">
-                  <option value="" disabled selected>Caricamento certificati...</option>
+        <!-- ── Top control bar ───────────────────────────────────────────────── -->
+        <div class="query-control-bar">
+
+          <!-- Identity -->
+          <div class="qcb-group qcb-identity">
+            <label for="query-user">
+              <span>Identità (CN)</span>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <select id="query-user" required>
+                  <option value="" disabled selected>Caricamento...</option>
                 </select>
-                <span id="hardware-badge" style="display: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85em; font-weight: bold; white-space: nowrap;"></span>
+                <span id="hardware-badge" style="display:none; padding:5px 10px; border-radius:6px; font-size:0.8em; font-weight:bold; white-space:nowrap;"></span>
               </div>
-              <small>Mostra gli utenti registrati con certificati attivi in volumes/certs/client/</small>
             </label>
+          </div>
 
+          <!-- Collection + Limit -->
+          <div class="qcb-group">
             <label for="query-collection">
               <span>Collezione</span>
               <select id="query-collection" required>
-                <option value="patients">patients (Anagrafica pazienti)</option>
-                <option value="clinical_records" selected>clinical_records (Cartelle cliniche)</option>
-                <option value="billing">billing (Fatturazione)</option>
-                <option value="providers">providers (Medici / Ospedali)</option>
-                <option value="admissions">admissions (Ricoveri)</option>
+                <option value="patients">patients</option>
+                <option value="clinical_records" selected>clinical_records</option>
+                <option value="billing">billing</option>
+                <option value="providers">providers</option>
+                <option value="admissions">admissions</option>
               </select>
             </label>
+          </div>
 
-            <label for="query-action">
-              <span>Operazione MongoDB</span>
-              <select id="query-action" required>
-                <option value="find" selected>find (Lettura - Standard)</option>
-                <option value="update">update (Modifica - Richiede Step-Up)</option>
-                <option value="delete">delete (Eliminazione - Richiede Step-Up)</option>
-              </select>
-            </label>
-
+          <div class="qcb-group qcb-narrow">
             <label for="query-limit">
-              <span>Limite Risultati</span>
-              <input type="number" id="query-limit" value="5" min="1" max="50">
+              <span>Limite</span>
+              <input type="number" id="query-limit" value="10" min="1" max="100">
             </label>
+          </div>
 
-            <!-- Simple Mode Container -->
-            <div id="simple-filter-container" style="grid-column: span 2;">
-              <!-- Dynamically populated fields -->
-            </div>
+          <!-- Hidden action — always find; edit/delete done inline per-row -->
+          <input type="hidden" id="query-action" value="find">
 
-            <div class="actions" style="grid-column: span 2;">
-              <button type="submit" id="query-submit-btn">Invia Query mTLS</button>
-            </div>
-          </form>
+          <div class="qcb-group qcb-submit">
+            <span style="visibility:hidden; font-size:0.85rem;">&#8203;</span>
+            <button type="submit" form="query-form" id="query-submit-btn" style="white-space:nowrap;">🔍 Cerca</button>
+          </div>
+        </div>
 
-          <div id="query-result-section" style="display: none; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(148, 163, 184, 0.15);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
-              <h3 style="margin: 0;">Risultati della Query</h3>
-              <div style="display: flex; gap: 8px;">
-                <button type="button" id="result-view-table" class="tab-btn active" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">📋 Tabella</button>
-                <button type="button" id="result-view-json" class="tab-btn" style="padding: 4px 12px; font-size: 0.8rem; min-height: 30px; border-radius: 8px;">{ } JSON</button>
-              </div>
-            </div>
-            
-            <div class="query-meta">
-              <div>Ruolo Rilevato: <strong id="query-resp-role" style="color: var(--accent);">doctor</strong></div>
-              <div>Vista RLS Applicata: <strong id="query-resp-view" style="color: var(--accent);">v_clinical_doctor</strong></div>
+        <!-- ── Dynamic filters ───────────────────────────────────────────────── -->
+        <form id="query-form">
+          <div id="simple-filter-container" class="filter-chips-row">
+            <!-- populated by updateSimpleQueryFields() -->
+          </div>
+        </form>
+
+        <!-- ── Feedback boxes ────────────────────────────────────────────────── -->
+        <div id="query-error-box" class="error-box" style="display:none; margin-top:12px;"></div>
+        <div id="query-success-box" class="success-box" style="display:none; margin-top:12px;"></div>
+
+        <!-- ── Results section ───────────────────────────────────────────────── -->
+        <div id="query-result-section" style="display:none; margin-top:1.5rem;">
+
+          <!-- Meta + view toggle -->
+          <div class="results-header">
+            <div class="query-meta" style="border:none; padding:0; background:none; margin:0;">
+              <div>Ruolo: <strong id="query-resp-role" style="color:var(--accent);">—</strong></div>
+              <div>Vista RLS: <strong id="query-resp-view" style="color:var(--accent);">—</strong></div>
               <div>Documenti: <strong id="query-resp-count">0</strong></div>
             </div>
-            
-            <!-- Table View Container -->
-            <div id="query-output-table-container" style="overflow-x: auto; width: 100%; border-radius: 14px; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(8, 15, 27, 0.4); margin-top: 16px;">
-              <table id="query-output-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9em; color: var(--text);">
-                <!-- Table headers and rows will be generated dynamically -->
-              </table>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <!-- Live search bar -->
+              <div style="position:relative;">
+                <input type="text" id="table-live-search" placeholder="🔎 Filtra tabella..." style="padding:6px 12px; border-radius:10px; font-size:0.82rem; width:200px; min-height:0;" oninput="liveFilterTable(this.value)">
+              </div>
+              <button type="button" id="result-view-table" class="tab-btn active" style="padding:4px 12px; font-size:0.8rem; min-height:30px; border-radius:8px;">📋 Tabella</button>
+              <button type="button" id="result-view-json" class="tab-btn" style="padding:4px 12px; font-size:0.8rem; min-height:30px; border-radius:8px;">{ } JSON</button>
             </div>
-
-            <!-- JSON View Container -->
-            <div id="query-output-json" class="query-result-box" style="display: none;"></div>
           </div>
-        </section>
 
-        <section class="panel info-panel">
-          <h2>Zero Trust Policy Gate</h2>
-          <p>
-            Ogni query inviata da questa console viene inoltrata a **Envoy** sulla porta <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">10000</code> utilizzando il certificato client dell'utente selezionato.
-          </p>
-          <ul>
-            <li><strong>Autenticazione hardware:</strong> Envoy convalida il certificato mTLS.</li>
-          <li><strong>Decisione OPA:</strong> Open Policy Agent valuta il ruolo, la collezione e l'IP sorgente per calcolare il punteggio di rischio.</li>
-            <li><strong>Tracciamento Splunk:</strong> Ogni decisione di policy (ALLOW/DENY) viene registrata con il CN dell'utente reale.</li>
-            <li><strong>Row-Level Security (RLS):</strong> La collezione viene tradotta dinamicamente nella vista MongoDB associata al ruolo dell'utente prima dell'esecuzione.</li>
-          </ul>
-        </section>
+          <!-- Table -->
+          <div id="query-output-table-container" style="overflow-x:auto; width:100%; border-radius:14px; border:1px solid rgba(148,163,184,0.18); background:rgba(8,15,27,0.4); margin-top:14px;">
+            <table id="query-output-table" style="width:100%; border-collapse:collapse; text-align:left; font-size:0.88em; color:var(--text);"></table>
+          </div>
+
+          <!-- JSON view -->
+          <div id="query-output-json" class="query-result-box" style="display:none;"></div>
+        </div>
+
       </section>
     </div>
   </main>
@@ -354,219 +350,137 @@
       badge.style.display = 'none';
     });
 
-    // Dynamic Filter Hints based on chosen collection
-    // Update simple query input fields dynamically based on chosen collection
+    // ─── Build filter chips per collection (chip-style) ──────────────────────
     function updateSimpleQueryFields() {
       const collection = document.getElementById('query-collection').value;
-      const container = document.getElementById('simple-filter-container');
-      let html = '';
+      const container  = document.getElementById('simple-filter-container');
 
-      if (collection === 'patients') {
-        html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
-            <label style="grid-column: span 2;">
-              <span>Nome Paziente (Filtro parziale)</span>
-              <input type="text" id="simple-patient-name" placeholder="Es. Jane, Robert...">
-            </label>
-            <label>
-              <span>Genere</span>
-              <select id="simple-patient-gender">
-                <option value="">Tutti</option>
-                <option value="Male">Maschio (Male)</option>
-                <option value="Female">Femmina (Female)</option>
-              </select>
-            </label>
-            <label>
-              <span>Gruppo Sanguigno</span>
-              <select id="simple-patient-blood">
-                <option value="">Tutti</option>
-                <option value="A+">A+</option>
-                <option value="A-">A-</option>
-                <option value="B+">B+</option>
-                <option value="B-">B-</option>
-                <option value="AB+">AB+</option>
-                <option value="AB-">AB-</option>
-                <option value="O+">O+</option>
-                <option value="O-">O-</option>
-              </select>
-            </label>
-          </div>
-        `;
-      } else if (collection === 'clinical_records') {
-        html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
-            <label style="grid-column: span 2;">
-              <span>ID Paziente (UUID)</span>
-              <input type="text" id="simple-clinical-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
-            </label>
-            <label>
-              <span>Condizione Medica</span>
-              <select id="simple-clinical-condition">
-                <option value="">Tutte</option>
-                <option value="Cancer">Cancro (Cancer)</option>
-                <option value="Asthma">Asma (Asthma)</option>
-                <option value="Obesity">Obesità (Obesity)</option>
-                <option value="Diabetes">Diabete (Diabetes)</option>
-                <option value="Arthritis">Artrite (Arthritis)</option>
-                <option value="Hypertension">Ipertensione (Hypertension)</option>
-              </select>
-            </label>
-            <label>
-              <span>Risultato Test</span>
-              <select id="simple-clinical-result">
-                <option value="">Tutti</option>
-                <option value="Normal">Normale (Normal)</option>
-                <option value="Abnormal">Anormale (Abnormal)</option>
-                <option value="Inconclusive">Inconcludente (Inconclusive)</option>
-              </select>
-            </label>
-          </div>
-        `;
-      } else if (collection === 'admissions') {
-        html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
-            <label style="grid-column: span 2;">
-              <span>ID Paziente (UUID)</span>
-              <input type="text" id="simple-admission-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
-            </label>
-            <label>
-              <span>Tipo di Ricovero</span>
-              <select id="simple-admission-type">
-                <option value="">Tutti</option>
-                <option value="Emergency">Emergenza (Emergency)</option>
-                <option value="Urgent">Urgente (Urgent)</option>
-                <option value="Elective">Elettivo (Elective)</option>
-              </select>
-            </label>
-            <label>
-              <span>Stato Ricovero</span>
-              <select id="simple-admission-status">
-                <option value="">Tutti</option>
-                <option value="Admitted">Ricoverato (Admitted)</option>
-                <option value="Discharged">Dimesso (Discharged)</option>
-              </select>
-            </label>
-          </div>
-        `;
-      } else if (collection === 'billing') {
-        html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
-            <label style="grid-column: span 2;">
-              <span>ID Paziente (UUID)</span>
-              <input type="text" id="simple-billing-patient-id" placeholder="Es. 4f781fb9-ce9f-5313-913d-7ec2be6047fa">
-            </label>
-            <label>
-              <span>Stato Pagamento</span>
-              <select id="simple-billing-status">
-                <option value="">Tutti</option>
-                <option value="Paid">Pagato (Paid)</option>
-                <option value="Unpaid">Non Pagato (Unpaid)</option>
-                <option value="Pending">In Sospeso (Pending)</option>
-              </select>
-            </label>
-            <label>
-              <span>Compagnia Assicuratrice (Filtro parziale)</span>
-              <input type="text" id="simple-billing-insurance" placeholder="Es. Cigna, Aetna...">
-            </label>
-          </div>
-        `;
-      } else if (collection === 'providers') {
-        html = `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%;">
-            <label style="grid-column: span 2;">
-              <span>Nome Fornitore (Filtro parziale)</span>
-              <input type="text" id="simple-provider-name" placeholder="Es. Dr. Smith, General Hospital...">
-            </label>
-            <label style="grid-column: span 2;">
-              <span>Tipo Fornitore</span>
-              <select id="simple-provider-type">
-                <option value="">Tutti</option>
-                <option value="doctor">Medico (Doctor)</option>
-                <option value="hospital">Ospedale (Hospital)</option>
-              </select>
-            </label>
-          </div>
-        `;
-      }
+      const chip = (label, inner) => `<div class="filter-chip"><span>${label}</span>${inner}</div>`;
+      const text = (id, ph)       => `<input type="text"   id="${id}" placeholder="${ph}">`;
+      const sel  = (id, opts)     => `<select id="${id}"><option value="">Tutti</option>${opts}</select>`;
+      const num  = (id, ph)       => `<input type="number" id="${id}" placeholder="${ph}" min="0">`;
 
-      container.innerHTML = html;
+      const OPTS = {
+        gender:    '<option value="Male">Maschio</option><option value="Female">Femmina</option>',
+        blood:     ['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(v=>`<option value="${v}">${v}</option>`).join(''),
+        condition: ['Cancer','Asthma','Obesity','Diabetes','Arthritis','Hypertension'].map(v=>`<option value="${v}">${v}</option>`).join(''),
+        result:    '<option value="Normal">Normal</option><option value="Abnormal">Abnormal</option><option value="Inconclusive">Inconclusive</option>',
+        admType:   '<option value="Emergency">Emergenza</option><option value="Urgent">Urgente</option><option value="Elective">Elettivo</option>',
+        admStatus: '<option value="Admitted">Ricoverato</option><option value="Discharged">Dimesso</option>',
+        payStatus: '<option value="Paid">Pagato</option><option value="Unpaid">Non Pagato</option><option value="Pending">In Sospeso</option>',
+        provType:  '<option value="doctor">Medico</option><option value="hospital">Ospedale</option>',
+      };
+
+      const MAP = {
+        patients: [
+          chip('Nome (parziale)',    text('simple-patient-name',   'Es. Jane, Robert…')),
+          chip('Genere',             sel('simple-patient-gender',  OPTS.gender)),
+          chip('Gruppo Sanguigno',   sel('simple-patient-blood',   OPTS.blood)),
+          chip('Età min',            num('simple-patient-age-min', '0')),
+          chip('Età max',            num('simple-patient-age-max', '120')),
+        ],
+        clinical_records: [
+          chip('ID Paziente',        text('simple-clinical-patient-id',  'Es. 4f781fb9…')),
+          chip('Condizione',         sel('simple-clinical-condition',    OPTS.condition)),
+          chip('Risultato',          sel('simple-clinical-result',       OPTS.result)),
+          chip('Farmaco (parziale)', text('simple-clinical-medication',  'Es. Aspirin…')),
+        ],
+        admissions: [
+          chip('ID Paziente',        text('simple-admission-patient-id', 'Es. 4f781fb9…')),
+          chip('Tipo Ricovero',      sel('simple-admission-type',        OPTS.admType)),
+          chip('Stato',              sel('simple-admission-status',      OPTS.admStatus)),
+        ],
+        billing: [
+          chip('ID Paziente',        text('simple-billing-patient-id',   'Es. 4f781fb9…')),
+          chip('Stato Pagamento',    sel('simple-billing-status',        OPTS.payStatus)),
+          chip('Assicurazione',      text('simple-billing-insurance',    'Es. Cigna…')),
+          chip('Importo min (€)',    num('simple-billing-amount-min',    '0')),
+          chip('Importo max (€)',    num('simple-billing-amount-max',    '')),
+        ],
+        providers: [
+          chip('Nome (parziale)',    text('simple-provider-name', 'Es. Dr. Smith…')),
+          chip('Tipo Fornitore',    sel('simple-provider-type',  OPTS.provType)),
+        ],
+      };
+
+      container.innerHTML = (MAP[collection] || []).join('');
     }
 
-    // Build filter payload (JSON)
+    // ─── Live search across visible table rows ────────────────────────────────
+    function liveFilterTable(val) {
+      const filter = val.toLowerCase();
+      const tbody  = document.querySelector('#query-output-table tbody');
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('tr[id^="data-row-"]')).forEach(tr => {
+        const text = tr.innerText.toLowerCase();
+        const editRow = document.getElementById(tr.id.replace('data-row-', 'edit-row-'));
+        const show = !filter || text.includes(filter);
+        tr.style.display = show ? '' : 'none';
+        if (editRow) editRow.style.display = 'none'; // always collapse edit on filter
+      });
+    }
+
+
+    // ─── Build filter payload (JSON) ─────────────────────────────────────────
     function getFilterPayload() {
-      // Construct filter object dynamically
       const collection = document.getElementById('query-collection').value;
-      const filterObj = {};
+      const f = {};
+
+      const v    = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+      const vnum = id => { const el = document.getElementById(id); return el && el.value !== '' ? parseFloat(el.value) : null; };
 
       if (collection === 'patients') {
-        const name = document.getElementById('simple-patient-name').value.trim();
-        const gender = document.getElementById('simple-patient-gender').value;
-        const blood = document.getElementById('simple-patient-blood').value;
-
-        if (name) {
-          filterObj.full_name = { "$regex": name, "$options": "i" };
-        }
-        if (gender) {
-          filterObj.gender = gender;
-        }
-        if (blood) {
-          filterObj.blood_type = blood;
+        const name   = v('simple-patient-name');
+        const gender = v('simple-patient-gender');
+        const blood  = v('simple-patient-blood');
+        const ageMin = vnum('simple-patient-age-min');
+        const ageMax = vnum('simple-patient-age-max');
+        if (name)   f.full_name = { $regex: name,   $options: 'i' };
+        if (gender) f.gender    = gender;
+        if (blood)  f.blood_type = blood;
+        if (ageMin !== null || ageMax !== null) {
+          f.age = {};
+          if (ageMin !== null) f.age.$gte = ageMin;
+          if (ageMax !== null) f.age.$lte = ageMax;
         }
       } else if (collection === 'clinical_records') {
-        const patientId = document.getElementById('simple-clinical-patient-id').value.trim();
-        const condition = document.getElementById('simple-clinical-condition').value;
-        const result = document.getElementById('simple-clinical-result').value;
-
-        if (patientId) {
-          filterObj.patient_id = patientId;
-        }
-        if (condition) {
-          filterObj.medical_condition = condition;
-        }
-        if (result) {
-          filterObj.test_results = result;
-        }
+        const pid      = v('simple-clinical-patient-id');
+        const cond     = v('simple-clinical-condition');
+        const result   = v('simple-clinical-result');
+        const med      = v('simple-clinical-medication');
+        if (pid)    f.patient_id        = pid;
+        if (cond)   f.medical_condition = cond;
+        if (result) f.test_results      = result;
+        if (med)    f.medication        = { $regex: med, $options: 'i' };
       } else if (collection === 'admissions') {
-        const patientId = document.getElementById('simple-admission-patient-id').value.trim();
-        const type = document.getElementById('simple-admission-type').value;
-        const status = document.getElementById('simple-admission-status').value;
-
-        if (patientId) {
-          filterObj.patient_id = patientId;
-        }
-        if (type) {
-          filterObj.admission_type = type;
-        }
-        if (status) {
-          filterObj.status = status;
-        }
+        const pid    = v('simple-admission-patient-id');
+        const type   = v('simple-admission-type');
+        const status = v('simple-admission-status');
+        if (pid)    f.patient_id     = pid;
+        if (type)   f.admission_type = type;
+        if (status) f.status         = status;
       } else if (collection === 'billing') {
-        const patientId = document.getElementById('simple-billing-patient-id').value.trim();
-        const status = document.getElementById('simple-billing-status').value;
-        const insurance = document.getElementById('simple-billing-insurance').value.trim();
-
-        if (patientId) {
-          filterObj.patient_id = patientId;
-        }
-        if (status) {
-          filterObj.payment_status = status;
-        }
-        if (insurance) {
-          filterObj.insurance_provider = { "$regex": insurance, "$options": "i" };
+        const pid       = v('simple-billing-patient-id');
+        const status    = v('simple-billing-status');
+        const insurance = v('simple-billing-insurance');
+        const amtMin    = vnum('simple-billing-amount-min');
+        const amtMax    = vnum('simple-billing-amount-max');
+        if (pid)       f.patient_id        = pid;
+        if (status)    f.payment_status    = status;
+        if (insurance) f.insurance_provider = { $regex: insurance, $options: 'i' };
+        if (amtMin !== null || amtMax !== null) {
+          f.billing_amount = {};
+          if (amtMin !== null) f.billing_amount.$gte = amtMin;
+          if (amtMax !== null) f.billing_amount.$lte = amtMax;
         }
       } else if (collection === 'providers') {
-        const name = document.getElementById('simple-provider-name').value.trim();
-        const type = document.getElementById('simple-provider-type').value;
-
-        if (name) {
-          filterObj.name = { "$regex": name, "$options": "i" };
-        }
-        if (type) {
-          filterObj.type = type;
-        }
+        const name = v('simple-provider-name');
+        const type = v('simple-provider-type');
+        if (name) f.name = { $regex: name, $options: 'i' };
+        if (type) f.type = type;
       }
 
-      return JSON.stringify(filterObj);
+      return JSON.stringify(f);
     }
 
     // ─── Edit field schema per collection ──────────────────────────────────

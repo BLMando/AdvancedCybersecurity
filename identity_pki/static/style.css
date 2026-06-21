@@ -516,15 +516,152 @@ button:disabled {
   padding: 24px;
 }
 
-@keyframes modalFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* ── Query control bar ──────────────────────────────────────────── */
+.query-control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  margin-bottom: 0;
 }
 
-@keyframes modalSlideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+.qcb-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 180px;
+  min-width: 0;
 }
+
+.qcb-group label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qcb-identity { flex: 2 1 260px; }
+.qcb-narrow   { flex: 0 0 90px; }
+.qcb-submit   { flex: 0 0 auto; }
+
+.qcb-group select,
+.qcb-group input[type="number"] {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+/* ── Filter chips row ───────────────────────────────────────────── */
+.filter-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 0 4px;
+  align-items: flex-end;
+}
+
+.filter-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  flex: 1 1 140px;
+  max-width: 260px;
+}
+
+.filter-chip span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-chip input,
+.filter-chip select {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+}
+
+/* ── Results header ─────────────────────────────────────────────── */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* ── Live search input override ─────────────────────────────────── */
+#table-live-search {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  width: 220px;
+}
+
+/* ── Tab query goes full width ──────────────────────────────────── */
+#tab-query > .panel {
+  padding: 28px 32px;
+}
+
+
+/* ── Filter chips row ───────────────────────────────────────────── */
+.filter-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 0 4px;
+  align-items: flex-end;
+}
+
+.filter-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  flex: 1 1 140px;
+  max-width: 260px;
+}
+
+.filter-chip span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-chip input,
+.filter-chip select {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+}
+
+/* ── Results header ─────────────────────────────────────────────── */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* ── Live search input override ─────────────────────────────────── */
+#table-live-search {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  width: 220px;
+}
+
+/* ── Tab query goes full width (single column) ──────────────────── */
+#tab-query > .panel {
+  padding: 28px 32px;
+}
+
+
 
 /* ── Inline table row action buttons ──────────────────────────── */
 .btn-action {
