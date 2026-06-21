@@ -618,6 +618,8 @@ def create_app(data_dir=None) -> Flask:
         limit = int(payload.get("limit", 10))
         jwt_token = payload.get("jwt_token")
         mongo_action = payload.get("action", "find")
+        record_id = payload.get("record_id")          # Single-document _id for delete/update
+        update_fields = payload.get("update_fields")  # Dict of specific fields to $set on update
 
         if not user_cn or not collection_name:
             return error_response("User CN and Collection name are required", 400)
@@ -636,6 +638,16 @@ def create_app(data_dir=None) -> Flask:
             query_filter = json.loads(query_filter_str) if query_filter_str else {}
         except json.JSONDecodeError as e:
             return error_response(f"Invalid JSON filter: {e}", 400)
+
+        # If a specific record_id is given, override the filter for single-doc operations
+        if record_id and mongo_action in ("delete", "update"):
+            from bson import ObjectId
+            from bson.errors import InvalidId
+            try:
+                query_filter = {"_id": ObjectId(record_id)}
+            except InvalidId:
+                # Try as plain string _id (some collections use UUID strings)
+                query_filter = {"_id": record_id}
 
         local_proxy_port = payload.get("local_proxy_port")
 
@@ -831,17 +843,24 @@ def create_app(data_dir=None) -> Flask:
                 results_json = json.loads(json_util.dumps(results))
                 count = len(results_json)
             elif mongo_action == "update":
-                update_payload = {"$set": {
-                    "updated_at": datetime.now(timezone.utc),
-                    "status_note": "ZTA Verified Step-Up Update"
-                }}
-                res = db[target_collection].update_many(query_filter, update_payload)
+                # Build $set payload: use specific update_fields if provided, else generic stamp
+                if update_fields and isinstance(update_fields, dict):
+                    # Sanitize: strip leading $ from keys to prevent operator injection
+                    safe_fields = {k: v for k, v in update_fields.items() if not k.startswith("$")}
+                    set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc).isoformat()}
+                else:
+                    set_payload = {
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "status_note": "ZTA Verified Step-Up Update"
+                    }
+                update_op = {"$set": set_payload}
+                res = db[target_collection].update_many(query_filter, update_op)
                 count = res.modified_count
-                message = f"Successfully updated {count} documents in {target_collection}"
+                message = f"Aggiornati {count} documenti in '{target_collection}'"
             elif mongo_action == "delete":
                 res = db[target_collection].delete_many(query_filter)
                 count = res.deleted_count
-                message = f"Successfully deleted {count} documents in {target_collection}"
+                message = f"Eliminati {count} documenti da '{target_collection}'"
             else:
                 client.close()
                 return error_response(f"Unsupported action: {mongo_action}", 400)

@@ -264,6 +264,19 @@
     </div>
   </div>
 
+  <!-- Confirm Delete Dialog -->
+  <div id="confirm-delete-modal" class="modal-overlay" style="display: none;">
+    <div class="confirm-dialog">
+      <h3>🗑️ Conferma Eliminazione</h3>
+      <p id="confirm-delete-msg">Sei sicuro di voler eliminare questo record? L'operazione è irreversibile e richiede Step-Up Authentication.</p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-cancel-edit" onclick="closeConfirmDelete()">Annulla</button>
+        <button type="button" class="btn-confirm-delete" id="confirm-delete-btn">🗑️ Elimina</button>
+      </div>
+    </div>
+  </div>
+
+
   <script>
     // Tab switching function
     function switchTab(tabName) {
@@ -556,7 +569,36 @@
       return JSON.stringify(filterObj);
     }
 
-    // Render results inside a beautiful HTML table
+    // ─── Edit field schema per collection ──────────────────────────────────
+    const EDIT_FIELDS = {
+      patients: [
+        { key: 'full_name',  label: 'Nome Completo', type: 'text' },
+        { key: 'age',        label: 'Età',           type: 'number' },
+        { key: 'gender',     label: 'Genere',        type: 'select', options: ['Male','Female'] },
+        { key: 'blood_type', label: 'Gruppo Sanguigno', type: 'select', options: ['A+','A-','B+','B-','AB+','AB-','O+','O-'] }
+      ],
+      clinical_records: [
+        { key: 'medical_condition', label: 'Condizione',   type: 'select', options: ['Cancer','Asthma','Obesity','Diabetes','Arthritis','Hypertension'] },
+        { key: 'medication',        label: 'Farmaco',      type: 'text' },
+        { key: 'test_results',      label: 'Risultato',   type: 'select', options: ['Normal','Abnormal','Inconclusive'] }
+      ],
+      admissions: [
+        { key: 'status',         label: 'Stato',        type: 'select', options: ['Admitted','Discharged'] },
+        { key: 'admission_type', label: 'Tipo Ricovero', type: 'select', options: ['Emergency','Urgent','Elective'] },
+        { key: 'room_number',    label: 'Camera',        type: 'number' }
+      ],
+      billing: [
+        { key: 'payment_status',    label: 'Stato Pagamento', type: 'select', options: ['Paid','Unpaid','Pending'] },
+        { key: 'billing_amount',    label: 'Importo (€)',     type: 'number' },
+        { key: 'insurance_provider',label: 'Assicurazione',   type: 'text' }
+      ],
+      providers: [
+        { key: 'name', label: 'Nome / Struttura', type: 'text' },
+        { key: 'type', label: 'Tipo',             type: 'select', options: ['doctor','hospital'] }
+      ]
+    };
+
+    // ─── Render results table with Edit/Delete action buttons ──────────────
     function renderQueryResults(results, collection) {
       const table = document.getElementById('query-output-table');
       if (!results || results.length === 0) {
@@ -564,27 +606,31 @@
         return;
       }
 
+      // Store results globally for edit access
+      window.lastQueryResults = results;
+      window.lastQueryCollection = collection;
+
       let headers = [];
       let rowRenderer = null;
 
       if (collection === 'patients') {
         headers = ['ID Paziente', 'Nome Completo', 'Età', 'Genere', 'Gruppo Sanguigno'];
         rowRenderer = (row) => [
-          row._id || 'N/A',
+          `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
           row.full_name || 'N/A',
           row.age !== undefined ? row.age : 'N/A',
           row.gender || 'N/A',
           row.blood_type || 'N/A'
         ];
       } else if (collection === 'clinical_records') {
-        headers = ['ID Record', 'ID Paziente', 'Condizione Medica', 'Terapia / Farmaco', 'Risultato Test', 'Data Registrazione'];
+        headers = ['ID Record', 'ID Paziente', 'Condizione', 'Farmaco', 'Risultato', 'Data'];
         rowRenderer = (row) => {
           let dateStr = 'N/A';
           if (row.recorded_at) {
             dateStr = row.recorded_at.$date ? new Date(row.recorded_at.$date).toLocaleDateString('it-IT') : new Date(row.recorded_at).toLocaleDateString('it-IT');
           }
           return [
-            row._id || 'N/A',
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
             row.patient_id || 'N/A',
             row.medical_condition || 'N/A',
             row.medication || 'N/A',
@@ -595,72 +641,335 @@
       } else if (collection === 'admissions') {
         headers = ['ID Ricovero', 'ID Paziente', 'Stato', 'Tipo', 'Entrata', 'Uscita', 'Camera'];
         rowRenderer = (row) => {
-          let inDate = row.date_of_admission ? (row.date_of_admission.$date ? new Date(row.date_of_admission.$date).toLocaleDateString('it-IT') : new Date(row.date_of_admission).toLocaleDateString('it-IT')) : 'N/A';
-          let outDate = row.discharge_date ? (row.discharge_date.$date ? new Date(row.discharge_date.$date).toLocaleDateString('it-IT') : new Date(row.discharge_date).toLocaleDateString('it-IT')) : 'N/A';
+          let inDate  = row.date_of_admission ? (row.date_of_admission.$date ? new Date(row.date_of_admission.$date).toLocaleDateString('it-IT') : new Date(row.date_of_admission).toLocaleDateString('it-IT')) : 'N/A';
+          let outDate = row.discharge_date    ? (row.discharge_date.$date    ? new Date(row.discharge_date.$date).toLocaleDateString('it-IT')    : new Date(row.discharge_date).toLocaleDateString('it-IT'))    : 'N/A';
           return [
-            row._id || 'N/A',
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
             row.patient_id || 'N/A',
             `<span class="badge ${row.status === 'Admitted' ? 'badge-success' : 'badge-muted'}">${row.status || 'N/A'}</span>`,
             row.admission_type || 'N/A',
-            inDate,
-            outDate,
+            inDate, outDate,
             row.room_number !== undefined ? row.room_number : (row.room !== undefined ? row.room : 'N/A')
           ];
         };
       } else if (collection === 'billing') {
         headers = ['ID Fattura', 'ID Paziente', 'Importo', 'Stato Pagamento', 'Assicurazione'];
         rowRenderer = (row) => {
-          let amountStr = row.billing_amount !== undefined ? `€ ${parseFloat(row.billing_amount).toLocaleString('it-IT', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : 'N/A';
-          let statusClass = 'badge-muted';
-          if (row.payment_status === 'Paid') statusClass = 'badge-success';
-          if (row.payment_status === 'Unpaid') statusClass = 'badge-danger';
-          if (row.payment_status === 'Pending') statusClass = 'badge-warning';
-          
+          let amountStr = row.billing_amount !== undefined
+            ? `€ ${parseFloat(row.billing_amount).toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})}`
+            : 'N/A';
+          let sc = 'badge-muted';
+          if (row.payment_status === 'Paid')    sc = 'badge-success';
+          if (row.payment_status === 'Unpaid')  sc = 'badge-danger';
+          if (row.payment_status === 'Pending') sc = 'badge-warning';
           return [
-            row._id || 'N/A',
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
             row.patient_id || 'N/A',
             amountStr,
-            `<span class="badge ${statusClass}">${row.payment_status || 'N/A'}</span>`,
+            `<span class="badge ${sc}">${row.payment_status || 'N/A'}</span>`,
             row.insurance_provider || 'N/A'
           ];
         };
       } else if (collection === 'providers') {
         headers = ['ID Fornitore', 'Nome / Struttura', 'Tipo'];
         rowRenderer = (row) => [
-          row._id || 'N/A',
+          `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
           row.name || 'N/A',
           row.type || 'N/A'
         ];
       } else {
         headers = Object.keys(results[0]).filter(k => k !== '_id');
         headers.unshift('ID');
-        rowRenderer = (row) => {
-          return headers.map(h => {
-            if (typeof row[h] === 'object') return JSON.stringify(row[h]);
-            return row[h] !== undefined ? row[h] : 'N/A';
-          });
-        };
+        rowRenderer = (row) => headers.map(h => {
+          if (typeof row[h] === 'object') return JSON.stringify(row[h]);
+          return row[h] !== undefined ? row[h] : 'N/A';
+        });
       }
 
+      const hasEditFields = !!(EDIT_FIELDS[collection]);
+
+      // Header
       let headerHtml = '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
       headers.forEach(h => {
-        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent);">${h}</th>`;
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
       });
+      if (hasEditFields) {
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;
+      }
       headerHtml += '</tr></thead>';
 
+      // Rows
       let rowsHtml = '<tbody>';
-      results.forEach(row => {
-        rowsHtml += '<tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">';
+      results.forEach((row, idx) => {
+        const rawId = extractId(row._id);
+        rowsHtml += `<tr id="data-row-${idx}" style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">`;
         const cells = rowRenderer(row);
         cells.forEach(c => {
-          rowsHtml += `<td style="padding: 12px 16px; font-family: sans-serif; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
+          rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
         });
+        if (hasEditFields) {
+          rowsHtml += `
+            <td style="padding: 8px 12px; white-space: nowrap;">
+              <div class="action-cell">
+                <button class="btn-action btn-edit" onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>
+                <button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>
+              </div>
+            </td>`;
+        }
         rowsHtml += '</tr>';
+        // Placeholder for inline edit panel
+        rowsHtml += `<tr id="edit-row-${idx}" style="display:none;"><td colspan="${headers.length + 1}" style="padding:0;"><div class="edit-row-panel" id="edit-panel-${idx}"></div></td></tr>`;
       });
       rowsHtml += '</tbody>';
 
       table.innerHTML = headerHtml + rowsHtml;
     }
+
+    // ─── Extract plain string _id from BSON or plain object ────────────────
+    function extractId(idVal) {
+      if (!idVal) return '';
+      if (typeof idVal === 'string') return idVal;
+      if (idVal.$oid) return idVal.$oid;
+      return JSON.stringify(idVal);
+    }
+
+    // ─── Open inline Edit form ──────────────────────────────────────────────
+    function openEditRow(idx, rawId, collection) {
+      // Close any other open edit panel
+      document.querySelectorAll('[id^="edit-row-"]').forEach(r => {
+        if (r.id !== `edit-row-${idx}`) r.style.display = 'none';
+      });
+
+      const editRow  = document.getElementById(`edit-row-${idx}`);
+      const panel    = document.getElementById(`edit-panel-${idx}`);
+      const row      = (window.lastQueryResults || [])[idx] || {};
+      const fields   = EDIT_FIELDS[collection] || [];
+
+      if (editRow.style.display !== 'none') {
+        editRow.style.display = 'none';
+        return;
+      }
+
+      // Build form fields pre-populated with current values
+      let fieldsHtml = '<div class="edit-row-grid">';
+      fields.forEach(f => {
+        const val = row[f.key] !== undefined ? row[f.key] : '';
+        if (f.type === 'select') {
+          const opts = f.options.map(o => `<option value="${o}" ${o == val ? 'selected' : ''}>${o}</option>`).join('');
+          fieldsHtml += `<label><span>${f.label}</span><select id="ef-${idx}-${f.key}">${opts}</select></label>`;
+        } else {
+          fieldsHtml += `<label><span>${f.label}</span><input type="${f.type}" id="ef-${idx}-${f.key}" value="${val}"></label>`;
+        }
+      });
+      fieldsHtml += '</div>';
+
+      panel.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+          <span style="color:var(--accent); font-size:0.85rem; font-weight:700;">✏️ Modifica record <code style="font-size:0.75em; opacity:0.7">${rawId.slice(0,16)}…</code></span>
+          <span class="edit-status-msg" id="edit-msg-${idx}"></span>
+        </div>
+        ${fieldsHtml}
+        <div class="edit-row-actions">
+          <button class="btn-save" onclick="saveRecord(${idx}, '${rawId}', '${collection}')">💾 Salva modifiche</button>
+          <button class="btn-cancel-edit" onclick="document.getElementById('edit-row-${idx}').style.display='none'">Annulla</button>
+          <span style="font-size:0.78rem; color:var(--muted); margin-left:4px;">⚠️ Richiede Step-Up Authentication</span>
+        </div>`;
+
+      editRow.style.display = 'table-row';
+    }
+
+    // ─── Save record (Update) ───────────────────────────────────────────────
+    async function saveRecord(idx, rawId, collection) {
+      const fields   = EDIT_FIELDS[collection] || [];
+      const updateFields = {};
+      fields.forEach(f => {
+        const el = document.getElementById(`ef-${idx}-${f.key}`);
+        if (el) {
+          updateFields[f.key] = f.type === 'number' ? parseFloat(el.value) : el.value;
+        }
+      });
+
+      const msgEl = document.getElementById(`edit-msg-${idx}`);
+      msgEl.className = 'edit-status-msg';
+      msgEl.textContent = '⏳ Salvataggio in corso…';
+      msgEl.style.display = 'inline';
+
+      const user = document.getElementById('query-user').value;
+      const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+      const isHardware = cert ? cert.is_hardware : false;
+
+      try {
+        let queryPayload = {
+          user, collection,
+          action: 'update',
+          filter: '{}',
+          record_id: rawId,
+          update_fields: updateFields
+        };
+
+        if (isHardware) {
+          // Step-up OIDC token (always required for update)
+          const email = cnToEmailMap[user] || `${user}@ospedale.it`;
+          let tokenResult = null, retryCount = 0;
+          while (!tokenResult && retryCount < 2) {
+            const oidcResp = await fetch('http://localhost:9090/oidc/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user, step_up: true })
+            });
+            const oidcData = await oidcResp.json();
+            if (oidcResp.status === 401 && oidcData.error === 'primary_auth_required') {
+              await promptPrimaryAuth(email);
+              retryCount++;
+              continue;
+            }
+            if (!oidcResp.ok) throw new Error(oidcData.message || 'Token OIDC fallito');
+            tokenResult = oidcData.token;
+          }
+          queryPayload.jwt_token = tokenResult;
+
+          // Start proxy
+          const proxyResp = await fetch('http://localhost:9090/proxy/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
+          });
+          const proxyData = await proxyResp.json();
+          if (!proxyResp.ok) throw new Error(proxyData.error || 'Proxy start fallito');
+          queryPayload.local_proxy_port = proxyData.port;
+
+          try {
+            const resp = await fetch('/api/query', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(queryPayload)
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.message || data.error || 'Errore update');
+            msgEl.className = 'edit-status-msg success';
+            msgEl.textContent = `✓ ${data.message || 'Salvato'}`;
+            // Close edit panel after success
+            setTimeout(() => { document.getElementById(`edit-row-${idx}`).style.display = 'none'; }, 1200);
+          } finally {
+            fetch('http://localhost:9090/proxy/stop', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: proxyData.session_token })
+            }).catch(() => {});
+          }
+        } else {
+          const resp = await fetch('/api/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(queryPayload)
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.message || data.error || 'Errore update');
+          msgEl.className = 'edit-status-msg success';
+          msgEl.textContent = `✓ ${data.message || 'Salvato'}`;
+          setTimeout(() => { document.getElementById(`edit-row-${idx}`).style.display = 'none'; }, 1200);
+        }
+      } catch (err) {
+        msgEl.className = 'edit-status-msg error';
+        msgEl.textContent = `❌ ${err.message}`;
+      }
+    }
+
+    // ─── Delete confirmation dialog ─────────────────────────────────────────
+    let _pendingDeleteId = null, _pendingDeleteCollection = null, _pendingDeleteIdx = null;
+
+    function confirmDeleteRecord(rawId, collection, idx) {
+      _pendingDeleteId = rawId;
+      _pendingDeleteCollection = collection;
+      _pendingDeleteIdx = idx;
+      document.getElementById('confirm-delete-msg').innerHTML =
+        `Sei sicuro di voler eliminare il documento con ID:<br><code style="font-size:0.82em; opacity:0.75">${rawId}</code><br><br>L'operazione è irreversibile e richiede Step-Up Authentication (OTP).`;
+      document.getElementById('confirm-delete-modal').style.display = 'flex';
+      document.getElementById('confirm-delete-btn').onclick = () => deleteRecord(_pendingDeleteId, _pendingDeleteCollection, _pendingDeleteIdx);
+    }
+
+    function closeConfirmDelete() {
+      document.getElementById('confirm-delete-modal').style.display = 'none';
+      _pendingDeleteId = null; _pendingDeleteCollection = null; _pendingDeleteIdx = null;
+    }
+
+    // ─── Execute Delete ─────────────────────────────────────────────────────
+    async function deleteRecord(rawId, collection, idx) {
+      closeConfirmDelete();
+      const user = document.getElementById('query-user').value;
+      const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+      const isHardware = cert ? cert.is_hardware : false;
+
+      const dataRow = document.getElementById(`data-row-${idx}`);
+      const editRow = document.getElementById(`edit-row-${idx}`);
+      if (dataRow) { dataRow.style.opacity = '0.4'; }
+
+      let queryPayload = { user, collection, action: 'delete', filter: '{}', record_id: rawId };
+
+      try {
+        if (isHardware) {
+          const email = cnToEmailMap[user] || `${user}@ospedale.it`;
+          let tokenResult = null, retryCount = 0;
+          while (!tokenResult && retryCount < 2) {
+            const oidcResp = await fetch('http://localhost:9090/oidc/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ common_name: user, step_up: true })
+            });
+            const oidcData = await oidcResp.json();
+            if (oidcResp.status === 401 && oidcData.error === 'primary_auth_required') {
+              await promptPrimaryAuth(email);
+              retryCount++;
+              continue;
+            }
+            if (!oidcResp.ok) throw new Error(oidcData.message || 'Token OIDC fallito');
+            tokenResult = oidcData.token;
+          }
+          queryPayload.jwt_token = tokenResult;
+
+          const proxyResp = await fetch('http://localhost:9090/proxy/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ common_name: user, ttl_seconds: 60 })
+          });
+          const proxyData = await proxyResp.json();
+          if (!proxyResp.ok) throw new Error(proxyData.error || 'Proxy start fallito');
+          queryPayload.local_proxy_port = proxyData.port;
+
+          try {
+            const resp = await fetch('/api/query', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(queryPayload)
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.message || data.error || 'Errore delete');
+            // Animate row removal
+            if (dataRow) { dataRow.style.transition = 'opacity 0.3s'; dataRow.style.opacity = '0'; setTimeout(() => { dataRow.remove(); if (editRow) editRow.remove(); }, 320); }
+            document.getElementById('query-resp-count').textContent = Math.max(0, parseInt(document.getElementById('query-resp-count').textContent || '0') - 1);
+          } finally {
+            fetch('http://localhost:9090/proxy/stop', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_token: proxyData.session_token })
+            }).catch(() => {});
+          }
+        } else {
+          const resp = await fetch('/api/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(queryPayload)
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.message || data.error || 'Errore delete');
+          if (dataRow) { dataRow.style.transition = 'opacity 0.3s'; dataRow.style.opacity = '0'; setTimeout(() => { dataRow.remove(); if (editRow) editRow.remove(); }, 320); }
+          document.getElementById('query-resp-count').textContent = Math.max(0, parseInt(document.getElementById('query-resp-count').textContent || '0') - 1);
+        }
+      } catch (err) {
+        if (dataRow) dataRow.style.opacity = '1';
+        alert(`❌ Errore eliminazione: ${err.message}`);
+      }
+    }
+
+
 
     // Toggle Result View event handlers
     document.getElementById('result-view-table').addEventListener('click', () => {

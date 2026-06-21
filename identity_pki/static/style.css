@@ -525,3 +525,169 @@ button:disabled {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* ── Inline table row action buttons ──────────────────────────── */
+.btn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  min-height: 0;
+}
+
+.btn-edit {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent);
+}
+.btn-edit:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: var(--accent);
+}
+
+.btn-delete {
+  background: rgba(251, 113, 133, 0.12);
+  border-color: rgba(251, 113, 133, 0.35);
+  color: var(--error);
+}
+.btn-delete:hover {
+  background: rgba(251, 113, 133, 0.25);
+  border-color: var(--error);
+}
+
+.action-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Inline edit row panel ──────────────────────────────────────── */
+.edit-row-panel {
+  background: rgba(8, 18, 34, 0.95);
+  border-top: 1px solid rgba(56, 189, 248, 0.18);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.18);
+  padding: 16px 20px;
+  animation: editPanelSlide 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes editPanelSlide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.edit-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.edit-row-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.edit-row-grid input,
+.edit-row-grid select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.edit-row-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn-save {
+  padding: 6px 18px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0ea5e9, #22c55e);
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.83rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-save:hover { opacity: 0.85; }
+
+.btn-cancel-edit {
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid rgba(148,163,184,0.3);
+  color: var(--muted);
+  font-size: 0.83rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  min-height: 0;
+}
+.btn-cancel-edit:hover { border-color: var(--muted); color: var(--text); }
+
+/* ── Confirm dialog (small modal variant) ───────────────────────── */
+.confirm-dialog {
+  width: min(400px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid rgba(251, 113, 133, 0.35);
+  box-shadow: 0 0 48px rgba(251, 113, 133, 0.15), var(--shadow);
+  border-radius: 20px;
+  padding: 28px 28px 24px;
+  animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-dialog h3 {
+  margin: 0 0 10px;
+  color: var(--error);
+  font-size: 1rem;
+}
+
+.confirm-dialog p {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 20px;
+  line-height: 1.55;
+}
+
+.confirm-dialog .confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.btn-confirm-delete {
+  padding: 8px 20px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fb7185, #e11d48);
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-confirm-delete:hover { opacity: 0.85; }
+
+.edit-status-msg {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: none;
+}
+.edit-status-msg.success { color: var(--success); display: inline; }
+.edit-status-msg.error { color: var(--error); display: inline; }
+
