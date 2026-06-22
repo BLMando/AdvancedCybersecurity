@@ -749,9 +749,11 @@ function Start-HttpServer {
                                 $responseBody = $reader.ReadToEnd()
                                 $reader.Close()
                                 $statusCode = [int]$_.Exception.Response.StatusCode
-                                $responseObj = ConvertFrom-Json $responseBody
+                                # ConvertFrom-Json may return $null on empty body — keep the default $responseObj in that case
+                                $parsed = ConvertFrom-Json $responseBody
+                                if ($parsed -ne $null) { $responseObj = $parsed }
                             } catch {
-                                # Fallback if parsing fails
+                                # Fallback: keep the default $responseObj set above
                             }
                         }
                         Write-Host "[API] /oidc/token fallito per CN=$cn : $_" -ForegroundColor Red
@@ -881,6 +883,8 @@ function Start-HttpServer {
                 }
                 
                 $responseBody = ConvertTo-Json $responseObj -Depth 5 -Compress
+                # Guard: ConvertTo-Json returns $null when $responseObj is $null
+                if ($null -eq $responseBody) { $responseBody = '{"error":"internal: null response object"}' }
                 $buffer = [System.Text.Encoding]::UTF8.GetBytes($responseBody)
                 $res.ContentLength64 = $buffer.Length
                 $res.OutputStream.Write($buffer, 0, $buffer.Length)
