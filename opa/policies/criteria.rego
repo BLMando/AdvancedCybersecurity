@@ -88,7 +88,7 @@ hard_deny if {
 inspection_violation if {
 	not identity.is_http_request
 	identity.normalized_collection_name == "clinical_records"
-	identity.action_name in {"find", "update"}
+	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 }
 
