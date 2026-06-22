@@ -1,0 +1,11 @@
+{
+  "department": "Cardiologia",
+  "enrollment_method": "hardware_proof",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 5700U with Radeon Graphics",
+    "mac": "00-15-5D-EB-AF-EA"
+  },
+  "role": "doctor",
+  "timestamp": "2026-06-22T08:28:01.358562+00:00",
+  "user": "mario.rossi"
+}
