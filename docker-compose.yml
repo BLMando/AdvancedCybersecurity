@@ -23,6 +23,8 @@ services:
       - ./volumes/certs/server:/data/server
       - ./volumes/certs/client:/data/certs/client
       - ./shared:/app/shared:ro
+      - ./identity_pki/templates:/app/identity_pki/templates
+      - ./identity_pki/static:/app/identity_pki/static
     networks:
       - backend-net
     extra_hosts:
