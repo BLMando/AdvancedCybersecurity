@@ -760,9 +760,9 @@ button:disabled {
 }
 
 .btn-save {
-  padding: 6px 18px;
+  padding: 6px 10px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #0ea5e9, #22c55e);
+  background: linear-gradient(135deg, #0ea5e9, #607fd4);
   border: none;
   color: #fff;
   font-weight: 700;

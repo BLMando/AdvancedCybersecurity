@@ -31,15 +31,15 @@
 
     <!-- Tab Controls -->
     <div class="tabs-container">
-      <button id="btn-enroll" class="tab-btn active" onclick="switchTab('enroll')">🔑 Hardware CSR Enrollment</button>
-      <button id="btn-query" class="tab-btn" onclick="switchTab('query')">🔍 ZTA MongoDB Console</button>
+      <button id="btn-enroll" class="tab-btn active" onclick="switchTab('enroll')">Hardware CSR Enrollment</button>
+      <button id="btn-query" class="tab-btn" onclick="switchTab('query')">MongoDB Console</button>
     </div>
 
     <!-- Enrollment Tab Content -->
     <div id="tab-enroll" class="tab-content active">
       <section class="panel-grid">
         <section class="panel">
-          <h2>Zero Trust Auto-Enrollment</h2>
+          <h2>Enrollment</h2>
           <div id="error-box" class="error-box" style="display: none;"></div>
           <div id="success-box" class="success-box" style="display: none;"></div>
 
@@ -55,6 +55,7 @@
                   <option value="giulia.bianchi@ospedale.it">giulia.bianchi@ospedale.it (Giulia Bianchi - Audit/Auditor)</option>
                   <option value="luca.ferrari@ospedale.it">luca.ferrari@ospedale.it (Luca Ferrari - Accettazione/Receptionist)</option>
                   <option value="paolo.roselli@ospedale.it">paolo.roselli@ospedale.it (Paolo Roselli - Medico/Doctor)</option>
+                  <option value="mattia.mandorlini@ospedale.it">mattia.mandorlini@ospedale.it (Mattia Mandorlini - Medico/Doctor)</option>
                 </select>
               </label>
 
@@ -98,7 +99,7 @@
             
             <form id="csr-form" class="form-grid">
               <div class="actions" style="grid-column: span 2; display: flex; flex-direction: column; gap: 10px;">
-                <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">⚡ Avvia Auto-Enroll (Local Agent)</button>
+                <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px;">Avvia Auto-Enroll (Local Agent)</button>
                 <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.85;">
                   <strong>Nota:</strong> Questa operazione contatterà l'Agente ZTA locale (porta 9090) in esecuzione sul tuo dispositivo per generare la chiave hardware nel Secure Enclave/TPM, associare l'identità autenticata ed emettere il certificato X.509 firmato dalla PKI.
                 </p>
@@ -492,9 +493,10 @@
         { key: 'blood_type', label: 'Gruppo Sanguigno', type: 'select', options: ['A+','A-','B+','B-','AB+','AB-','O+','O-'] }
       ],
       clinical_records: [
-        { key: 'medical_condition', label: 'Condizione',   type: 'select', options: ['Cancer','Asthma','Obesity','Diabetes','Arthritis','Hypertension'] },
-        { key: 'medication',        label: 'Farmaco',      type: 'text' },
-        { key: 'test_results',      label: 'Risultato',   type: 'select', options: ['Normal','Abnormal','Inconclusive'] }
+        { key: 'medical_condition', label: 'Condizione',   type: 'select', options: ['Arthritis','Asthma','Cancer','Diabetes','Hypertension','Obesity'] },
+        { key: 'medication',        label: 'Farmaco',      type: 'select', options: ['Aspirin','Ibuprofen','Lipitor','Paracetamol','Penicillin'] },
+        { key: 'test_results',      label: 'Risultato',    type: 'select', options: ['Normal','Abnormal','Inconclusive'] },
+        { key: 'notes',             label: 'Note',         type: 'text' }
       ],
       admissions: [
         { key: 'status',         label: 'Stato',        type: 'select', options: ['Admitted','Discharged'] },
@@ -511,6 +513,23 @@
         { key: 'type', label: 'Tipo',             type: 'select', options: ['doctor','hospital'] }
       ]
     };
+
+    // ─── Role-based action permissions (mirrors OPA criteria.rego) ──────────
+    // u = canUpdate, d = canDelete per (role, collection)
+    const ROLE_PERMISSIONS = {
+      admin:        { patients: {u:true,  d:true},  providers: {u:true,  d:true},  admissions: {u:true,  d:true},  clinical_records: {u:true,  d:true},  billing: {u:true,  d:true}  },
+      doctor:       { patients: {u:true, d:false}, providers: {u:false, d:false}, admissions: {u:true,  d:false}, clinical_records: {u:true,  d:false}, billing: {u:false, d:false} },
+      billing_staff:{ patients: {u:false, d:false}, providers: {u:false, d:false}, admissions: {u:false, d:false}, clinical_records: {u:false, d:false}, billing: {u:true,  d:false} },
+      auditor:      { patients: {u:false, d:false}, providers: {u:false, d:false}, admissions: {u:false, d:false}, clinical_records: {u:false, d:false}, billing: {u:false, d:false} },
+      receptionist: { patients: {u:true,  d:false}, providers: {u:false, d:false}, admissions: {u:true,  d:false}, clinical_records: {u:false, d:false}, billing: {u:false, d:false} },
+    };
+
+    function getRolePerms(collection) {
+      const user = document.getElementById('query-user').value;
+      const cert = window.activeCertificates ? window.activeCertificates.find(c => c.user === user) : null;
+      const role = cert ? cert.role : 'auditor';
+      return (ROLE_PERMISSIONS[role] || {})[collection] || {u: false, d: false};
+    }
 
     // ─── Render results table with Edit/Delete action buttons ──────────────
     function renderQueryResults(results, collection) {
@@ -601,13 +620,16 @@
       }
 
       const hasEditFields = !!(EDIT_FIELDS[collection]);
+      const perms = getRolePerms(collection);
+      const canEdit   = hasEditFields && perms.u;
+      const canDelete = perms.d;
 
       // Header
       let headerHtml = '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
       headers.forEach(h => {
         headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
       });
-      if (hasEditFields) {
+      if (canEdit || canDelete) {
         headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;
       }
       headerHtml += '</tr></thead>';
@@ -621,12 +643,12 @@
         cells.forEach(c => {
           rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
         });
-        if (hasEditFields) {
+        if (canEdit || canDelete) {
           rowsHtml += `
             <td style="padding: 8px 12px; white-space: nowrap;">
               <div class="action-cell">
-                <button class="btn-action btn-edit" onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>
-                <button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>
+                ${canEdit   ? `<button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>` : ''}
+                ${canDelete ? `<button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>` : ''}
               </div>
             </td>`;
         }
@@ -733,7 +755,7 @@
             });
             const oidcData = await oidcResp.json();
             if (oidcResp.status === 401 && oidcData.error === 'primary_auth_required') {
-              await promptPrimaryAuth(email);
+              await promptPrimaryAuth(email, true);
               retryCount++;
               continue;
             }
@@ -831,7 +853,7 @@
             });
             const oidcData = await oidcResp.json();
             if (oidcResp.status === 401 && oidcData.error === 'primary_auth_required') {
-              await promptPrimaryAuth(email);
+              await promptPrimaryAuth(email, true);
               retryCount++;
               continue;
             }
@@ -1081,7 +1103,9 @@
 
     let primaryAuthCallbacks = null;
 
-    function promptPrimaryAuth(email) {
+    // isStepUp=true  → calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
+    // isStepUp=false → calls /api/auth/verify-otp (full enrollment session token)
+    function promptPrimaryAuth(email, isStepUp = false) {
       return new Promise((resolve, reject) => {
         document.getElementById('modal-login-email').value = email;
         document.getElementById('modal-login-password').value = 'password123';
@@ -1090,8 +1114,8 @@
         document.getElementById('modal-step-login').style.display = 'block';
         document.getElementById('modal-step-otp').style.display = 'none';
         document.getElementById('primary-auth-modal').style.display = 'flex';
-        
-        primaryAuthCallbacks = { resolve, reject };
+
+        primaryAuthCallbacks = { resolve, reject, isStepUp };
       });
     }
 
@@ -1146,26 +1170,35 @@
       const otp = document.getElementById('modal-otp-code').value.trim();
       const errorBox = document.getElementById('modal-error-box');
       const btn = document.getElementById('modal-otp-btn');
+      // Detect whether this modal was opened for a step-up or a full enrollment
+      const isStepUp = primaryAuthCallbacks ? primaryAuthCallbacks.isStepUp : false;
 
       errorBox.style.display = 'none';
       try {
         btn.disabled = true;
         btn.textContent = '⏳ Verifica OTP...';
 
-        const response = await fetch('/api/auth/verify-otp', {
+        // Step-up: only refreshes last_mfa_time, does NOT create a new enrollment token.
+        // Full login: creates an enrollment session token (existing behaviour).
+        const endpoint = isStepUp ? '/api/auth/step-up' : '/api/auth/verify-otp';
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, otp })
+          body: JSON.stringify({ email, otp,
+            // /api/auth/step-up also needs the password to re-validate the user
+            ...(isStepUp && { password: document.getElementById('modal-login-password').value })
+          })
         });
 
         const data = await response.json();
         if (!response.ok) {
-          throw new Error(data.error || 'Codice OTP errato');
+          throw new Error(data.error || data.message || 'Codice OTP errato');
         }
 
         document.getElementById('primary-auth-modal').style.display = 'none';
         if (primaryAuthCallbacks) {
-          primaryAuthCallbacks.resolve(data.enrollment_session_token);
+          // For step-up we resolve with null (caller only needs to know it succeeded)
+          primaryAuthCallbacks.resolve(isStepUp ? null : data.enrollment_session_token);
           primaryAuthCallbacks = null;
         }
       } catch (error) {
@@ -1256,7 +1289,7 @@
               if (oidcResponse.status === 401 && oidcData.error === 'primary_auth_required') {
                 submitBtn.textContent = '⏳ Autenticazione primaria in corso...';
                 const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-                await promptPrimaryAuth(email);
+                await promptPrimaryAuth(email, needsStepUp);
                 
                 retryCount++;
                 submitBtn.textContent = needsStepUp ? '⏳ Richiesta Touch ID (Step-Up Richiesto)...' : '⏳ Richiesta Touch ID / Windows Hello...';
