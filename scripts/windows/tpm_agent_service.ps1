@@ -582,9 +582,18 @@ function Start-HttpServer {
                         $store.Add($certObj)
                         $store.Close()
                         
-                        # Associa la chiave privata tramite certutil -repairstore
+                        # Associa la chiave privata tramite certutil -repairstore (usando -silent e con un timeout per evitare blocchi infiniti)
                         $thumb = $certObj.Thumbprint
-                        & certutil.exe -user -repairstore My $thumb | Out-Null
+                        Write-Host "[API] Associazione chiave privata con certutil (non bloccante)..." -ForegroundColor Gray
+                        $job = Start-Job -ScriptBlock {
+                            param($t)
+                            & certutil.exe -silent -user -repairstore My $t | Out-Null
+                        } -ArgumentList $thumb
+                        $completed = $job | Wait-Job -Timeout 10
+                        if ($null -eq $completed) {
+                            Write-Host "[API WARN] certutil repairstore ha richiesto troppo tempo (timeout 10s) ed e' stato interrotto." -ForegroundColor Yellow
+                        }
+                        $job | Remove-Job -Force
                         
                         # Scrivi copia del cert nella cartella condivisa client/
                         $certOutPath = Join-Path $CERT_DIR "$cn.crt"

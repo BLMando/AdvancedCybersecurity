@@ -199,7 +199,7 @@ def enroll(args):
                     f'$store.Add($cert); '
                     f'$store.Close(); '
                     f'$thumb = $cert.Thumbprint; '
-                    f'certutil.exe -user -repairstore My $thumb'
+                    f'certutil.exe -silent -user -repairstore My $thumb'
                 ]
                 res = subprocess.run(ps_cmd, capture_output=True, text=True, errors="replace")
                 if res.returncode == 0:
