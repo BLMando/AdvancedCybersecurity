@@ -3,6 +3,12 @@ TODO:
 - complete mediation 
 
 
+da mettere nella relazione:
+<li><strong>Sicurezza Hardware:</strong> La coppia di chiavi viene generata e custodita all'interno del Secure Enclave (macOS) o del TPM 2.0 (Windows) locale.</li>
+<li><strong>Zero Knowledge:</strong> La chiave privata rimane al sicuro nel dispositivo e non viene mai trasmessa al server né salvata su disco.</li>
+<li><strong>Automazione Completa:</strong> L'agente locale dialoga con il server PKI per firmare il certificato e registrarlo nel portachiavi di sistema.</li>
+<li><strong>Auto-Provisioning:</strong> L'utente viene registrato ed autorizzato all'istante all'interno di MongoDB.</li>
+
 
 http_test_listener serve solo a validare la parte mTLS crittografica/hardware isolandola dal database -> è possibile elimimare il filtro lua  file (l7_firewall.lua)
 
