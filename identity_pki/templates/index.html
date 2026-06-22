@@ -967,7 +967,7 @@
           billing: { u: true, d: true },
         },
         doctor: {
-          patients: { u: true, d: false },
+          patients: { u: false, d: false },
           providers: { u: false, d: false },
           admissions: { u: true, d: false },
           clinical_records: { u: true, d: false },
@@ -1152,9 +1152,9 @@
         headers.forEach((h) => {
           headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
         });
-        if (canEdit || canDelete) {
+        // if (canEdit || canDelete) {
           headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;
-        }
+        // }
         headerHtml += "</tr></thead>";
 
         // Rows
@@ -1166,15 +1166,15 @@
           cells.forEach((c) => {
             rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
           });
-          if (canEdit || canDelete) {
+          // if (canEdit || canDelete) {
             rowsHtml += `
             <td style="padding: 8px 12px; white-space: nowrap;">
               <div class="action-cell">
-                ${canEdit ? `<button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>` : ""}
-                ${canDelete ? `<button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>` : ""}
+                ${true ? `<button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>` : ""}
+                ${true ? `<button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>` : ""}
               </div>
             </td>`;
-          }
+          // }
           rowsHtml += "</tr>";
           // Placeholder for inline edit panel
           rowsHtml += `<tr id="edit-row-${idx}" style="display:none;"><td colspan="${headers.length + 1}" style="padding:0;"><div class="edit-row-panel" id="edit-panel-${idx}"></div></td></tr>`;
@@ -1310,8 +1310,6 @@
             const proxyData = await proxyResp.json();
             if (!proxyResp.ok)
               throw new Error(proxyData.error || "Proxy start fallito");
-            queryPayload.local_proxy_port = proxyData.port;
-
             try {
               const resp = await fetch("/api/query", {
                 method: "POST",
@@ -1442,8 +1440,6 @@
             const proxyData = await proxyResp.json();
             if (!proxyResp.ok)
               throw new Error(proxyData.error || "Proxy start fallito");
-            queryPayload.local_proxy_port = proxyData.port;
-
             try {
               const resp = await fetch("/api/query", {
                 method: "POST",
@@ -2010,7 +2006,6 @@
                 );
               }
 
-              queryPayload.local_proxy_port = agentData.port;
               proxyToken = agentData.session_token;
 
               submitBtn.textContent =

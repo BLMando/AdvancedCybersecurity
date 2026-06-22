@@ -847,15 +847,24 @@ def create_app(data_dir=None) -> Flask:
                 if update_fields and isinstance(update_fields, dict):
                     # Sanitize: strip leading $ from keys to prevent operator injection
                     safe_fields = {k: v for k, v in update_fields.items() if not k.startswith("$")}
-                    set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc).isoformat()}
+                    if target_collection != "providers":
+                        set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc)}
+                    else:
+                        set_payload = safe_fields
                 else:
-                    set_payload = {
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                        "status_note": "ZTA Verified Step-Up Update"
-                    }
-                update_op = {"$set": set_payload}
-                res = db[target_collection].update_many(query_filter, update_op)
-                count = res.modified_count
+                    if target_collection != "providers":
+                        set_payload = {
+                            "updated_at": datetime.now(timezone.utc)
+                        }
+                    else:
+                        set_payload = {}
+                
+                if set_payload:
+                    update_op = {"$set": set_payload}
+                    res = db[target_collection].update_many(query_filter, update_op)
+                    count = res.modified_count
+                else:
+                    count = 0
                 message = f"Aggiornati {count} documenti in '{target_collection}'"
             elif mongo_action == "delete":
                 res = db[target_collection].delete_many(query_filter)
