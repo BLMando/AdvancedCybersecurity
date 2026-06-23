@@ -149,3 +149,46 @@ Calling `GET /api/admin/certificates` returns:
   - `[x]` Update `docs/ARCHITECTURE.md`: four-layer model, Windows TPM mention, 7 Security Principles (added Human Session Lifecycle, Progressive MFA, RFC 8705 Token Binding).
   - `[x]` Update `docs/README.md`: Key Features (4-layer auth, TPM agent, CRL, RFC 8705), Quick Start Step 5 (Web Console flow), Security Principles (session gating, step-up MFA, token binding).
 
+- `[x]` **Phase 20: Certificates Revocation Tab & Doctor Update Fix**
+  - `[x]` Add "Gestione Certificati" tab to `identity_pki/templates/index.html` with certificates list and "🚫 Revoca" button.
+  - `[x]` Implement `loadCertsTable` and `revokeCertificateFromUI` in JavaScript in `index.html`.
+  - `[x]` Add CSS rules for status classes `.status-active` and `.status-revoked` in `identity_pki/static/style.css`.
+  - `[x]` Update `saveRecord` and `deleteRecord` in `index.html` to pass `patient_id` if present in the row data.
+  - `[x]` Modify `/api/query` in `identity_pki/app.py` to extract `patient_id` and append it to the update/delete query filter.
+  - `[x]` Rebuild the Docker environment.
+  - `[x]` Verify the certificates list and revocation flow.
+  - `[x]` Verify that doctor `paolo.roselli` can successfully update clinical records, and that delete is blocked by OPA.
+
+## Verification Evidence (Phase 20)
+
+### 1. Doctor Update & Delete Operations Test
+Running `scratch/test_doctor_update.py` yields:
+```
+=== Testing Doctor Update & Delete Operations ===
+
+[*] Step 1: Performing Primary AD Login for paolo.roselli@ospedale.it...
+[✓] AD Login successful. Simulated OTP: 847641
+[*] Verifying MFA OTP...
+[✓] MFA Verified! Session token: efe53d3a-7c65-4bba-aad8-9dbf0a82a217
+
+[*] Step 2: Fetching Step-Up OIDC JWT from local agent at http://localhost:9090/oidc/token...
+[✓] Successfully retrieved OIDC token!
+
+[*] Step 3: Finding a clinical record for patient 4f781fb9-ce9f-5313-913d-7ec2be6047fa...
+[✓] Found record _id: 167a6bde-aff9-5322-8c56-9a8432d277d2, patient_id: 4f781fb9-ce9f-5313-913d-7ec2be6047fa
+
+[*] Step 4: Attempting update WITHOUT patient_id (expecting rejection)...
+[✓] Expected failure occurred! Status code: 403
+Error message: {"error_type":"authorization_denied","message":"OPA/RBAC Access Denied: Document failed validation (missing patient_id)","role":"doctor","status":"error","translated_collection":"clinical_records"}
+
+[*] Step 5: Attempting update WITH patient_id (expecting success)...
+[✓] SUCCESS! Update succeeded!
+Server response: Aggiornati 1 documenti in 'clinical_records'
+
+[*] Step 6: Attempting delete (expecting 403 Access Denied)...
+[✓] Expected 403 failure occurred! Status code: 403
+Error message: {"error_type":"authorization_denied","message":"OPA/RBAC Access Denied: Role 'doctor' is not allowed to perform 'delete' on collection 'clinical_records'","role":"doctor","status":"error","translated_collection":"clinical_records"}
+```
+
+
+

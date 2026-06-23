@@ -59,6 +59,9 @@
         <button id="btn-query" class="tab-btn" onclick="switchTab('query')">
           MongoDB Console
         </button>
+        <button id="btn-certs" class="tab-btn" onclick="switchTab('certs')">
+          Gestione Certificati
+        </button>
       </div>
 
       <!-- Enrollment Tab Content -->
@@ -453,6 +456,34 @@
           </div>
         </section>
       </div>
+
+      <!-- Certs Tab Content -->
+      <div id="tab-certs" class="tab-content" style="display: none;">
+        <section class="panel-grid single">
+          <section class="panel">
+            <h2>Registro Identità &amp; Revoche</h2>
+            <p class="lede" style="margin-bottom: 1.5rem;">
+              Visualizza lo stato dei certificati crittografici emessi. I certificati hardware e software possono essere revocati istantaneamente, aggiornando la CRL per Envoy e bloccando l'accesso.
+            </p>
+            <div class="table-container">
+              <table id="certs-table">
+                <thead>
+                  <tr>
+                    <th>Utente (Common Name)</th>
+                    <th>Ruolo</th>
+                    <th>Tipo</th>
+                    <th>Stato</th>
+                    <th>Azioni</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Caricamento...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </div>
     </main>
 
     <!-- Modal for Primary AD Auth + OTP -->
@@ -608,6 +639,10 @@
           document.getElementById("btn-query").classList.add("active");
           document.getElementById("tab-query").classList.add("active");
           loadActiveCertificates(); // Load users when switching to query tab
+        } else if (tabName === "certs") {
+          document.getElementById("btn-certs").classList.add("active");
+          document.getElementById("tab-certs").classList.add("active");
+          loadCertsTable(); // Load list of all certs for management
         }
       }
 
@@ -625,15 +660,17 @@
           select.innerHTML =
             '<option value="" disabled selected>Seleziona un utente...</option>';
 
-          if (!data || data.length === 0) {
+          const activeCerts = data ? data.filter(c => c.status === "active") : [];
+
+          if (activeCerts.length === 0) {
             select.innerHTML =
               '<option value="" disabled>Nessun certificato attivo trovato</option>';
             document.getElementById("hardware-badge").style.display = "none";
             return;
           }
 
-          // Add users
-          data.forEach((cert) => {
+          // Add active users
+          activeCerts.forEach((cert) => {
             const opt = document.createElement("option");
             opt.value = cert.user;
             opt.textContent = `${cert.user} (${cert.role} - ${cert.is_hardware ? "Hardware 🛡️" : "Software 🧪"})`;
@@ -647,6 +684,66 @@
             '<option value="" disabled>Errore caricamento certificati</option>';
           document.getElementById("hardware-badge").style.display = "none";
           console.error("Failed to load certificates:", err);
+        }
+      }
+
+      // Load all certificates (active and revoked) for the management tab table
+      async function loadCertsTable() {
+        const tbody = document.querySelector("#certs-table tbody");
+        try {
+          const resp = await fetch("/api/admin/certificates");
+          const certs = await resp.json();
+
+          if (!certs || certs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Nessun certificato attivo o revocato nel database.</td></tr>`;
+            return;
+          }
+
+          tbody.innerHTML = certs
+            .map(
+              (c) => `
+            <tr>
+              <td style="font-weight: 600;">${c.user}</td>
+              <td>${c.role}</td>
+              <td>${c.is_hardware ? "Hardware 🛡️" : "Software 🧪"}</td>
+              <td><span class="status-${c.status}">${c.status.toUpperCase()}</span></td>
+              <td>
+                ${
+                  c.status === "active"
+                    ? `<button class="btn-action btn-delete" style="padding: 6px 12px; font-size: 0.8em;" onclick="revokeCertificateFromUI('${c.user}')">🚫 Revoca</button>`
+                    : `<button disabled style="padding: 6px 12px; font-size: 0.8em; opacity: 0.5;">Revocato</button>`
+                }
+              </td>
+            </tr>
+          `,
+            )
+            .join("");
+        } catch (err) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--error); padding: 24px;">Errore caricamento: ${err.message}</td></tr>`;
+        }
+      }
+
+      // Action to revoke a certificate from UI
+      async function revokeCertificateFromUI(user) {
+        if (!confirm(`Sei sicuro di voler REVOCARE il certificato dell'utente ${user}? L'operazione è irreversibile.`)) {
+          return;
+        }
+        try {
+          const resp = await fetch("/api/admin/revoke", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user }),
+          });
+          const data = await resp.json();
+          if (resp.ok) {
+            alert(`Certificato per ${user} revocato con successo!`);
+            loadCertsTable();
+            loadActiveCertificates(); // Update query dropdown too
+          } else {
+            alert(`Errore revoca: ${data.message || data.error}`);
+          }
+        } catch (err) {
+          alert(`Errore di connessione: ${err.message}`);
         }
       }
 
@@ -1244,6 +1341,7 @@
 
       // ─── Save record (Update) ───────────────────────────────────────────────
       async function saveRecord(idx, rawId, collection) {
+        const row = (window.lastQueryResults || [])[idx] || {};
         const fields = EDIT_FIELDS[collection] || [];
         const updateFields = {};
         fields.forEach((f) => {
@@ -1274,6 +1372,10 @@
             record_id: rawId,
             update_fields: updateFields,
           };
+
+          if (row.patient_id) {
+            queryPayload.patient_id = row.patient_id;
+          }
 
           if (isHardware) {
             // Step-up OIDC token (always required for update)
@@ -1398,6 +1500,8 @@
           dataRow.style.opacity = "0.4";
         }
 
+        const row = (window.lastQueryResults || [])[idx] || {};
+
         let queryPayload = {
           user,
           collection,
@@ -1405,6 +1509,10 @@
           filter: "{}",
           record_id: rawId,
         };
+
+        if (row.patient_id) {
+          queryPayload.patient_id = row.patient_id;
+        }
 
         try {
           if (isHardware) {

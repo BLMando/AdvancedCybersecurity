@@ -837,3 +837,15 @@ button:disabled {
 .edit-status-msg.success { color: var(--success); display: inline; }
 .edit-status-msg.error { color: var(--error); display: inline; }
 
+/* Status Labels */
+.status-active {
+  color: var(--success);
+  font-weight: 600;
+}
+.status-revoked {
+  color: var(--error);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+

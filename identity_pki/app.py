@@ -358,6 +358,54 @@ def create_app(data_dir=None) -> Flask:
             }
         })
 
+    @app.post("/api/auth/step-up")
+    def api_auth_step_up():
+        """Verify the OTP and password to refresh the last_mfa_time for Step-up Authentication."""
+        payload = request.get_json(silent=True) or {}
+        email = payload.get("email", "").strip()
+        otp = payload.get("otp", "").strip()
+        password = payload.get("password", "")
+
+        if not email or not otp or not password:
+            return error_response("Email, OTP and Password are required", 400)
+
+        # 1. Verify password matches Active Directory
+        user_info = AD_USERS.get(email)
+        if not user_info or user_info["password"] != password:
+            return error_response("Invalid email or password", 401)
+
+        # 2. Verify OTP
+        pending = PENDING_OTPS.get(email)
+        if not pending:
+            return error_response("No pending authentication session found", 400)
+
+        if datetime.now(timezone.utc) > pending["expires_at"]:
+            PENDING_OTPS.pop(email, None)
+            return error_response("OTP has expired", 401)
+
+        if pending["otp"] != otp:
+            return error_response("Invalid OTP code", 401)
+
+        # Success: Refresh/Establish primary session with updated last_mfa_time
+        user_cn = user_info["cn"]
+        now = datetime.now(timezone.utc)
+        
+        orig_session = PRIMARY_SESSIONS.get(user_cn, {})
+        login_time = orig_session.get("login_time", now)
+        
+        PRIMARY_SESSIONS[user_cn] = {
+            "login_time": login_time,
+            "last_mfa_time": now
+        }
+        
+        PENDING_OTPS.pop(email, None)
+        
+        app.logger.info(f"Step-up Authentication successful for {user_cn} ({email})")
+        return jsonify({
+            "status": "success",
+            "message": "Step-up Authentication successful. Session MFA timestamp refreshed."
+        })
+
     @app.post("/api/enroll")
     def api_enroll_delegated():
         """Delegate hardware enrollment request to the host local agent."""
@@ -620,6 +668,7 @@ def create_app(data_dir=None) -> Flask:
         mongo_action = payload.get("action", "find")
         record_id = payload.get("record_id")          # Single-document _id for delete/update
         update_fields = payload.get("update_fields")  # Dict of specific fields to $set on update
+        patient_id = payload.get("patient_id")        # patient_id to satisfy OPA WAF checks
 
         if not user_cn or not collection_name:
             return error_response("User CN and Collection name are required", 400)
@@ -648,6 +697,9 @@ def create_app(data_dir=None) -> Flask:
             except InvalidId:
                 # Try as plain string _id (some collections use UUID strings)
                 query_filter = {"_id": record_id}
+
+            if patient_id:
+                query_filter["patient_id"] = patient_id
 
         local_proxy_port = payload.get("local_proxy_port")
 
@@ -743,6 +795,58 @@ def create_app(data_dir=None) -> Flask:
                     "role": role,
                     "translated_collection": view_name
                 }), 403
+
+            # Action-level permission check (mirrors criteria.rego permissions)
+            action_permission_map = {
+                "doctor": {
+                    "patients": {"find"},
+                    "providers": {"find"},
+                    "admissions": {"find", "insert", "update"},
+                    "clinical_records": {"find", "insert", "update"},
+                    "billing": set()
+                },
+                "billing_staff": {
+                    "patients": {"find"},
+                    "providers": {"find"},
+                    "admissions": {"find"},
+                    "clinical_records": set(),
+                    "billing": {"find", "insert", "update"}
+                },
+                "auditor": {
+                    "patients": {"find"},
+                    "providers": {"find"},
+                    "admissions": {"find"},
+                    "clinical_records": {"find"},
+                    "billing": {"find"}
+                },
+                "receptionist": {
+                    "patients": {"find", "insert", "update"},
+                    "providers": {"find"},
+                    "admissions": {"find", "insert", "update"},
+                    "clinical_records": set(),
+                    "billing": set()
+                }
+            }
+            role_allowed_actions = action_permission_map.get(role, {}).get(collection_name, set())
+            if mongo_action not in role_allowed_actions:
+                return jsonify({
+                    "status": "error",
+                    "error_type": "authorization_denied",
+                    "message": f"OPA/RBAC Access Denied: Role '{role}' is not allowed to perform '{mongo_action}' on collection '{collection_name}'",
+                    "role": role,
+                    "translated_collection": view_name
+                }), 403
+
+            # Enforce that update operations on clinical_records contain patient_id in the query filter
+            if collection_name == "clinical_records" and mongo_action == "update":
+                if not query_filter.get("patient_id"):
+                    return jsonify({
+                        "status": "error",
+                        "error_type": "authorization_denied",
+                        "message": "OPA/RBAC Access Denied: Document failed validation (missing patient_id)",
+                        "role": role,
+                        "translated_collection": view_name
+                    }), 403
 
             rls_views = {
                 "doctor": {
