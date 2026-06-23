@@ -9,6 +9,10 @@ import future.keywords
 user_identity := sanitize_user(raw_user)
 
 raw_user := user if {
+	claims := token_claims
+	user := claims.sub
+	user != ""
+} else := user if {
 	attrs := object.get(input, "attributes", {})
 	source := object.get(attrs, "source", {})
 	user := object.get(source, "principal", "")
@@ -87,6 +91,16 @@ is_internal_network if {
 # ─── Role Mapping & Matrix ────────────────────────────────────────────────────
 
 current_role := role if {
+	claims := token_claims
+	is_array(claims.role)
+	role := claims.role[0]
+	role != ""
+} else := role if {
+	claims := token_claims
+	is_string(claims.role)
+	role := claims.role
+	role != ""
+} else := role if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
 	cert_pem := urlquery.decode(cert_pem_raw)

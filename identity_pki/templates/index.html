@@ -1412,6 +1412,7 @@
             const proxyData = await proxyResp.json();
             if (!proxyResp.ok)
               throw new Error(proxyData.error || "Proxy start fallito");
+            queryPayload.local_proxy_port = proxyData.port;
             try {
               const resp = await fetch("/api/query", {
                 method: "POST",
@@ -1548,6 +1549,7 @@
             const proxyData = await proxyResp.json();
             if (!proxyResp.ok)
               throw new Error(proxyData.error || "Proxy start fallito");
+            queryPayload.local_proxy_port = proxyData.port;
             try {
               const resp = await fetch("/api/query", {
                 method: "POST",
@@ -2115,6 +2117,7 @@
               }
 
               proxyToken = agentData.session_token;
+              queryPayload.local_proxy_port = agentData.port;
 
               submitBtn.textContent =
                 "⏳ Esecuzione operazione via hardware OIDC mTLS...";

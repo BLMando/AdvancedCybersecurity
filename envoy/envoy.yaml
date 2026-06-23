@@ -66,6 +66,7 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.mongo_proxy.v3.MongoProxy
                 stat_prefix: mongo_stats
+                emit_dynamic_metadata: true
 
             # Ask OPA for an allow/deny decision before forwarding traffic to
             # MongoDB. This is the policy gate of the system.
