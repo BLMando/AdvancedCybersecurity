@@ -1378,31 +1378,6 @@
           }
 
           if (isHardware) {
-            // Step-up OIDC token (always required for update)
-            const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-            let tokenResult = null,
-              retryCount = 0;
-            while (!tokenResult && retryCount < 2) {
-              const oidcResp = await fetch("http://localhost:9090/oidc/token", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ common_name: user, step_up: true }),
-              });
-              const oidcData = await oidcResp.json();
-              if (
-                oidcResp.status === 401 &&
-                oidcData.error === "primary_auth_required"
-              ) {
-                await promptPrimaryAuth(email, true);
-                retryCount++;
-                continue;
-              }
-              if (!oidcResp.ok)
-                throw new Error(oidcData.message || "Token OIDC fallito");
-              tokenResult = oidcData.token;
-            }
-            queryPayload.jwt_token = tokenResult;
-
             // Start proxy
             const proxyResp = await fetch("http://localhost:9090/proxy/start", {
               method: "POST",
@@ -1414,6 +1389,31 @@
               throw new Error(proxyData.error || "Proxy start fallito");
             queryPayload.local_proxy_port = proxyData.port;
             try {
+              // Step-up OIDC token (always required for update)
+              const email = cnToEmailMap[user] || `${user}@ospedale.it`;
+              let tokenResult = null,
+                retryCount = 0;
+              while (!tokenResult && retryCount < 2) {
+                const oidcResp = await fetch("http://localhost:9090/oidc/token", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ common_name: user, step_up: true }),
+                });
+                const oidcData = await oidcResp.json();
+                if (
+                  oidcResp.status === 401 &&
+                  oidcData.error === "primary_auth_required"
+                ) {
+                  await promptPrimaryAuth(email, true);
+                  retryCount++;
+                  continue;
+                }
+                if (!oidcResp.ok)
+                  throw new Error(oidcData.message || "Token OIDC fallito");
+                tokenResult = oidcData.token;
+              }
+              queryPayload.jwt_token = tokenResult;
+
               const resp = await fetch("/api/query", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1517,30 +1517,6 @@
 
         try {
           if (isHardware) {
-            const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-            let tokenResult = null,
-              retryCount = 0;
-            while (!tokenResult && retryCount < 2) {
-              const oidcResp = await fetch("http://localhost:9090/oidc/token", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ common_name: user, step_up: true }),
-              });
-              const oidcData = await oidcResp.json();
-              if (
-                oidcResp.status === 401 &&
-                oidcData.error === "primary_auth_required"
-              ) {
-                await promptPrimaryAuth(email, true);
-                retryCount++;
-                continue;
-              }
-              if (!oidcResp.ok)
-                throw new Error(oidcData.message || "Token OIDC fallito");
-              tokenResult = oidcData.token;
-            }
-            queryPayload.jwt_token = tokenResult;
-
             const proxyResp = await fetch("http://localhost:9090/proxy/start", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1551,6 +1527,30 @@
               throw new Error(proxyData.error || "Proxy start fallito");
             queryPayload.local_proxy_port = proxyData.port;
             try {
+              const email = cnToEmailMap[user] || `${user}@ospedale.it`;
+              let tokenResult = null,
+                retryCount = 0;
+              while (!tokenResult && retryCount < 2) {
+                const oidcResp = await fetch("http://localhost:9090/oidc/token", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ common_name: user, step_up: true }),
+                });
+                const oidcData = await oidcResp.json();
+                if (
+                  oidcResp.status === 401 &&
+                  oidcData.error === "primary_auth_required"
+                ) {
+                  await promptPrimaryAuth(email, true);
+                  retryCount++;
+                  continue;
+                }
+                if (!oidcResp.ok)
+                  throw new Error(oidcData.message || "Token OIDC fallito");
+                tokenResult = oidcData.token;
+              }
+              queryPayload.jwt_token = tokenResult;
+
               const resp = await fetch("/api/query", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -2036,6 +2036,26 @@
             }
 
             if (isHardware) {
+              submitBtn.textContent = "⏳ Avvio proxy locale...";
+              const agentResponse = await fetch(
+                "http://localhost:9090/proxy/start",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
+                },
+              );
+
+              const agentData = await agentResponse.json();
+              if (!agentResponse.ok) {
+                throw new Error(
+                  agentData.error || "Autenticazione hardware fallita.",
+                );
+              }
+
+              proxyToken = agentData.session_token;
+              queryPayload.local_proxy_port = agentData.port;
+
               submitBtn.textContent = needsStepUp
                 ? "⏳ Richiesta Touch ID (Step-Up Richiesto)..."
                 : "⏳ Richiesta Touch ID / Windows Hello...";
@@ -2098,26 +2118,6 @@
               }
 
               queryPayload.jwt_token = tokenResult;
-
-              submitBtn.textContent = "⏳ Avvio proxy locale...";
-              const agentResponse = await fetch(
-                "http://localhost:9090/proxy/start",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
-                },
-              );
-
-              const agentData = await agentResponse.json();
-              if (!agentResponse.ok) {
-                throw new Error(
-                  agentData.error || "Autenticazione hardware fallita.",
-                );
-              }
-
-              proxyToken = agentData.session_token;
-              queryPayload.local_proxy_port = agentData.port;
 
               submitBtn.textContent =
                 "⏳ Esecuzione operazione via hardware OIDC mTLS...";
