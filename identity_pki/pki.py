@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -261,6 +261,62 @@ class PKIService:
         self.challenges[challenge_id] = challenge
         return challenge_id, base64.b64encode(nonce).decode()
 
+    def _verify_cryptographic_signature(self, pub_key, signature: bytes, data: bytes) -> bool:
+        """Helper to verify a cryptographic signature for RSA or EC keys."""
+        try:
+            print(f"[DEBUG] Tipo Public Key: {type(pub_key)}")
+            if isinstance(pub_key, rsa.RSAPublicKey):
+                pub_key.verify(
+                    signature,
+                    data,
+                    padding.PKCS1v15(),
+                    hashes.SHA256()
+                )
+                print(f"[DEBUG] ✓ VERIFICA RIUSCITA!")
+                return True
+            elif isinstance(pub_key, ec.EllipticCurvePublicKey):
+                print(f"[DEBUG] Eseguo verifica ECDSA SHA256...")
+                pub_key.verify(
+                    signature,
+                    data,
+                    ec.ECDSA(hashes.SHA256())
+                )
+                print(f"[DEBUG] ✓ VERIFICA RIUSCITA!")
+                return True
+            else:
+                logger.warning("Unsupported key type for verification: %s", type(pub_key))
+                return False
+        except Exception as ve:
+            print(f"[DEBUG] ✗ VERIFICA FALLITA: {ve}")
+            return False
+
+    def _get_identity_from_certificate(self, user_cn: str) -> tuple[str, str, Optional[Any]]:
+        """Extract role, department and public key from an existing certificate on disk."""
+        role = "unknown"
+        dept = "unknown"
+        pub_key = None
+        
+        cert_path = self._find_certificate_path(user_cn)
+        if cert_path:
+            try:
+                cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+                pub_key = cert.public_key()
+
+                # Get Role and Dept from Subject
+                for attr in cert.subject:
+                    if attr.oid == NameOID.TITLE:
+                        role = attr.value
+                    elif attr.oid == NameOID.ORGANIZATIONAL_UNIT_NAME:
+                        val = str(attr.value)
+                        if not val.startswith(("MAC:", "CPU:")):
+                            dept = val
+            except Exception as e:
+                logger.warning("Failed to parse existing certificate for %s: %s", user_cn, e)
+        else:
+            logger.warning("Certificate for %s not found", user_cn)
+            
+        return role, dept, pub_key
+
     def verify_proof(self, challenge_id, signature_b64, public_key_pem=None, proof_string=None):
         """Verify a hardware-bound proof of possession."""
         print(f"\n[DEBUG] --- Inizio Verifica Proof ---")
@@ -298,25 +354,7 @@ class PKIService:
                     return None
 
                 # 1. Load Identity Context (Role, Dept, PubKey) from stored certificate
-                role = "unknown"
-                dept = "unknown"
-                cert_pub_key = None
-                
-                cert_path = self._find_certificate_path(user_cn)
-                if cert_path:
-                    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-                    cert_pub_key = cert.public_key()
-
-                    # Get Role and Dept from Subject
-                    for attr in cert.subject:
-                        if attr.oid == NameOID.TITLE:
-                            role = attr.value
-                        elif attr.oid == NameOID.ORGANIZATIONAL_UNIT_NAME:
-                            val = str(attr.value)
-                            if not val.startswith(("MAC:", "CPU:")):
-                                dept = val
-                else:
-                    logger.warning("Certificate for %s not found", user_cn)
+                role, dept, cert_pub_key = self._get_identity_from_certificate(user_cn)
 
                 # 2. Resolve Public Key for verification
                 pub_key = self._load_public_key(public_key_pem) if public_key_pem else None
@@ -330,29 +368,8 @@ class PKIService:
                     logger.warning("No public key found for %s", user_cn)
                     return None
 
-                try:
-                    print(f"[DEBUG] Tipo Public Key: {type(pub_key)}")
-                    if isinstance(pub_key, rsa.RSAPublicKey):
-                        pub_key.verify(
-                            signature,
-                            proof_string.encode(),
-                            padding.PKCS1v15(),
-                            hashes.SHA256()
-                        )
-                    elif isinstance(pub_key, ec.EllipticCurvePublicKey):
-                        print(f"[DEBUG] Eseguo verifica ECDSA SHA256...")
-                        pub_key.verify(
-                            signature,
-                            proof_string.encode(),
-                            ec.ECDSA(hashes.SHA256())
-                        )
-                    else:
-                        logger.warning("Unsupported key type for verification: %s", type(pub_key))
-                        return None
-                    print(f"[DEBUG] ✓ VERIFICA RIUSCITA!")
-                except Exception as ve:
-                    print(f"[DEBUG] ✗ VERIFICA FALLITA: {ve}")
-                    logger.warning("Signature verification failed for %s: %s", user_cn, ve)
+                if not self._verify_cryptographic_signature(pub_key, signature, proof_string.encode()):
+                    logger.warning("Signature verification failed for %s", user_cn)
                     return None
 
                 logger.info("Hardware proof verified for %s", user_cn)
@@ -378,22 +395,10 @@ class PKIService:
             # 3. Raw RSA verification (Standard nonce)
             if public_key_pem:
                 pub_key = serialization.load_pem_public_key(public_key_pem.encode())
-                if isinstance(pub_key, rsa.RSAPublicKey):
-                    pub_key.verify(
-                        signature,
-                        challenge.nonce,
-                        padding.PKCS1v15(),
-                        hashes.SHA256()
-                    )
-                elif isinstance(pub_key, ec.EllipticCurvePublicKey):
-                    pub_key.verify(
-                        signature,
-                        challenge.nonce,
-                        ec.ECDSA(hashes.SHA256())
-                    )
-                logger.info("Raw signature verified")
-                self.challenges[challenge_id].used = True
-                return True
+                if self._verify_cryptographic_signature(pub_key, signature, challenge.nonce):
+                    logger.info("Raw signature verified")
+                    self.challenges[challenge_id].used = True
+                    return True
             
         except Exception as e:
             logger.warning("Verification failed: %s", e)
@@ -671,19 +676,12 @@ class PKIService:
         if proof_string:
             user_cn = self._extract_cn_from_proof(proof_string) or user_cn
 
-        # Try to find existing public key from cert on disk as fallback
-        cert_path = self._find_certificate_path(user_cn)
-        if cert_path:
-            cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-            cert_pub_key = cert.public_key()
-            # Use roles from cert if not provided
-            for attr in cert.subject:
-                if attr.oid == NameOID.TITLE and role == "unknown":
-                    role = attr.value
-                elif attr.oid == NameOID.ORGANIZATIONAL_UNIT_NAME and dept == "unknown":
-                    val = str(attr.value)
-                    if not val.startswith(("MAC:", "CPU:")):
-                        dept = val
+        # Try to find existing public key and identity from cert on disk as fallback
+        cert_role, cert_dept, cert_pub_key = self._get_identity_from_certificate(user_cn)
+        if role == "unknown":
+            role = cert_role
+        if dept == "unknown":
+            dept = cert_dept
 
         pub_key = self._load_public_key(public_key_pem)
         if not pub_key:
