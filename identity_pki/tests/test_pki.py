@@ -97,6 +97,12 @@ class PKIServiceTests(unittest.TestCase):
                 
                 # Mock signature verification
                 from unittest.mock import patch
+                from identity_pki.app import PRIMARY_SESSIONS
+                from datetime import datetime, timezone
+                PRIMARY_SESSIONS["paolo.roselli"] = {
+                    "login_time": datetime.now(timezone.utc),
+                    "last_mfa_time": datetime.now(timezone.utc)
+                }
                 with patch('identity_pki.pki.PKIService.verify_proof') as mock_verify:
                     mock_verify.return_value = {
                         "user": "paolo.roselli",
@@ -138,7 +144,13 @@ class PKIServiceTests(unittest.TestCase):
                 mock_client_instance = MagicMock()
                 mock_client_instance.__getitem__.return_value.__getitem__.return_value.find.return_value.limit.return_value = []
                 
-                with patch('identity_pki.app.MongoClient', return_value=mock_client_instance) as mock_mongo_client:
+                with patch('identity_pki.app.MongoClient', return_value=mock_client_instance) as mock_mongo_client, \
+                     patch('urllib.request.urlopen') as mock_url_open:
+                    
+                    mock_response = MagicMock()
+                    mock_response.read.return_value = b'{"result": false}'
+                    mock_url_open.return_value.__enter__.return_value = mock_response
+                    
                     jwt_token = "hdr.eyJ1c2VyIjoicGFvbG8ucm9zZWxsaSIsInJvbGUiOiJkb2N0b3IifQ.sig"
                     query_resp = client.post(
                         "/api/query",
@@ -168,6 +180,15 @@ class PKIServiceTests(unittest.TestCase):
             app.config["TESTING"] = True
             
             with app.test_client() as client:
+                from identity_pki.app import ENROLLMENT_SESSIONS
+                from datetime import datetime, timezone, timedelta
+                session_token = "mock_session_token"
+                ENROLLMENT_SESSIONS[session_token] = {
+                    "cn": "paolo.roselli",
+                    "role": "doctor",
+                    "department": "Cardiologia",
+                    "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10)
+                }
                 # Mock service verify_proof and issue_hardware_bound_certificate
                 from unittest.mock import patch
                 with patch('identity_pki.pki.PKIService.verify_proof') as mock_verify, \
@@ -192,7 +213,8 @@ class PKIServiceTests(unittest.TestCase):
                             "proof_string": "ZTA-CERT-BINDING|CN=paolo.roselli|TIME=2026-06-04T16:29:00Z",
                             "attestation_sig_b64": "AP8B+QD4AP0B",  # Binary signature representation (fails to decode to UTF-8)
                             "is_hardware_csr": True,
-                            "public_key_pem": "mock_pub"
+                            "public_key_pem": "mock_pub",
+                            "enrollment_session_token": session_token
                         }
                     )
                     

@@ -13,6 +13,7 @@ from .pki import PKIService
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 import json
+import urllib.request
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -69,6 +70,96 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _provision_mongo_user(service: PKIService, logger: logging.Logger, username: str, role: str) -> None:
+    try:
+        mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
+        mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
+        mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+        ca_path = os.path.join(service.cert_dir, "ca.crt")
+        
+        client = MongoClient(
+            f"mongodb://{mongo_root_user}:{mongo_root_pass}@mongo:27017/admin",
+            serverSelectionTimeoutMS=2000,
+            tls=True,
+            tlsCertificateKeyFile="/data/server/mongo.pem",
+            tlsCAFile=ca_path,
+            tlsAllowInvalidCertificates=True
+        )
+        db = client[mongo_db_name]
+        
+        from shared.zta_roles import ZTA_ROLES
+        role_config = ZTA_ROLES.get(role, {})
+        mongo_role = role_config.get("mongo_role", "read")
+        
+        password = f"{''.join(x.capitalize() for x in username.split('.'))}2026!"
+        
+        try:
+            db.command("dropUser", username)
+        except Exception:
+            pass
+            
+        db.command(
+            "createUser", username,
+            pwd=password,
+            roles=[{"role": mongo_role, "db": mongo_db_name}]
+        )
+        logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
+
+        # Create user in $external database for MONGODB-OIDC authentication
+        db_external = client["$external"]
+        oidc_username = f"oidc/{username}"
+        try:
+            db_external.command("dropUser", oidc_username)
+        except Exception:
+            pass
+        try:
+            db_external.command(
+                "createUser", oidc_username,
+                roles=[{"role": mongo_role, "db": mongo_db_name}]
+            )
+            logger.info(f"Auto-provisioned MongoDB external OIDC user '{oidc_username}' with role '{mongo_role}'")
+        except Exception as ex:
+            logger.warning(f"Failed to auto-provision external OIDC user '{oidc_username}': {ex}")
+
+        client.close()
+    except Exception as e:
+        logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
+
+
+def _send_audit_event_impl(logger: logging.Logger, user, role, collection, action, translated_view,
+                           query_filter, decision, count=0, error_type="",
+                           message="", jwt_auth=False, hardware_mode=False):
+    """Fire-and-forget audit event to the Splunk forwarder sidecar."""
+    import threading as _threading
+    def _send():
+        try:
+            audit_payload = json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user": user,
+                "role": role,
+                "resource": collection,
+                "command": action,
+                "translated_view": translated_view,
+                "filter": query_filter,
+                "decision": decision,
+                "count": count,
+                "error_type": error_type,
+                "message": message,
+                "jwt_auth": jwt_auth,
+                "hardware_mode": hardware_mode,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://opa-splunk-forwarder:5000/api/audit",
+                data=audit_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=2)
+        except Exception as e:
+            logger.debug("Audit event delivery failed (non-critical): %s", e)
+    _threading.Thread(target=_send, daemon=True).start()
+
+
 def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
@@ -81,60 +172,11 @@ def create_app(data_dir=None) -> Flask:
         return jsonify({"error": message, "code": code}), code
     
     def provision_mongo_user(username, role):
-        try:
-            mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
-            mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
-            mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
-            ca_path = os.path.join(service.cert_dir, "ca.crt")
-            
-            client = MongoClient(
-                f"mongodb://{mongo_root_user}:{mongo_root_pass}@mongo:27017/admin",
-                serverSelectionTimeoutMS=2000,
-                tls=True,
-                tlsCertificateKeyFile="/data/server/mongo.pem",
-                tlsCAFile=ca_path,
-                tlsAllowInvalidCertificates=True
-            )
-            db = client[mongo_db_name]
-            
-            from shared.zta_roles import ZTA_ROLES
-            role_config = ZTA_ROLES.get(role, {})
-            mongo_role = role_config.get("mongo_role", "read")
-            
-            password = f"{''.join(x.capitalize() for x in username.split('.'))}2026!"
-            
-            try:
-                db.command("dropUser", username)
-            except Exception:
-                pass
-                
-            db.command(
-                "createUser", username,
-                pwd=password,
-                roles=[{"role": mongo_role, "db": mongo_db_name}]
-            )
-            app.logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
+        _provision_mongo_user(service, app.logger, username, role)
 
-            # Create user in $external database for MONGODB-OIDC authentication
-            db_external = client["$external"]
-            oidc_username = f"oidc/{username}"
-            try:
-                db_external.command("dropUser", oidc_username)
-            except Exception:
-                pass
-            try:
-                db_external.command(
-                    "createUser", oidc_username,
-                    roles=[{"role": mongo_role, "db": mongo_db_name}]
-                )
-                app.logger.info(f"Auto-provisioned MongoDB external OIDC user '{oidc_username}' with role '{mongo_role}'")
-            except Exception as ex:
-                app.logger.warning(f"Failed to auto-provision external OIDC user '{oidc_username}': {ex}")
+    def _send_audit_event(*args, **kwargs):
+        _send_audit_event_impl(app.logger, *args, **kwargs)
 
-            client.close()
-        except Exception as e:
-            app.logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
-    
 
     @app.get("/health")
     def health():
@@ -745,6 +787,7 @@ def create_app(data_dir=None) -> Flask:
 
         # Get role to perform RLS view translation
         role = "unknown"
+        hardware_mode = False
         if jwt_token:
             try:
                 parts = jwt_token.split(".")
@@ -759,16 +802,17 @@ def create_app(data_dir=None) -> Flask:
             except Exception as ex:
                 logger.warning(f"Failed to decode JWT claims: {ex}")
 
-
-        if role == "unknown":
-            metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
-            if os.path.exists(metadata_path):
-                try:
-                    with open(metadata_path) as f:
-                        meta = json.load(f)
+        # Also get hardware_mode if metadata exists
+        metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path) as f:
+                    meta = json.load(f)
+                    if role == "unknown":
                         role = meta.get("role", "unknown")
-                except Exception:
-                    pass
+                    hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
+            except Exception:
+                pass
 
         if role == "unknown":
             try:
@@ -781,6 +825,55 @@ def create_app(data_dir=None) -> Flask:
             except Exception:
                 pass
 
+        # Call OPA to inspect the query filter for NoSQL Injection
+        try:
+            opa_payload = json.dumps({
+                "input": {
+                    "parsed_body": {
+                        "query": json.dumps(query_filter)
+                    }
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://opa:8181/v1/data/envoy/authz/policy/is_malicious",
+                data=opa_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=1) as resp:
+                opa_res = json.loads(resp.read().decode("utf-8"))
+                is_malicious = opa_res.get("result", False)
+                if is_malicious:
+                    # Log audit event for block
+                    _send_audit_event(
+                        user=user_cn,
+                        role=role,
+                        collection=collection_name,
+                        action=mongo_action,
+                        translated_view=collection_name,
+                        query_filter=query_filter_str,
+                        decision="DENY",
+                        error_type="nosql_injection_blocked",
+                        message="OPA L7 WAF Blocked: Suspicious NoSQL injection pattern detected in payload",
+                        jwt_auth=bool(jwt_token),
+                        hardware_mode=hardware_mode
+                    )
+                    return jsonify({
+                        "status": "error",
+                        "error_type": "authorization_denied",
+                        "message": "Richiesta bloccata - Rilevato pattern NoSQL sospetto",
+                        "role": role,
+                        "translated_collection": collection_name
+                    }), 403
+        except Exception as e:
+            # Fallback: if OPA is down or query fails, we log it and default to safe deny
+            app.logger.error("Failed to query OPA for NoSQL injection check: %s", e)
+            return jsonify({
+                "status": "error",
+                "error_type": "security_system_failure",
+                "message": "Security validation failed. Please try again later."
+            }), 500
+
         # Translate collection to RLS view
         view_name = collection_name
         if role != "admin":
@@ -788,6 +881,19 @@ def create_app(data_dir=None) -> Flask:
             role_config = ZTA_ROLES.get(role, {})
             allowed = role_config.get("allowed_collections", [])
             if collection_name not in allowed:
+                _send_audit_event(
+                    user=user_cn,
+                    role=role,
+                    collection=collection_name,
+                    action=mongo_action,
+                    translated_view=view_name,
+                    query_filter=query_filter_str,
+                    decision="DENY",
+                    error_type="authorization_denied",
+                    message=f"OPA/RBAC Access Denied: Role '{role}' is not allowed to access collection '{collection_name}'",
+                    jwt_auth=bool(jwt_token),
+                    hardware_mode=hardware_mode
+                )
                 return jsonify({
                     "status": "error",
                     "error_type": "authorization_denied",
@@ -829,6 +935,19 @@ def create_app(data_dir=None) -> Flask:
             }
             role_allowed_actions = action_permission_map.get(role, {}).get(collection_name, set())
             if mongo_action not in role_allowed_actions:
+                _send_audit_event(
+                    user=user_cn,
+                    role=role,
+                    collection=collection_name,
+                    action=mongo_action,
+                    translated_view=view_name,
+                    query_filter=query_filter_str,
+                    decision="DENY",
+                    error_type="authorization_denied",
+                    message=f"OPA/RBAC Access Denied: Role '{role}' is not allowed to perform '{mongo_action}' on collection '{collection_name}'",
+                    jwt_auth=bool(jwt_token),
+                    hardware_mode=hardware_mode
+                )
                 return jsonify({
                     "status": "error",
                     "error_type": "authorization_denied",
@@ -980,6 +1099,20 @@ def create_app(data_dir=None) -> Flask:
                 
             client.close()
 
+            _send_audit_event(
+                user=user_cn,
+                role=role,
+                collection=collection_name,
+                action=mongo_action,
+                translated_view=target_collection,
+                query_filter=query_filter_str,
+                decision="ALLOW",
+                count=count,
+                message=message,
+                jwt_auth=bool(jwt_token),
+                hardware_mode=hardware_mode
+            )
+
             return jsonify({
                 "status": "success",
                 "role": role,
@@ -991,6 +1124,19 @@ def create_app(data_dir=None) -> Flask:
 
         except OperationFailure as e:
             err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
+            _send_audit_event(
+                user=user_cn,
+                role=role,
+                collection=collection_name,
+                action=mongo_action,
+                translated_view=view_name,
+                query_filter=query_filter_str,
+                decision="DENY",
+                error_type="authorization_denied",
+                message=f"OPA/RBAC Access Denied: {err_msg}",
+                jwt_auth=bool(jwt_token),
+                hardware_mode=hardware_mode
+            )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",
