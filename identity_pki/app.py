@@ -64,7 +64,7 @@ def main() -> None:
     debug = os.environ.get("IDENTITY_APP_DEBUG", "false").lower() == "true"
     ssl_context = ("/data/server/envoy.crt", "/data/server/envoy.key")
     app.run(host=host, port=port, debug=debug, ssl_context=ssl_context)
-
+    
 
 if __name__ == "__main__":
     main()
