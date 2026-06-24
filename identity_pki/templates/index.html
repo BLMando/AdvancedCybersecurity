@@ -896,6 +896,19 @@
         );
       }
 
+      function parseItalianFloat(str) {
+        if (typeof str !== "string") return parseFloat(str);
+        let valStr = str.trim();
+        if (valStr.includes('.') && valStr.includes(',')) {
+          valStr = valStr.replace(/\./g, "").replace(/,/g, ".");
+        } else if (valStr.includes(',')) {
+          valStr = valStr.replace(/,/g, ".");
+        } else if (valStr.includes('.') && valStr.split('.').pop().length === 3) {
+          valStr = valStr.replace(/\./g, "");
+        }
+        return parseFloat(valStr);
+      }
+
       // ─── Build filter payload (JSON) ─────────────────────────────────────────
       function getFilterPayload() {
         const collection = document.getElementById("query-collection").value;
@@ -907,7 +920,7 @@
         };
         const vnum = (id) => {
           const el = document.getElementById(id);
-          return el && el.value !== "" ? parseFloat(el.value) : null;
+          return el && el.value !== "" ? parseItalianFloat(el.value) : null;
         };
 
         if (collection === "patients") {
@@ -1369,7 +1382,7 @@
           const el = document.getElementById(`ef-${idx}-${f.key}`);
           if (el) {
             updateFields[f.key] =
-              f.type === "number" ? parseFloat(el.value) : el.value;
+              f.type === "number" ? parseItalianFloat(el.value) : el.value;
           }
         });
 
