@@ -13,6 +13,7 @@ from .pki import PKIService
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 import json
+import urllib.request
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -134,7 +135,40 @@ def create_app(data_dir=None) -> Flask:
             client.close()
         except Exception as e:
             app.logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
-    
+
+    def _send_audit_event(user, role, collection, action, translated_view,
+                          query_filter, decision, count=0, error_type="",
+                          message="", jwt_auth=False, hardware_mode=False):
+        """Fire-and-forget audit event to the Splunk forwarder sidecar."""
+        import threading as _threading
+        def _send():
+            try:
+                audit_payload = json.dumps({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "user": user,
+                    "role": role,
+                    "resource": collection,
+                    "command": action,
+                    "translated_view": translated_view,
+                    "filter": query_filter,
+                    "decision": decision,
+                    "count": count,
+                    "error_type": error_type,
+                    "message": message,
+                    "jwt_auth": jwt_auth,
+                    "hardware_mode": hardware_mode,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    "http://opa-splunk-forwarder:5000/api/audit",
+                    data=audit_payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=2)
+            except Exception as e:
+                app.logger.debug("Audit event delivery failed (non-critical): %s", e)
+        _threading.Thread(target=_send, daemon=True).start()
+
 
     @app.get("/health")
     def health():
@@ -745,6 +779,7 @@ def create_app(data_dir=None) -> Flask:
 
         # Get role to perform RLS view translation
         role = "unknown"
+        hardware_mode = False
         if jwt_token:
             try:
                 parts = jwt_token.split(".")
@@ -759,16 +794,17 @@ def create_app(data_dir=None) -> Flask:
             except Exception as ex:
                 logger.warning(f"Failed to decode JWT claims: {ex}")
 
-
-        if role == "unknown":
-            metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
-            if os.path.exists(metadata_path):
-                try:
-                    with open(metadata_path) as f:
-                        meta = json.load(f)
+        # Also get hardware_mode if metadata exists
+        metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path) as f:
+                    meta = json.load(f)
+                    if role == "unknown":
                         role = meta.get("role", "unknown")
-                except Exception:
-                    pass
+                    hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
+            except Exception:
+                pass
 
         if role == "unknown":
             try:
@@ -788,6 +824,19 @@ def create_app(data_dir=None) -> Flask:
             role_config = ZTA_ROLES.get(role, {})
             allowed = role_config.get("allowed_collections", [])
             if collection_name not in allowed:
+                _send_audit_event(
+                    user=user_cn,
+                    role=role,
+                    collection=collection_name,
+                    action=mongo_action,
+                    translated_view=view_name,
+                    query_filter=query_filter_str,
+                    decision="DENY",
+                    error_type="authorization_denied",
+                    message=f"OPA/RBAC Access Denied: Role '{role}' is not allowed to access collection '{collection_name}'",
+                    jwt_auth=bool(jwt_token),
+                    hardware_mode=hardware_mode
+                )
                 return jsonify({
                     "status": "error",
                     "error_type": "authorization_denied",
@@ -829,6 +878,19 @@ def create_app(data_dir=None) -> Flask:
             }
             role_allowed_actions = action_permission_map.get(role, {}).get(collection_name, set())
             if mongo_action not in role_allowed_actions:
+                _send_audit_event(
+                    user=user_cn,
+                    role=role,
+                    collection=collection_name,
+                    action=mongo_action,
+                    translated_view=view_name,
+                    query_filter=query_filter_str,
+                    decision="DENY",
+                    error_type="authorization_denied",
+                    message=f"OPA/RBAC Access Denied: Role '{role}' is not allowed to perform '{mongo_action}' on collection '{collection_name}'",
+                    jwt_auth=bool(jwt_token),
+                    hardware_mode=hardware_mode
+                )
                 return jsonify({
                     "status": "error",
                     "error_type": "authorization_denied",
@@ -980,6 +1042,20 @@ def create_app(data_dir=None) -> Flask:
                 
             client.close()
 
+            _send_audit_event(
+                user=user_cn,
+                role=role,
+                collection=collection_name,
+                action=mongo_action,
+                translated_view=target_collection,
+                query_filter=query_filter_str,
+                decision="ALLOW",
+                count=count,
+                message=message,
+                jwt_auth=bool(jwt_token),
+                hardware_mode=hardware_mode
+            )
+
             return jsonify({
                 "status": "success",
                 "role": role,
@@ -991,6 +1067,19 @@ def create_app(data_dir=None) -> Flask:
 
         except OperationFailure as e:
             err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
+            _send_audit_event(
+                user=user_cn,
+                role=role,
+                collection=collection_name,
+                action=mongo_action,
+                translated_view=view_name,
+                query_filter=query_filter_str,
+                decision="DENY",
+                error_type="authorization_denied",
+                message=f"OPA/RBAC Access Denied: {err_msg}",
+                jwt_auth=bool(jwt_token),
+                hardware_mode=hardware_mode
+            )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",

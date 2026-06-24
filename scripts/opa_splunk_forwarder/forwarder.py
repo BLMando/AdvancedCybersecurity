@@ -169,38 +169,70 @@ def handle_stats_query():
         f'OR (index=zta_snort src_addr="{esc(network_ip)}" earliest=-15m) '
         f'OR (index=zta_nftables action=DROP src_ip="{esc(network_ip)}" earliest=-15m) '
         f'OR (index=zta_mongodb_audit atype=authenticate result!=0 param.user="{esc(user)}" earliest=-15m) '
+        f'| eval eta_min = (now() - _time) / 60 '
+        f'| eval peso = if(index="zta_envoy", 1.0, exp(-0.231 * eta_min)) '
         f'| eval type=case('
         f'  index="zta_envoy" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
-        f'  index="zta_envoy" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
+        f'  index="zta_envoy" AND sourcetype="envoy:access" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
         f'  index="zta_snort", "snort_alerts",'
         f'  index="zta_nftables", "nftables_drops",'
         f'  index="zta_mongodb_audit", "mongo_failures"'
         f') '
-        f'| stats count by type'
+        f'| stats sum(peso) as weighted_score by type'
     )
 
     # Inizializziamo i contatori a zero
     counts = {
-        "user_allows": 0,
-        "user_denies": 0,
-        "snort_alerts": 0,
-        "nftables_drops": 0,
-        "mongo_failures": 0
+        "user_allows": 0.0,
+        "user_denies": 0.0,
+        "snort_alerts": 0.0,
+        "nftables_drops": 0.0,
+        "mongo_failures": 0.0
     }
 
     try:
         results = _run_splunk_search(splunk_query)
         for res in results:
             t = res.get("type")
-            c = res.get("count")
+            c = res.get("weighted_score")
             if t in counts and c:
                 try:
-                    counts[t] = int(c)
+                    counts[t] = float(c)
                 except ValueError:
                     pass
     except Exception as e:
         logger.error("Failed querying Splunk stats: %s", e)
         return jsonify({"error": "splunk query failed"}), 502
+
+    # 2. Query 2: User Baseline Anomaly Detection over 7 Days (earliest=-7d)
+    z_score = 0.0
+    baseline_media = 0.0
+    baseline_std = 0.0
+    current_count = 0.0
+
+    baseline_query = (
+        f'search index=zta_envoy user="{esc(user)}" earliest=-7d '
+        f'| eval is_current = if(_time >= now() - 900, 1, 0) '
+        f'| bucket _time span=15m '
+        f'| stats count as query_count by _time, is_current '
+        f'| stats avg(query_count) as media, stdev(query_count) as dev_std, max(eval(if(is_current=1, query_count, 0))) as current_count '
+        f'| eval z_score = if(dev_std > 0, (current_count - media) / dev_std, 0)'
+    )
+
+    try:
+        baseline_results = _run_splunk_search(baseline_query)
+        if baseline_results:
+            res = baseline_results[0]
+            z_score = float(res.get("z_score", 0.0) or 0.0)
+            baseline_media = float(res.get("media", 0.0) or 0.0)
+            baseline_std = float(res.get("dev_std", 0.0) or 0.0)
+            current_count = float(res.get("current_count", 0.0) or 0.0)
+            logger.info(
+                "User %s 7d baseline: avg=%.2f, std=%.2f, current=%.2f, z_score=%.2f",
+                user, baseline_media, baseline_std, current_count, z_score
+            )
+    except Exception as e:
+        logger.warning("Failed querying Splunk user baseline (non-critical): %s", e)
 
     # Calcolo del risk boost combinato (multi-vettore)
     risk_boost = 0
@@ -235,6 +267,12 @@ def handle_stats_query():
     elif counts["mongo_failures"] >= 3:
         risk_boost += 20
 
+    # 6. Impatto Anomaly Detection (Z-Score della frequenza query)
+    if z_score >= 3.0:
+        risk_boost += 40
+    elif z_score >= 2.0:
+        risk_boost += 20
+
     # Cap del risk boost a un massimo di 100
     if risk_boost > 100:
         risk_boost = 100
@@ -243,6 +281,10 @@ def handle_stats_query():
         {
             "stats": counts,
             "risk_boost": risk_boost,
+            "z_score": z_score,
+            "baseline_media": baseline_media,
+            "baseline_std": baseline_std,
+            "current_count": current_count
         }
     ), 200
 
@@ -560,6 +602,46 @@ def handle_envoy_log():
 
     fields = extract_envoy_fields(body)
     hec_envoy.send_event(fields, index="zta_envoy", sourcetype="envoy:access")
+    return jsonify({"status": "queued"}), 202
+
+
+@app.route("/api/audit", methods=["POST"])
+def handle_app_audit():
+    """Receive application-level audit events from Flask and forward to Splunk.
+
+    Unlike Envoy access logs (which only capture connection-level metadata),
+    this endpoint receives the *actual* query details (collection, command,
+    filter, result) from the Flask application layer after each /api/query
+    execution.  Events are indexed separately as sourcetype 'zta:app:query'
+    so Splunk dashboards can correlate them with Envoy connection logs.
+    """
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "invalid json"}), 400
+
+    event = {
+        "timestamp": body.get("timestamp", ""),
+        "user": body.get("user", "unknown"),
+        "role": body.get("role", "unknown"),
+        "resource": body.get("resource", "unknown"),
+        "command": body.get("command", "unknown"),
+        "translated_view": body.get("translated_view", "unknown"),
+        "filter": body.get("filter", "{}"),
+        "decision": body.get("decision", "unknown"),
+        "count": body.get("count", 0),
+        "error_type": body.get("error_type", ""),
+        "message": body.get("message", ""),
+        "jwt_auth": body.get("jwt_auth", False),
+        "hardware_mode": body.get("hardware_mode", False),
+    }
+
+    hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:app:query")
+    logger.info(
+        "App audit: user=%s role=%s cmd=%s resource=%s decision=%s",
+        event["user"], event["role"], event["command"],
+        event["resource"], event["decision"],
+    )
     return jsonify({"status": "queued"}), 202
 
 
