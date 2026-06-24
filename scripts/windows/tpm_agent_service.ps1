@@ -236,6 +236,15 @@ function Get-FileCertWithKey ($cn) {
     }
 }
 
+# Helper per recuperare il certificato preferendo quello con la chiave privata associata
+function Get-ZtaCertificate ($cn) {
+    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" -and $_.HasPrivateKey } | Select-Object -First 1
+    if (-not $cert) {
+        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+    }
+    return $cert
+}
+
 # Helper per pipe bidirezionale asincrona dei dati TCP
 function Start-Pipe ($sourceStream, $targetStream, $connectionName) {
     $ps = [System.Management.Automation.PowerShell]::Create()
@@ -262,7 +271,7 @@ function Start-Pipe ($sourceStream, $targetStream, $connectionName) {
 # Avvia il Listener TCP Proxy mTLS locale per una sessione
 function Start-ProxySession ($cn, $ttlSeconds) {
     # 1. Trova il certificato nel Windows Store
-    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+    $cert = Get-ZtaCertificate $cn
     if (-not $cert) {
         Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
         $cert = Get-FileCertWithKey $cn
@@ -500,7 +509,7 @@ function Start-HttpServer {
                     $cn = $jsonBody.common_name
                     if (-not $cn) { $cn = $jsonBody.user }
                     Write-Host "[API] Ricevuto /cert per CN=$cn" -ForegroundColor Gray
-                    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                    $cert = Get-ZtaCertificate $cn
                     if (-not $cert) {
                         Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
                         $cert = Get-FileCertWithKey $cn
@@ -700,7 +709,7 @@ function Start-HttpServer {
                         $challengeId = $challengeResp.challenge_id
                         
                         # 2. Trova il certificato nel Windows Store (con fallback su file)
-                        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                        $cert = Get-ZtaCertificate $cn
                         if (-not $cert) {
                             Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
                             $cert = Get-FileCertWithKey $cn
@@ -774,7 +783,7 @@ function Start-HttpServer {
                     $dataB64 = $jsonBody.data_b64
                     Write-Host "[API] Ricevuto /sign per CN=$cn" -ForegroundColor Gray
                     
-                    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                    $cert = Get-ZtaCertificate $cn
                     if (-not $cert) {
                         Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
                         $cert = Get-FileCertWithKey $cn
@@ -816,7 +825,7 @@ function Start-HttpServer {
                     
                     try {
                         # Trova il certificato nel Windows Store
-                        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -like "*CN=$cn*" } | Select-Object -First 1
+                        $cert = Get-ZtaCertificate $cn
                         if (-not $cert) {
                             $cert = Get-FileCertWithKey $cn
                         }
