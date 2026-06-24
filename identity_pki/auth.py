@@ -1,5 +1,3 @@
-"""Authentication and authorization services for the PKI & identity module."""
-
 import os
 import json
 import base64
@@ -128,7 +126,7 @@ def extract_role_from_jwt(jwt_token: Optional[str], logger: logging.Logger) -> s
             role = claims.get("role", "unknown")
             if isinstance(role, list):
                 role = role[0] if role else "unknown"
-            return role
+            return str(role)
     except Exception as ex:
         logger.warning(f"Failed to decode JWT claims: {ex}")
     return "unknown"
@@ -145,7 +143,7 @@ def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt
             with open(metadata_path) as f:
                 meta = json.load(f)
                 if role == "unknown":
-                    role = meta.get("role", "unknown")
+                    role = str(meta.get("role", "unknown"))
                 hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
         except Exception:
             pass
@@ -157,7 +155,8 @@ def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt
                 cert = x509.load_pem_x509_certificate(f.read())
                 titles = cert.subject.get_attributes_for_oid(x509.NameOID.TITLE)
                 if titles:
-                    role = titles[0].value
+                    val = titles[0].value
+                    role = val.decode("utf-8") if isinstance(val, bytes) else str(val)
         except Exception:
             pass
 

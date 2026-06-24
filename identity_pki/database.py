@@ -1,5 +1,3 @@
-"""Database operations and provisioning for the PKI & identity module."""
-
 import os
 import json
 import logging

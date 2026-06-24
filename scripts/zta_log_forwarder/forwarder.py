@@ -1,28 +1,22 @@
-"""
-Envoy-to-Splunk Forwarder + Stats API for OPA
-
-Responsibilities:
-  1) Forward Envoy access logs to Splunk HEC.
-  2) Forward Snort 3 IDS alert logs to Splunk HEC.
-  3) Forward nftables firewall logs to Splunk HEC.
-  4) Expose a lightweight stats endpoint that OPA can query to enrich
-     risk evaluation with recent activity from Splunk.
-
-OPA must not send decision logs to Splunk.
-"""
-
 import atexit
 import json
 import logging
 import os
-import re
 import threading
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 from flask import Flask, request, jsonify
 from heclient import HEClient
+
+# Import extracted modules
+from parsers import (
+    extract_envoy_fields,
+    extract_snort_fields,
+    extract_mongo_fields,
+    parse_nftables_line,
+)
+from risk import calculate_risk_boost
+from splunk_search import run_splunk_search, SPLUNK_PASSWORD
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("forwarder")
@@ -41,71 +35,6 @@ SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
 NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
 MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
-SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
-SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
-SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
-SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
-SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").lower() == "true"
-
-
-def extract_envoy_fields(log_entry: dict) -> dict:
-    return {
-        "source_ip": log_entry.get("downstream_remote_address") or "unknown",
-        "downstream_local": log_entry.get("downstream_local_address") or "unknown",
-        "upstream_host": log_entry.get("upstream_host") or "unknown",
-        "duration_ms": log_entry.get("duration") or "0",
-        "bytes_sent": log_entry.get("bytes_sent") or "0",
-        "bytes_received": log_entry.get("bytes_received") or "0",
-        "user": log_entry.get("user") or "unknown",
-        "device": log_entry.get("device") or "no-tpm",
-        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
-        "decision": log_entry.get("decision") or "unknown",
-        "risk_score": log_entry.get("risk_score") or "0",
-    }
-
-
-def calculate_risk_boost(counts: dict, z_score: float) -> int:
-    """Calculate the combined multi-vector risk boost based on counts and frequency z-score."""
-    risk_boost = 0
-
-    # 1. Impatto Frequenza (Allows)
-    if counts.get("user_allows", 0.0) >= 200:
-        risk_boost += 15
-    elif counts.get("user_allows", 0.0) >= 100:
-        risk_boost += 8
-
-    # 2. Impatto Richieste Negate (Denies)
-    if counts.get("user_denies", 0.0) >= 10:
-        risk_boost += 30
-    elif counts.get("user_denies", 0.0) >= 5:
-        risk_boost += 15
-
-    # 3. Impatto Snort Alerts (Intrusione L7)
-    if counts.get("snort_alerts", 0.0) >= 5:
-        risk_boost += 60
-    elif counts.get("snort_alerts", 0.0) >= 1:
-        risk_boost += 30
-
-    # 4. Impatto nftables Firewall Drops (Scansione Rete)
-    if counts.get("nftables_drops", 0.0) >= 50:
-        risk_boost += 20
-    elif counts.get("nftables_drops", 0.0) >= 10:
-        risk_boost += 10
-
-    # 5. Impatto MongoDB Login Failures (Brute Force)
-    if counts.get("mongo_failures", 0.0) >= 10:
-        risk_boost += 40
-    elif counts.get("mongo_failures", 0.0) >= 3:
-        risk_boost += 20
-
-    # 6. Impatto Anomaly Detection (Z-Score della frequenza query)
-    if z_score >= 3.0:
-        risk_boost += 40
-    elif z_score >= 2.0:
-        risk_boost += 20
-
-    # Cap del risk boost a un massimo di 100
-    return min(risk_boost, 100)
 
 
 @app.route("/api/stats", methods=["POST"])
@@ -159,7 +88,7 @@ def handle_stats_query():
     }
 
     try:
-        results = _run_splunk_search(splunk_query)
+        results = run_splunk_search(splunk_query)
         for res in results:
             t = res.get("type")
             c = res.get("weighted_score")
@@ -188,7 +117,7 @@ def handle_stats_query():
     )
 
     try:
-        baseline_results = _run_splunk_search(baseline_query)
+        baseline_results = run_splunk_search(baseline_query)
         if baseline_results:
             res = baseline_results[0]
             z_score = float(res.get("z_score", 0.0) or 0.0)
@@ -265,24 +194,6 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
     )
 
 
-def extract_snort_fields(log_entry: dict) -> dict:
-    """Estrae i campi rilevanti dal JSON nativo di Snort 3."""
-    return {
-        "timestamp": log_entry.get("timestamp", ""),
-        "msg": log_entry.get("msg", "unknown"),
-        "src_addr": log_entry.get("src_addr", "0.0.0.0"),
-        "src_port": log_entry.get("src_port", 0),
-        "dst_addr": log_entry.get("dst_addr", "0.0.0.0"),
-        "dst_port": log_entry.get("dst_port", 0),
-        "proto": log_entry.get("proto", "unknown"),
-        "action": log_entry.get("action", "alert"),
-        "gid": log_entry.get("gid", 1),
-        "sid": log_entry.get("sid", 0),
-        "rev": log_entry.get("rev", 0),
-        "priority": log_entry.get("priority", 0),
-    }
-
-
 def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
     """Background thread that tails a Snort 3 alert_json log file."""
     def handle_line(line: str) -> None:
@@ -302,77 +213,6 @@ def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> Non
     )
 
 
-# Regex per parsare i log del kernel nftables
-# Formato: <N>NFT_DROP: IN=eth0 OUT= MAC=... SRC=1.2.3.4 DST=5.6.7.8
-#          LEN=52 ... PROTO=TCP SPT=12345 DPT=27017 ...
-NFT_LOG_PATTERN = re.compile(
-    r"(NFT_\w+):\s+"
-    r".*?IN=(\S*)\s+"
-    r".*?SRC=(\S+)\s+"
-    r".*?DST=(\S+)\s+"
-    r".*?PROTO=(\S+)\s*"
-    r"(?:.*?SPT=(\d+))?\s*"
-    r"(?:.*?DPT=(\d+))?"
-)
-
-
-def parse_nftables_line(line: str) -> dict | None:
-    """Parsa una riga di log kernel o di counter ruleset nftables."""
-    # 1. Prova prima il formato kernel standard
-    match = NFT_LOG_PATTERN.search(line)
-    if match:
-        prefix = match.group(1)
-        action = "DROP" if "DROP" in prefix else "ACCEPT" if "ACCEPT" in prefix else prefix
-        return {
-            "prefix": prefix,
-            "action": action,
-            "in_iface": match.group(2) or "",
-            "src_ip": match.group(3) or "0.0.0.0",
-            "dst_ip": match.group(4) or "0.0.0.0",
-            "proto": match.group(5) or "unknown",
-            "src_port": int(match.group(6)) if match.group(6) else 0,
-            "dst_port": int(match.group(7)) if match.group(7) else 0,
-        }
-
-    # 2. Prova il formato dump dei counter (es. "tcp dport 10000 ... counter packets 1 bytes 60 log prefix \"NFT_ENVOY_ACCEPT: \" accept")
-    if "counter packets" in line:
-        try:
-            # Estrae log prefix
-            prefix_match = re.search(r'log prefix "([^"]+)"', line)
-            prefix = prefix_match.group(1).strip(": ") if prefix_match else "NFT_COUNTER"
-            
-            # Estrae azione finale
-            action = "DROP" if "drop" in line.lower() else "ACCEPT" if "accept" in line.lower() else "UNKNOWN"
-            
-            # Estrae packets e bytes
-            packets_match = re.search(r'counter packets (\d+)', line)
-            packets = int(packets_match.group(1)) if packets_match else 0
-            
-            bytes_match = re.search(r'bytes (\d+)', line)
-            bytes_val = int(bytes_match.group(1)) if bytes_match else 0
-            
-            # Estrae protocollo
-            proto = "tcp" if "tcp" in line else "udp" if "udp" in line else "icmp" if "icmp" in line else "ip"
-            
-            # Estrae porta destinazione
-            dport_match = re.search(r'dport (\d+)', line)
-            dst_port = int(dport_match.group(1)) if dport_match else 0
-            
-            return {
-                "prefix": prefix,
-                "action": action,
-                "packets": packets,
-                "bytes": bytes_val,
-                "proto": proto,
-                "dst_port": dst_port,
-                "raw_rule": line.strip()
-            }
-        except Exception as e:
-            logger.warning("Error parsing counter line: %s, error: %s", line, e)
-            
-    return None
-
-
 def tail_nftables_logs(stop_event: threading.Event) -> None:
     """Background thread that tails nftables kernel log output."""
     def handle_line(line: str) -> None:
@@ -386,21 +226,6 @@ def tail_nftables_logs(stop_event: threading.Event) -> None:
         line_handler=handle_line,
         post_batch_handler=hec_envoy.flush
     )
-
-
-def extract_mongo_fields(log_entry: dict) -> dict:
-    """Estrae i campi dai log JSON nativi di MongoDB 4.4+."""
-    t_field = log_entry.get("t")
-    timestamp = t_field.get("$date") if isinstance(t_field, dict) else str(t_field) if t_field else ""
-    return {
-        "timestamp": timestamp,
-        "severity": log_entry.get("s", "I"),
-        "component": log_entry.get("c", "UNKNOWN"),
-        "id": log_entry.get("id", 0),
-        "context": log_entry.get("ctx", ""),
-        "message": log_entry.get("msg", ""),
-        "attributes": log_entry.get("attr", {}),
-    }
 
 
 def tail_mongo_logs(stop_event: threading.Event) -> None:
@@ -497,67 +322,6 @@ def handle_app_audit():
     return jsonify({"status": "queued"}), 202
 
 
-def _run_splunk_search(query: str) -> list:
-    """Run a Splunk search and return the list of raw results (dict)."""
-    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
-    form = urllib.parse.urlencode({
-        "search": query,
-        "output_mode": "json",
-        "exec_mode": "oneshot",
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        base_url,
-        data=form,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST"
-    )
-    import ssl as _ssl
-    ctx = _ssl.create_default_context()
-    if not SPLUNK_SEARCH_VERIFY_TLS:
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl.CERT_NONE
-
-    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
-    password_manager.add_password(None, base_url, SPLUNK_USERNAME, SPLUNK_PASSWORD)
-    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
-    https_handler = urllib.request.HTTPSHandler(context=ctx)
-    opener = urllib.request.build_opener(auth_handler, https_handler)
-
-    try:
-        with opener.open(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8").strip()
-    except Exception as e:
-        logger.error("Failed running Splunk search: %s", e)
-        return []
-
-    results = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            if "result" in obj:
-                results.append(obj["result"])
-        except json.JSONDecodeError:
-            continue
-    return results
-
-
-def _push_to_opa(url: str, data: dict) -> None:
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(data).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="PUT"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
-            logger.info("Successfully pushed to OPA %s: %s keys", url.split("/")[-1], len(data))
-    except Exception as e:
-        logger.error("Failed to push to OPA %s: %s", url, e)
-
-
 _stop_event = threading.Event()
 _TAILER_LOCK = Path("/tmp/envoy_tailer.lock")
 
@@ -570,11 +334,6 @@ def _ensure_tailer():
         t = threading.Thread(target=tail_envoy_logs, args=(_stop_event,), daemon=True)
         t.start()
         logger.info("Envoy log tailer started (lock acquired)")
-
-        # Thread: Splunk ↔ OPA sync (Disabilitato per comunicazione sincrona tramite /api/stats)
-        # t_sync = threading.Thread(target=sync_splunk_to_opa, args=(_stop_event,), daemon=True)
-        # t_sync.start()
-        # logger.info("Splunk to OPA sync thread started (lock acquired)")
 
         # Thread: Snort logs (PEP)
         t_snort_pep = threading.Thread(

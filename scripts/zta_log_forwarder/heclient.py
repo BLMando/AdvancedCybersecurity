@@ -1,10 +1,3 @@
-"""
-Splunk HTTP Event Collector (HEC) client.
-
-Handles batching, retry with backoff, authentication, and
-JSON-formatted event submission to Splunk HEC endpoint.
-"""
-
 import json
 import logging
 import threading

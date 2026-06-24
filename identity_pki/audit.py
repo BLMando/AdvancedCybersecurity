@@ -1,15 +1,13 @@
-"""Audit logging module for the PKI & identity app."""
-
 import json
 import logging
 import urllib.request
 from datetime import datetime, timezone
+import threading as _threading
 
 def send_audit_event_impl(logger: logging.Logger, user, role, collection, action, translated_view,
                           query_filter, decision, count=0, error_type="",
                           message="", jwt_auth=False, hardware_mode=False):
-    """Fire-and-forget audit event to the Splunk forwarder sidecar."""
-    import threading as _threading
+
     def _send():
         try:
             audit_payload = json.dumps({
