@@ -211,44 +211,52 @@ def handle_stats_query():
     ), 200
 
 
-def tail_envoy_logs(stop_event: threading.Event) -> None:
-    """Background thread that tails the Envoy access log file."""
-    logger.info("Envoy log tailer started, watching: %s", ENVOY_LOG_PATH)
+def tail_log_file(path: Path, stop_event: threading.Event, line_handler, post_batch_handler=None, sleep_interval=2.0) -> None:
+    """Generic helper to tail a log file, calling line_handler for each line and optionally post_batch_handler."""
+    logger.info("Log tailer started, watching: %s", path)
     last_position = 0
-
     while not stop_event.is_set():
         try:
-            if ENVOY_LOG_PATH.exists():
-                current_size = ENVOY_LOG_PATH.stat().st_size
+            if path.exists():
+                current_size = path.stat().st_size
                 if current_size < last_position:
                     last_position = 0
                 if current_size > last_position:
-                    with open(ENVOY_LOG_PATH, "r") as f:
+                    has_lines = False
+                    with open(path, "r") as f:
                         f.seek(last_position)
                         for line in f:
                             line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                fields = extract_envoy_fields(log_entry)
-                                hec_envoy.send_event(
-                                    fields,
-                                    index="zta_envoy",
-                                    sourcetype="envoy:access",
-                                )
-                            except json.JSONDecodeError:
-                                logger.warning("Skipping invalid JSON line from Envoy log")
+                            if line:
+                                has_lines = True
+                                line_handler(line)
                         last_position = f.tell()
-                    hec_envoy.flush()
+                    if has_lines and post_batch_handler:
+                        post_batch_handler()
             else:
-                logger.debug("Envoy log file not yet available: %s", ENVOY_LOG_PATH)
+                logger.debug("Log file not yet available: %s", path)
         except Exception as e:
-            logger.error("Error tailing Envoy log: %s", e)
+            logger.error("Error tailing log %s: %s", path, e)
+        stop_event.wait(timeout=sleep_interval)
+    logger.info("Log tailer stopped: %s", path)
 
-        stop_event.wait(timeout=2.0)
 
-    logger.info("Envoy log tailer stopped")
+def tail_envoy_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails the Envoy access log file."""
+    def handle_line(line: str) -> None:
+        try:
+            log_entry = json.loads(line)
+            fields = extract_envoy_fields(log_entry)
+            hec_envoy.send_event(fields, index="zta_envoy", sourcetype="envoy:access")
+        except json.JSONDecodeError:
+            logger.warning("Skipping invalid JSON line from Envoy log")
+
+    tail_log_file(
+        path=ENVOY_LOG_PATH,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush
+    )
 
 
 def extract_snort_fields(log_entry: dict) -> dict:
@@ -271,42 +279,21 @@ def extract_snort_fields(log_entry: dict) -> dict:
 
 def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
     """Background thread that tails a Snort 3 alert_json log file."""
-    logger.info("Snort [%s] log tailer started, watching: %s", sensor, path)
-    last_position = 0
-
-    while not stop_event.is_set():
+    def handle_line(line: str) -> None:
         try:
-            if path.exists():
-                current_size = path.stat().st_size
-                if current_size < last_position:
-                    last_position = 0
-                if current_size > last_position:
-                    with open(path, "r") as f:
-                        f.seek(last_position)
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                fields = extract_snort_fields(log_entry)
-                                fields["sensor"] = sensor
-                                hec_envoy.send_event(
-                                    fields,
-                                    index="zta_snort",
-                                    sourcetype="snort:alert_json",
-                                )
-                            except json.JSONDecodeError:
-                                logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)
-                        last_position = f.tell()
-                    hec_envoy.flush()
-            else:
-                logger.debug("Snort [%s] log file not yet available: %s", sensor, path)
-        except Exception as e:
-            logger.error("Error tailing Snort [%s] log: %s", sensor, e)
-        stop_event.wait(timeout=2.0)
+            log_entry = json.loads(line)
+            fields = extract_snort_fields(log_entry)
+            fields["sensor"] = sensor
+            hec_envoy.send_event(fields, index="zta_snort", sourcetype="snort:alert_json")
+        except json.JSONDecodeError:
+            logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)
 
-    logger.info("Snort [%s] log tailer stopped", sensor)
+    tail_log_file(
+        path=path,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush
+    )
 
 
 # Regex per parsare i log del kernel nftables
@@ -382,38 +369,17 @@ def parse_nftables_line(line: str) -> dict | None:
 
 def tail_nftables_logs(stop_event: threading.Event) -> None:
     """Background thread that tails nftables kernel log output."""
-    logger.info("nftables log tailer started, watching: %s", NFTABLES_LOG_PATH)
-    last_position = 0
+    def handle_line(line: str) -> None:
+        fields = parse_nftables_line(line)
+        if fields:
+            hec_envoy.send_event(fields, index="zta_nftables", sourcetype="nftables:log")
 
-    while not stop_event.is_set():
-        try:
-            if NFTABLES_LOG_PATH.exists():
-                current_size = NFTABLES_LOG_PATH.stat().st_size
-                if current_size < last_position:
-                    last_position = 0
-                if current_size > last_position:
-                    with open(NFTABLES_LOG_PATH, "r") as f:
-                        f.seek(last_position)
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            fields = parse_nftables_line(line)
-                            if fields:
-                                hec_envoy.send_event(
-                                    fields,
-                                    index="zta_nftables",
-                                    sourcetype="nftables:log",
-                                )
-                        last_position = f.tell()
-                    hec_envoy.flush()
-            else:
-                logger.debug("nftables log file not yet available: %s", NFTABLES_LOG_PATH)
-        except Exception as e:
-            logger.error("Error tailing nftables log: %s", e)
-        stop_event.wait(timeout=2.0)
-
-    logger.info("nftables log tailer stopped")
+    tail_log_file(
+        path=NFTABLES_LOG_PATH,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush
+    )
 
 
 def extract_mongo_fields(log_entry: dict) -> dict:
@@ -433,79 +399,37 @@ def extract_mongo_fields(log_entry: dict) -> dict:
 
 def tail_mongo_logs(stop_event: threading.Event) -> None:
     """Background thread that tails the MongoDB log file."""
-    logger.info("MongoDB log tailer started, watching: %s", MONGO_LOG_PATH)
-    last_position = 0
-
-    while not stop_event.is_set():
+    def handle_line(line: str) -> None:
         try:
-            if MONGO_LOG_PATH.exists():
-                current_size = MONGO_LOG_PATH.stat().st_size
-                if current_size < last_position:
-                    last_position = 0
-                if current_size > last_position:
-                    with open(MONGO_LOG_PATH, "r") as f:
-                        f.seek(last_position)
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                fields = extract_mongo_fields(log_entry)
-                                hec_envoy.send_event(
-                                    fields,
-                                    index="zta_mongodb",
-                                    sourcetype="mongodb:json",
-                                )
-                            except json.JSONDecodeError:
-                                logger.warning("Skipping invalid JSON from MongoDB log")
-                        last_position = f.tell()
-                    hec_envoy.flush()
-            else:
-                logger.debug("MongoDB log file not yet available: %s", MONGO_LOG_PATH)
-        except Exception as e:
-            logger.error("Error tailing MongoDB log: %s", e)
-        stop_event.wait(timeout=2.0)
+            log_entry = json.loads(line)
+            fields = extract_mongo_fields(log_entry)
+            hec_envoy.send_event(fields, index="zta_mongodb", sourcetype="mongodb:json")
+        except json.JSONDecodeError:
+            logger.warning("Skipping invalid JSON from MongoDB log")
 
-    logger.info("MongoDB log tailer stopped")
+    tail_log_file(
+        path=MONGO_LOG_PATH,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush
+    )
 
 
 def tail_mongo_audit_logs(stop_event: threading.Event) -> None:
     """Background thread that tails the MongoDB Audit log file."""
-    logger.info("MongoDB Audit log tailer started, watching: %s", MONGO_AUDIT_PATH)
-    last_position = 0
-
-    while not stop_event.is_set():
+    def handle_line(line: str) -> None:
         try:
-            if MONGO_AUDIT_PATH.exists():
-                current_size = MONGO_AUDIT_PATH.stat().st_size
-                if current_size < last_position:
-                    last_position = 0
-                if current_size > last_position:
-                    with open(MONGO_AUDIT_PATH, "r") as f:
-                        f.seek(last_position)
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                log_entry = json.loads(line)
-                                hec_envoy.send_event(
-                                    log_entry,
-                                    index="zta_mongodb_audit",
-                                    sourcetype="mongodb:audit",
-                                )
-                            except json.JSONDecodeError:
-                                logger.warning("Skipping invalid JSON from MongoDB Audit log")
-                        last_position = f.tell()
-                    hec_envoy.flush()
-            else:
-                logger.debug("MongoDB Audit log file not yet available: %s", MONGO_AUDIT_PATH)
-        except Exception as e:
-            logger.error("Error tailing MongoDB Audit log: %s", e)
-        stop_event.wait(timeout=2.0)
+            log_entry = json.loads(line)
+            hec_envoy.send_event(log_entry, index="zta_mongodb_audit", sourcetype="mongodb:audit")
+        except json.JSONDecodeError:
+            logger.warning("Skipping invalid JSON from MongoDB Audit log")
 
-    logger.info("MongoDB Audit log tailer stopped")
+    tail_log_file(
+        path=MONGO_AUDIT_PATH,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush
+    )
 
 
 @app.route("/health", methods=["GET"])
