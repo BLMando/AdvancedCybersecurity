@@ -26,12 +26,6 @@ AD_USERS = {
         "department": "Cardiologia",
         "password": "password123"
     },
-    "anna.verdi@ospedale.it": {
-        "cn": "anna.verdi",
-        "role": "billing_staff",
-        "department": "Amministrazione",
-        "password": "password123"
-    },
     "giulia.bianchi@ospedale.it": {
         "cn": "giulia.bianchi",
         "role": "auditor",
@@ -47,6 +41,12 @@ AD_USERS = {
     "paolo.roselli@ospedale.it": {
         "cn": "paolo.roselli",
         "role": "doctor",
+        "department": "Cardiologia",
+        "password": "password123"
+    },
+     "mattia.mandorlini@ospedale.it": {
+        "cn": "mattia.mandorlini",
+        "role": "billing_staff",
         "department": "Cardiologia",
         "password": "password123"
     }

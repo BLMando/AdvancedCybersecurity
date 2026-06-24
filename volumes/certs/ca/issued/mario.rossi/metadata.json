@@ -3,9 +3,9 @@
   "enrollment_method": "hardware_proof",
   "hardware": {
     "cpu": "AMD Ryzen 7 5700U with Radeon Graphics",
-    "mac": "EC-2E-98-3C-6C-AB"
+    "mac": "00-15-5D-90-C4-E4"
   },
   "role": "doctor",
-  "timestamp": "2026-06-24T08:18:17.466049+00:00",
+  "timestamp": "2026-06-24T14:47:06.817398+00:00",
   "user": "mario.rossi"
 }
