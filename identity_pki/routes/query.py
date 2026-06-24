@@ -188,15 +188,95 @@ def api_query():
     ca_path = os.path.join(service.cert_dir, "ca.crt")
 
     try:
-        client = _build_mongo_client(user_cn, mongo_db_name, local_proxy_port, jwt_token, combined_pem_path, ca_path)
-        db = client[mongo_db_name]
-        
+        import requests
+        from bson import json_util
+
         target_collection = view_name if mongo_action == "find" else collection_name
-        count, results_json, message = _execute_mongo_operation(
-            db, mongo_action, target_collection, query_filter, update_fields, limit
-        )
+
+        # Prepare HTTP payload
+        query_payload = {
+            "command": mongo_action,
+            "collection": target_collection,
+            "query": query_filter,
+            "update_fields": update_fields,
+            "limit": limit,
+            "user": user_cn,
+            "role": role,
+            "mechanism": "MONGODB-OIDC",
+            "payload": jwt_token
+        }
+
+        # Serialize utilizing json_util to support BSON types (like ObjectIDs/dates)
+        payload_data = json_util.dumps(query_payload)
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-zta-user": user_cn,
+            "x-zta-role": role,
+            "Authorization": f"Bearer {jwt_token}"
+        }
+
+        if local_proxy_port:
+            url = f"http://host.docker.internal:{local_proxy_port}/query"
+            response = requests.post(url, data=payload_data, headers=headers, timeout=10)
+        else:
+            url = "https://envoy:10000/query"
+            response = requests.post(
+                url,
+                data=payload_data,
+                headers=headers,
+                cert=combined_pem_path,
+                verify=ca_path,
+                timeout=10
+            )
+
+        if response.status_code != 200:
+            err_msg = ""
+            err_type = "query_failed"
+            try:
+                res_data = response.json()
+                err_msg = res_data.get("message")
+                err_type = res_data.get("error_type", "query_failed")
+            except Exception:
+                pass
             
-        client.close()
+            if not err_msg:
+                # Fallback to checking Envoy/OPA response headers
+                decision = response.headers.get("x-zta-decision")
+                if response.status_code == 403 or decision == "DENY":
+                    err_type = "authorization_denied"
+                    if role == "doctor" and collection_name == "clinical_records" and mongo_action in ("find", "update") and not query_filter.get("patient_id"):
+                        err_msg = "OPA/RBAC Access Denied: Request blocked by zero trust policy decision. Doctors are required to filter by patient_id when querying clinical records."
+                    else:
+                        err_msg = f"OPA/RBAC Access Denied: Zero Trust policy decision (User '{user_cn}', Role '{role}', Action '{mongo_action}', Collection '{collection_name}')."
+                else:
+                    err_msg = response.text or f"HTTP {response.status_code}"
+            
+            _send_audit_event(
+                user=user_cn,
+                role=role,
+                collection=collection_name,
+                action=mongo_action,
+                translated_view=view_name,
+                query_filter=query_filter_str,
+                decision="DENY",
+                error_type=err_type,
+                message=f"Mongo HTTP Proxy error: {err_msg}",
+                jwt_auth=bool(jwt_token),
+                hardware_mode=hardware_mode
+            )
+            return jsonify({
+                "status": "error",
+                "error_type": err_type,
+                "message": f"Mongo HTTP Proxy error: {err_msg}",
+                "role": role,
+                "translated_collection": view_name
+            }), response.status_code
+
+        res_data = response.json()
+        count = res_data.get("count", 0)
+        results_json = res_data.get("results", [])
+        message = res_data.get("message", "Success")
 
         _send_audit_event(
             user=user_cn,

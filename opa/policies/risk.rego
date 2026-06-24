@@ -52,19 +52,21 @@ collection_sensitivity_val := 15 if {
 } else := 0
 
 # Content Risk Dimension (20% weight) - checks queries for MongoDB
-content_risk := 0 if {
-	identity.is_http_request
-} else := 100 if {
+content_risk := 100 if {
+	identity.is_db_query
 	identity.normalized_collection_name == "clinical_records"
 	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 } else := 100 if {
+	identity.is_db_query
 	identity.normalized_collection_name == "billing"
 	identity.query_has_field("$where")
 } else := 100 if {
+	identity.is_db_query
 	identity.normalized_collection_name == "billing"
 	identity.query_has_field("$function")
 } else := 100 if {
+	identity.is_db_query
 	identity.normalized_collection_name == "patients"
 	identity.current_role != "admin"
 	identity.action_name == "find"

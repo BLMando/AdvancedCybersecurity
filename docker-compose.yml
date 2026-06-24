@@ -51,6 +51,26 @@ services:
     networks:
       - backend-net
 
+  # ── Custom MongoDB Proxy ────────────────────────────
+  mongo-proxy:
+    build:
+      context: ./mongo_proxy
+      dockerfile: Dockerfile
+    container_name: mongo-proxy
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5001:5001"
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    volumes:
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
+    networks:
+      - backend-net
+
   # ── Envoy Log Init (Correzione Permessi Volume) ────
   envoy-log-init:
     image: alpine:latest

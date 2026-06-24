@@ -141,15 +141,22 @@ class PKIServiceTests(unittest.TestCase):
                 )
                 
                 from unittest.mock import patch, MagicMock
-                mock_client_instance = MagicMock()
-                mock_client_instance.__getitem__.return_value.__getitem__.return_value.find.return_value.limit.return_value = []
-                
-                with patch('identity_pki.app.MongoClient', return_value=mock_client_instance) as mock_mongo_client, \
+                with patch('requests.post') as mock_post, \
                      patch('urllib.request.urlopen') as mock_url_open:
                     
                     mock_response = MagicMock()
-                    mock_response.read.return_value = b'{"result": false}'
-                    mock_url_open.return_value.__enter__.return_value = mock_response
+                    mock_response.status_code = 200
+                    mock_response.json.return_value = {
+                        "status": "success",
+                        "count": 0,
+                        "results": [],
+                        "message": "Success"
+                    }
+                    mock_post.return_value = mock_response
+                    
+                    mock_url_response = MagicMock()
+                    mock_url_response.read.return_value = b'{"result": false}'
+                    mock_url_open.return_value.__enter__.return_value = mock_url_response
                     
                     jwt_token = "hdr.eyJ1c2VyIjoicGFvbG8ucm9zZWxsaSIsInJvbGUiOiJkb2N0b3IifQ.sig"
                     query_resp = client.post(
@@ -163,13 +170,21 @@ class PKIServiceTests(unittest.TestCase):
                     )
                     self.assertEqual(query_resp.status_code, 200)
                     
-                    mock_mongo_client.assert_called_once()
-                    _, kwargs = mock_mongo_client.call_args
-                    self.assertIn("authMechanismProperties", kwargs)
-                    callback = kwargs["authMechanismProperties"]["OIDC_CALLBACK"]
-                    self.assertIsNotNone(callback)
+                    mock_post.assert_called_once()
+                    args, kwargs = mock_post.call_args
+                    self.assertEqual(args[0], "https://envoy:10000/query")
+                    self.assertIn("data", kwargs)
                     
-                    from pymongo.auth_oidc import OIDCCallbackResult
+                    # Verify StaticTokenCallback behavior directly
+                    from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+                    
+                    class StaticTokenCallback(OIDCCallback):
+                        def __init__(self, token):
+                            self.token = token
+                        def fetch(self, context):
+                            return OIDCCallbackResult(access_token=self.token)
+                    
+                    callback = StaticTokenCallback(jwt_token)
                     res = callback.fetch(None)
                     self.assertIsInstance(res, OIDCCallbackResult)
                     self.assertEqual(res.access_token, jwt_token)

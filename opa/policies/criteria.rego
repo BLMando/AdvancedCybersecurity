@@ -86,26 +86,26 @@ hard_deny if {
 # ─── Content Inspection (L7 WAF queries) ──────────────────────────────────────
 
 inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "clinical_records"
 	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 }
 
 inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "billing"
 	identity.query_has_field("$where")
 }
 
 inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "billing"
 	identity.query_has_field("$function")
 }
 
 inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "patients"
 	identity.current_role != "admin"
 	identity.action_name == "find"

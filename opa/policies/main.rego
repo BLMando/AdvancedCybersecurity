@@ -16,6 +16,7 @@ allow if {
 	criteria.criteria_allow
 	risk.risk_score_allow
 	not policy.is_malicious
+	is_valid_oidc_if_present
 }
 
 main := {
@@ -26,22 +27,11 @@ main := {
 	"response_metadata": response_metadata
 }
 
-# OPA Bypass Rules for database system commands
-allow if {
-	identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo"}
-}
-
-allow if {
-	identity.action_name in {"ping", "getLog", "getCmdLineOpts", "serverStatus"}
-}
-
-allow if {
-	identity.action_name == "saslStart"
+is_valid_oidc_if_present if {
 	not identity.is_mongodb_oidc
 }
 
-allow if {
-	identity.action_name == "saslStart"
+is_valid_oidc_if_present if {
 	identity.is_mongodb_oidc
 	identity.valid_oidc_token
 }

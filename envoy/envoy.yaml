@@ -22,11 +22,13 @@ static_resources:
                 bytes_sent: "%BYTES_SENT%"
                 bytes_received: "%BYTES_RECEIVED%"
                 upstream_host: "%UPSTREAM_HOST%"
-                user: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-user)%"
-                device: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-device)%"
-                network_ip: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-network)%"
-                decision: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-decision)%"
-                risk_score: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-risk-score)%"
+                user: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-zta-user)%"
+                device: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-zta-device)%"
+                network_ip: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-zta-network)%"
+                decision: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-zta-decision)%"
+                risk_score: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-zta-risk-score)%"
+                command: "%DYNAMIC_METADATA(envoy.filters.http.lua:command)%"
+                collection: "%DYNAMIC_METADATA(envoy.filters.http.lua:collection)%"
       listener_filters:
         # Run before TLS termination so Envoy can inspect the ClientHello
         # and derive the JA3 fingerprint used as a device hint.
@@ -58,54 +60,79 @@ static_resources:
               # present a valid certificate.
               require_client_certificate: true
           filters:
-            # Mongo proxy inspects the MongoDB wire protocol so we can log the
-            # actual command and collection being accessed.
-            - name: envoy.filters.network.mongo_proxy
+            - name: envoy.filters.network.http_connection_manager
               typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.mongo_proxy.v3.MongoProxy
-                stat_prefix: mongo_stats
-                emit_dynamic_metadata: true
-
-            # Ask OPA for an allow/deny decision before forwarding traffic to
-            # MongoDB. This is the policy gate of the system.
-            - name: envoy.filters.network.ext_authz
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz #Ext Authz --> explicit authorization
-                stat_prefix: opa_authz
-                transport_api_version: V3
-                include_peer_certificate: true
-                metadata_context_namespaces:
-                  - envoy.filters.listener.tls_inspector
-                  - envoy.filters.network.mongo_proxy
-                grpc_service:
-                  envoy_grpc:
-                    cluster_name: opa_cluster
-                  timeout: 2s
-                failure_mode_allow: false
-                # Fail closed: if OPA is unavailable, the request is denied.
-
-            # If the request passes the checks, forward it to MongoDB.
-            - name: envoy.filters.network.tcp_proxy
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
-                stat_prefix: mongo_tcp
-                cluster: mongo_cluster
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: local_service
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: mongo_proxy_cluster
+                http_filters:
+                  - name: envoy.filters.http.buffer
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                      max_request_bytes: 65536
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      stat_prefix: opa_authz
+                      transport_api_version: V3
+                      include_peer_certificate: true
+                      with_request_body:
+                        max_request_bytes: 8192
+                        pack_as_bytes: true
+                      metadata_context_namespaces:
+                        - envoy.filters.listener.tls_inspector
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: opa_cluster
+                        timeout: 2s
+                      failure_mode_allow: false
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      inline_code: |
+                        function envoy_on_request(request_handle)
+                          local body = request_handle:body()
+                          if body then
+                            local len = body:length()
+                            if len > 0 then
+                              local body_str = tostring(body:getBytes(0, len))
+                              local command = string.match(body_str, '"command"%s*:%s*"([^"]+)"') or "unknown"
+                              local collection = string.match(body_str, '"collection"%s*:%s*"([^"]+)"') or "unknown"
+                              
+                              local meta = request_handle:streamInfo():dynamicMetadata()
+                              meta:set("envoy.filters.http.lua", "command", command)
+                              meta:set("envoy.filters.http.lua", "collection", collection)
+                            end
+                          end
+                        end
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
 
   # ─── Clusters ──────────────────────────────────────
   clusters:
-    - name: mongo_cluster
+    - name: mongo_proxy_cluster
       connect_timeout: 2s
       type: STRICT_DNS
       load_assignment:
-        cluster_name: mongo_cluster
+        cluster_name: mongo_proxy_cluster
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: mongo
-                      port_value: 27017
+                      address: mongo-proxy
+                      port_value: 5001
       transport_socket:
         name: envoy.transport_sockets.tls
         typed_config:

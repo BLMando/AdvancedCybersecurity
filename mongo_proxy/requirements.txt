@@ -1,5 +1,4 @@
 Flask>=3.0,<4.0
-cryptography>=42.0,<45.0
 pymongo>=4.17.0
+cryptography>=42.0,<45.0
 requests>=2.31.0
-

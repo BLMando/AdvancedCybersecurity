@@ -29,6 +29,8 @@ def extract_envoy_fields(log_entry: dict) -> dict:
         "network_ip": log_entry.get("network_ip") or "0.0.0.0",
         "decision": log_entry.get("decision") or "unknown",
         "risk_score": log_entry.get("risk_score") or "0",
+        "command": log_entry.get("command") or "unknown",
+        "collection": log_entry.get("collection") or "unknown",
     }
 
 

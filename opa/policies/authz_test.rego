@@ -139,7 +139,7 @@ test_clinical_no_patient_id_denied if {
 			"user": "mario.rossi",
 			"device": "device-laptop-001",
 			"network_ip": "172.20.0.5",
-			"command": "find",
+			"command": "update",
 			"collection": "clinical_records",
 			"query": "{}"
 		}
@@ -225,7 +225,7 @@ test_doctor_clinical_view_no_patient_id_denied if {
 			"user": "mario.rossi",
 			"device": "device-laptop-001",
 			"network_ip": "172.20.0.5",
-			"command": "find",
+			"command": "update",
 			"collection": "v_clinical_doctor",
 			"query": "{}"
 		}
@@ -257,7 +257,8 @@ test_oidc_valid if {
 			}
 		},
 		"parsed_body": {
-			"command": "saslStart",
+			"command": "find",
+			"collection": "patients",
 			"mechanism": "MONGODB-OIDC",
 			"query": {
 				"payload": "a.b.c"
@@ -279,7 +280,8 @@ test_oidc_invalid_cert_denied if {
 			}
 		},
 		"parsed_body": {
-			"command": "saslStart",
+			"command": "find",
+			"collection": "patients",
 			"mechanism": "MONGODB-OIDC",
 			"query": {
 				"payload": "a.b.c"
@@ -301,7 +303,8 @@ test_oidc_expired_token_denied if {
 			}
 		},
 		"parsed_body": {
-			"command": "saslStart",
+			"command": "find",
+			"collection": "patients",
 			"mechanism": "MONGODB-OIDC",
 			"query": {
 				"payload": "a.b.c"
@@ -323,7 +326,8 @@ test_oidc_wrong_cn_denied if {
 			}
 		},
 		"parsed_body": {
-			"command": "saslStart",
+			"command": "find",
+			"collection": "patients",
 			"mechanism": "MONGODB-OIDC",
 			"query": {
 				"payload": "a.b.c"
@@ -345,7 +349,8 @@ test_oidc_trusted_proxy_valid if {
 			}
 		},
 		"parsed_body": {
-			"command": "saslStart",
+			"command": "find",
+			"collection": "patients",
 			"mechanism": "MONGODB-OIDC",
 			"query": {
 				"payload": "a.b.c"
@@ -707,55 +712,7 @@ test_nosql_injection_sleep_denied if {
 	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
 }
 
-test_mongodb_metadata_extraction_find_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {"principal": "mario.rossi"},
-			"metadata_context": {
-				"filter_metadata": {
-					"envoy.filters.network.mongo_proxy": {
-						"zta_db.patients": {
-							"find": {
-								"filter": {"patient_id": "P001"}
-							}
-						}
-					}
-				}
-			}
-		},
-		"parsed_body": {
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
-}
 
-test_mongodb_metadata_extraction_where_blocked if {
-	deny with input as {
-		"attributes": {
-			"source": {"principal": "mario.rossi"},
-			"metadata_context": {
-				"filter_metadata": {
-					"envoy.filters.network.mongo_proxy": {
-						"zta_db.patients": {
-							"find": {
-								"filter": {"$where": "this.age > 30"}
-							}
-						}
-					}
-				}
-			}
-		},
-		"parsed_body": {
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {"mario.rossi": {"device-laptop-001": ["172.20.0.5"]}}
-}
 
 # Helper mocks per http.send
 mock_http_send_high_risk(req) := {
