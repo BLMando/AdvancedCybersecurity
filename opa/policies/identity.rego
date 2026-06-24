@@ -84,7 +84,7 @@ network_identity_str := ip if {
 } else := "0.0.0.0"
 
 is_internal_network if {
-	cidr_match := regex.match(`^(172\.20\.|172\.21\.|10\.)`, network_identity_str)
+	cidr_match := regex.match(`^(172\.19\.|172\.20\.|172\.21\.|10\.)`, network_identity_str)
 	cidr_match == true
 }
 
@@ -132,7 +132,8 @@ user_role_map := {
 	"admin":          "admin",
 	"test.user":      "auditor",
 	"paolo.roselli":  "doctor",
-	"mattia.mando":   "doctor"
+	"mattia.mando":   "doctor",
+	"test.doctor":    "doctor"
 }
 
 known_users := {
@@ -143,7 +144,8 @@ known_users := {
 	"admin",
 	"test.user",
 	"paolo.roselli",
-	"mattia.mando"
+	"mattia.mando",
+	"test.doctor"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {
@@ -286,8 +288,9 @@ is_valid_token_binding(claims, cert_subject_cn) if {
 	# Direct client: CN matches sub, cert fingerprint matches cnf
 	cert_subject_cn == claims.sub
 	
-	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem != ""
+	raw_cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	raw_cert_pem != ""
+	cert_pem := cert_pem_decoded(raw_cert_pem)
 	
 	cert_der := cert_der_bytes(cert_pem)
 	client_cert_hex := crypto.sha256(cert_der)
@@ -400,3 +403,6 @@ is_non_db_http_request if {
 	path != ""
 	path != "/query"
 }
+ 
+
+

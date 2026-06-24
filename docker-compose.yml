@@ -158,6 +158,8 @@ services:
       - "127.0.0.1:9002:9002"
     volumes:
       - ./opa/policies:/policies:ro
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
     command:
       - run
       - --server
