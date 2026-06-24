@@ -20,32 +20,26 @@ from datetime import datetime, timedelta, timezone
 
 # Simulated Active Directory / HR database for ZTA Identity Verification
 AD_USERS = {
-    "dr.mario.rossi@ospedale.it": {
-        "cn": "mario.rossi",
+    "test.doctor@ospedale.it": {
+        "cn": "test.doctor",
         "role": "doctor",
         "department": "Cardiologia",
         "password": "password123"
     },
-    "giulia.bianchi@ospedale.it": {
-        "cn": "giulia.bianchi",
+    "test.auditor@ospedale.it": {
+        "cn": "test.auditor",
         "role": "auditor",
         "department": "Audit",
         "password": "password123"
     },
-    "luca.ferrari@ospedale.it": {
-        "cn": "luca.ferrari",
+    "test.receptionist@ospedale.it": {
+        "cn": "test.receptionist",
         "role": "receptionist",
         "department": "Accettazione",
         "password": "password123"
     },
-    "paolo.roselli@ospedale.it": {
-        "cn": "paolo.roselli",
-        "role": "doctor",
-        "department": "Cardiologia",
-        "password": "password123"
-    },
-     "mattia.mandorlini@ospedale.it": {
-        "cn": "mattia.mandorlini",
+     "test.billing@ospedale.it": {
+        "cn": "test.billing",
         "role": "billing_staff",
         "department": "Cardiologia",
         "password": "password123"
