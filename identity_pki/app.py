@@ -817,6 +817,55 @@ def create_app(data_dir=None) -> Flask:
             except Exception:
                 pass
 
+        # Call OPA to inspect the query filter for NoSQL Injection
+        try:
+            opa_payload = json.dumps({
+                "input": {
+                    "parsed_body": {
+                        "query": json.dumps(query_filter)
+                    }
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://opa:8181/v1/data/envoy/authz/policy/is_malicious",
+                data=opa_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=1) as resp:
+                opa_res = json.loads(resp.read().decode("utf-8"))
+                is_malicious = opa_res.get("result", False)
+                if is_malicious:
+                    # Log audit event for block
+                    _send_audit_event(
+                        user=user_cn,
+                        role=role,
+                        collection=collection_name,
+                        action=mongo_action,
+                        translated_view=collection_name,
+                        query_filter=query_filter_str,
+                        decision="DENY",
+                        error_type="nosql_injection_blocked",
+                        message="OPA L7 WAF Blocked: Suspicious NoSQL injection pattern detected in payload",
+                        jwt_auth=bool(jwt_token),
+                        hardware_mode=hardware_mode
+                    )
+                    return jsonify({
+                        "status": "error",
+                        "error_type": "authorization_denied",
+                        "message": "Richiesta bloccata - Rilevato pattern NoSQL sospetto",
+                        "role": role,
+                        "translated_collection": collection_name
+                    }), 403
+        except Exception as e:
+            # Fallback: if OPA is down or query fails, we log it and default to safe deny
+            app.logger.error("Failed to query OPA for NoSQL injection check: %s", e)
+            return jsonify({
+                "status": "error",
+                "error_type": "security_system_failure",
+                "message": "Security validation failed. Please try again later."
+            }), 500
+
         # Translate collection to RLS view
         view_name = collection_name
         if role != "admin":
