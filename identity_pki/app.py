@@ -70,6 +70,96 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _provision_mongo_user(service: PKIService, logger: logging.Logger, username: str, role: str) -> None:
+    try:
+        mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
+        mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
+        mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+        ca_path = os.path.join(service.cert_dir, "ca.crt")
+        
+        client = MongoClient(
+            f"mongodb://{mongo_root_user}:{mongo_root_pass}@mongo:27017/admin",
+            serverSelectionTimeoutMS=2000,
+            tls=True,
+            tlsCertificateKeyFile="/data/server/mongo.pem",
+            tlsCAFile=ca_path,
+            tlsAllowInvalidCertificates=True
+        )
+        db = client[mongo_db_name]
+        
+        from shared.zta_roles import ZTA_ROLES
+        role_config = ZTA_ROLES.get(role, {})
+        mongo_role = role_config.get("mongo_role", "read")
+        
+        password = f"{''.join(x.capitalize() for x in username.split('.'))}2026!"
+        
+        try:
+            db.command("dropUser", username)
+        except Exception:
+            pass
+            
+        db.command(
+            "createUser", username,
+            pwd=password,
+            roles=[{"role": mongo_role, "db": mongo_db_name}]
+        )
+        logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
+
+        # Create user in $external database for MONGODB-OIDC authentication
+        db_external = client["$external"]
+        oidc_username = f"oidc/{username}"
+        try:
+            db_external.command("dropUser", oidc_username)
+        except Exception:
+            pass
+        try:
+            db_external.command(
+                "createUser", oidc_username,
+                roles=[{"role": mongo_role, "db": mongo_db_name}]
+            )
+            logger.info(f"Auto-provisioned MongoDB external OIDC user '{oidc_username}' with role '{mongo_role}'")
+        except Exception as ex:
+            logger.warning(f"Failed to auto-provision external OIDC user '{oidc_username}': {ex}")
+
+        client.close()
+    except Exception as e:
+        logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
+
+
+def _send_audit_event_impl(logger: logging.Logger, user, role, collection, action, translated_view,
+                           query_filter, decision, count=0, error_type="",
+                           message="", jwt_auth=False, hardware_mode=False):
+    """Fire-and-forget audit event to the Splunk forwarder sidecar."""
+    import threading as _threading
+    def _send():
+        try:
+            audit_payload = json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user": user,
+                "role": role,
+                "resource": collection,
+                "command": action,
+                "translated_view": translated_view,
+                "filter": query_filter,
+                "decision": decision,
+                "count": count,
+                "error_type": error_type,
+                "message": message,
+                "jwt_auth": jwt_auth,
+                "hardware_mode": hardware_mode,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://opa-splunk-forwarder:5000/api/audit",
+                data=audit_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=2)
+        except Exception as e:
+            logger.debug("Audit event delivery failed (non-critical): %s", e)
+    _threading.Thread(target=_send, daemon=True).start()
+
+
 def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
@@ -82,92 +172,10 @@ def create_app(data_dir=None) -> Flask:
         return jsonify({"error": message, "code": code}), code
     
     def provision_mongo_user(username, role):
-        try:
-            mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
-            mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
-            mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
-            ca_path = os.path.join(service.cert_dir, "ca.crt")
-            
-            client = MongoClient(
-                f"mongodb://{mongo_root_user}:{mongo_root_pass}@mongo:27017/admin",
-                serverSelectionTimeoutMS=2000,
-                tls=True,
-                tlsCertificateKeyFile="/data/server/mongo.pem",
-                tlsCAFile=ca_path,
-                tlsAllowInvalidCertificates=True
-            )
-            db = client[mongo_db_name]
-            
-            from shared.zta_roles import ZTA_ROLES
-            role_config = ZTA_ROLES.get(role, {})
-            mongo_role = role_config.get("mongo_role", "read")
-            
-            password = f"{''.join(x.capitalize() for x in username.split('.'))}2026!"
-            
-            try:
-                db.command("dropUser", username)
-            except Exception:
-                pass
-                
-            db.command(
-                "createUser", username,
-                pwd=password,
-                roles=[{"role": mongo_role, "db": mongo_db_name}]
-            )
-            app.logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
+        _provision_mongo_user(service, app.logger, username, role)
 
-            # Create user in $external database for MONGODB-OIDC authentication
-            db_external = client["$external"]
-            oidc_username = f"oidc/{username}"
-            try:
-                db_external.command("dropUser", oidc_username)
-            except Exception:
-                pass
-            try:
-                db_external.command(
-                    "createUser", oidc_username,
-                    roles=[{"role": mongo_role, "db": mongo_db_name}]
-                )
-                app.logger.info(f"Auto-provisioned MongoDB external OIDC user '{oidc_username}' with role '{mongo_role}'")
-            except Exception as ex:
-                app.logger.warning(f"Failed to auto-provision external OIDC user '{oidc_username}': {ex}")
-
-            client.close()
-        except Exception as e:
-            app.logger.warning(f"Failed to auto-provision MongoDB user '{username}': {e}")
-
-    def _send_audit_event(user, role, collection, action, translated_view,
-                          query_filter, decision, count=0, error_type="",
-                          message="", jwt_auth=False, hardware_mode=False):
-        """Fire-and-forget audit event to the Splunk forwarder sidecar."""
-        import threading as _threading
-        def _send():
-            try:
-                audit_payload = json.dumps({
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "user": user,
-                    "role": role,
-                    "resource": collection,
-                    "command": action,
-                    "translated_view": translated_view,
-                    "filter": query_filter,
-                    "decision": decision,
-                    "count": count,
-                    "error_type": error_type,
-                    "message": message,
-                    "jwt_auth": jwt_auth,
-                    "hardware_mode": hardware_mode,
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    "http://opa-splunk-forwarder:5000/api/audit",
-                    data=audit_payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                urllib.request.urlopen(req, timeout=2)
-            except Exception as e:
-                app.logger.debug("Audit event delivery failed (non-critical): %s", e)
-        _threading.Thread(target=_send, daemon=True).start()
+    def _send_audit_event(*args, **kwargs):
+        _send_audit_event_impl(app.logger, *args, **kwargs)
 
 
     @app.get("/health")
