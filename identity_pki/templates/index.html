@@ -1075,56 +1075,6 @@
         ],
       };
 
-      // ─── Role-based action permissions (mirrors OPA criteria.rego) ──────────
-      // u = canUpdate, d = canDelete per (role, collection)
-      const ROLE_PERMISSIONS = {
-        admin: {
-          patients: { u: true, d: true },
-          providers: { u: true, d: true },
-          admissions: { u: true, d: true },
-          clinical_records: { u: true, d: true },
-          billing: { u: true, d: true },
-        },
-        doctor: {
-          patients: { u: false, d: false },
-          providers: { u: false, d: false },
-          admissions: { u: true, d: false },
-          clinical_records: { u: true, d: false },
-          billing: { u: false, d: false },
-        },
-        billing_staff: {
-          patients: { u: false, d: false },
-          providers: { u: false, d: false },
-          admissions: { u: false, d: false },
-          clinical_records: { u: false, d: false },
-          billing: { u: true, d: false },
-        },
-        auditor: {
-          patients: { u: false, d: false },
-          providers: { u: false, d: false },
-          admissions: { u: false, d: false },
-          clinical_records: { u: false, d: false },
-          billing: { u: false, d: false },
-        },
-        receptionist: {
-          patients: { u: true, d: false },
-          providers: { u: false, d: false },
-          admissions: { u: true, d: false },
-          clinical_records: { u: false, d: false },
-          billing: { u: false, d: false },
-        },
-      };
-
-      function getRolePerms(collection) {
-        const user = document.getElementById("query-user").value;
-        const cert = window.activeCertificates
-          ? window.activeCertificates.find((c) => c.user === user)
-          : null;
-        const role = cert ? cert.role : "auditor";
-        return (
-          (ROLE_PERMISSIONS[role] || {})[collection] || { u: false, d: false }
-        );
-      }
 
       // ─── Render results table with Edit/Delete action buttons ──────────────
       function renderQueryResults(results, collection) {
@@ -1271,10 +1221,6 @@
             });
         }
 
-        const hasEditFields = !!EDIT_FIELDS[collection];
-        const perms = getRolePerms(collection);
-        const canEdit = hasEditFields && perms.u;
-        const canDelete = perms.d;
 
         // Header
         let headerHtml =
@@ -1282,9 +1228,8 @@
         headers.forEach((h) => {
           headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
         });
-        // if (canEdit || canDelete) {
-          headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;
-        // }
+
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;       
         headerHtml += "</tr></thead>";
 
         // Rows
@@ -1296,15 +1241,15 @@
           cells.forEach((c) => {
             rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
           });
-          // if (canEdit || canDelete) {
-            rowsHtml += `
-            <td style="padding: 8px 12px; white-space: nowrap;">
-              <div class="action-cell">
-                ${true ? `<button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>` : ""}
-                ${true ? `<button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>` : ""}
-              </div>
-            </td>`;
-          // }
+
+          rowsHtml += `
+          <td style="padding: 8px 12px; white-space: nowrap;">
+            <div class="action-cell">
+              <button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>
+              <button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>
+            </div>
+          </td>`;
+       
           rowsHtml += "</tr>";
           // Placeholder for inline edit panel
           rowsHtml += `<tr id="edit-row-${idx}" style="display:none;"><td colspan="${headers.length + 1}" style="padding:0;"><div class="edit-row-panel" id="edit-panel-${idx}"></div></td></tr>`;
