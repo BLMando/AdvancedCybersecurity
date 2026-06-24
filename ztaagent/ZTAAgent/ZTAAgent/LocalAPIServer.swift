@@ -44,7 +44,6 @@ class LocalAPIServer {
         let method = parts[0]
         let path = parts[1]
         
-        // Handle CORS OPTIONS preflight requests globally
         if method == "OPTIONS" {
             self.sendOptionsResponse(connection: connection)
             return

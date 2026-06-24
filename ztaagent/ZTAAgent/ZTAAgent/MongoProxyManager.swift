@@ -28,7 +28,6 @@ class MongoProxySession {
     
     func start() throws {
         let localPort = NWEndpoint.Port(rawValue: self.port)!
-        // Bind parameters on localhost loopback ONLY to prevent external clients from connecting to our local plain socket
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address("127.0.0.1")!), port: .any)
         
@@ -100,7 +99,6 @@ class MongoProxySession {
             
             if let error = error {
                 let errDesc = error.localizedDescription
-                // Suppress common benign socket closure errors in logs
                 if !errDesc.contains("No message available on STREAM") &&
                    !errDesc.contains("Operation canceled") &&
                    !errDesc.contains("Socket is not connected") {
@@ -158,7 +156,6 @@ class MongoProxySession {
             sec_identity_create(identity)!
         )
         
-        // Accetta il certificato di Envoy auto-firmato per il lab
         sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { _, _, complete in
             complete(true)
         }, .main)
@@ -175,7 +172,6 @@ class MongoProxyManager {
     private let lock = NSLock()
     
     func startSession(cn: String, ttl: TimeInterval) async throws -> (port: UInt16, token: String) {
-        // Gating biometrico: prompt Touch ID / password
         let context = LAContext()
         context.touchIDAuthenticationAllowableReuseDuration = 60.0
         var error: NSError?
@@ -199,7 +195,6 @@ class MongoProxyManager {
         lock.lock()
         defer { lock.unlock() }
         
-        // Ricerca di una porta libera
         var port = nextPort
         while sessions.values.contains(where: { $0.port == port }) {
             port += 1
@@ -211,7 +206,6 @@ class MongoProxyManager {
         
         sessions[session.sessionToken] = session
         
-        // Rilascio automatico dopo il TTL
         let delay = Int(ttl)
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(delay)) {
             self.stopSession(token: session.sessionToken)

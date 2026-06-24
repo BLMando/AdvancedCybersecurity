@@ -48,7 +48,7 @@ class HardwareManager {
         var info = ["mac": "unknown", "cpu": "unknown"]
         print("[DEBUG] Recupero info hardware...")
         
-        // 1. Get Hardware UUID (Mac equivalent of stable ID)
+        // 1. Get Hardware UUID
         let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         if platformExpert != 0 {
             if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(platformExpert, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0) {
@@ -86,7 +86,6 @@ class HardwareManager {
         let tag = label.data(using: .utf8)!
         let keyFile = ztaDir.appendingPathComponent("\(cn).key")
         
-        // Se la chiave esiste già nel file system, la riutilizziamo
         if FileManager.default.fileExists(atPath: keyFile.path) {
             if let data = try? Data(contentsOf: keyFile),
                let privateKey = SecKeyCreateWithData(data as CFData, [
@@ -99,7 +98,6 @@ class HardwareManager {
             }
         }
         
-        // Se la chiave esiste già nel SE, la restituiamo (idempotente su re-enrollment)
         let existsQuery: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag,
@@ -167,10 +165,9 @@ class HardwareManager {
         let sErr = softError?.takeRetainedValue()
         print("[!] SecKeyCreateRandomKey (Software Keychain) fallito: \(String(describing: sErr)). Provo fallback in File System...")
         
-        // Fallback to CryptoKit File-based Software P256 EC Key (Completamente in user-space, bypassa Keychain)
         do {
             let privateKey = P256.Signing.PrivateKey()
-            let keyData = privateKey.x963Representation // SEC1 representation
+            let keyData = privateKey.x963Representation
             try keyData.write(to: keyFile)
             print("[✓] Chiave file-based creata con successo tramite CryptoKit in \(keyFile.path).")
             
@@ -189,7 +186,6 @@ class HardwareManager {
     }
     
     func getPublicKeyDER(for cn: String) throws -> Data {
-        // 1. Prova file-based
         let keyFile = ztaDir.appendingPathComponent("\(cn).key")
         if FileManager.default.fileExists(atPath: keyFile.path) {
             if let data = try? Data(contentsOf: keyFile),
@@ -206,7 +202,6 @@ class HardwareManager {
             }
         }
 
-        // 2. Prova Keychain lookup
         let label = "com.zta.identity.\(cn)"
         let tag = label.data(using: .utf8)!
         let query: [String: Any] = [
@@ -232,7 +227,6 @@ class HardwareManager {
     }
     
     func sign(data: Data, cn: String, context: LAContext? = nil) throws -> Data {
-        // 1. Prova file-based
         let keyFile = ztaDir.appendingPathComponent("\(cn).key")
         if FileManager.default.fileExists(atPath: keyFile.path) {
             if let keyData = try? Data(contentsOf: keyFile),
@@ -249,7 +243,6 @@ class HardwareManager {
             }
         }
 
-        // 2. Prova Keychain
         let label = "com.zta.identity.\(cn)"
         let tag = label.data(using: .utf8)!
         var query: [String: Any] = [
@@ -276,21 +269,15 @@ class HardwareManager {
     }
     
     func saveCertificate(cn: String, certData: Data) throws {
-        // Scriviamo il certificato DER su file in ~/.zta/<cn>.crt per il fallback
         let certFile = ztaDir.appendingPathComponent("\(cn).crt")
         try certData.write(to: certFile)
         print("[✓] Certificato per \(cn) salvato nel file system in \(certFile.path).")
-
-        // Scriviamo il certificato DER su un file temporaneo, poi usiamo
-        // 'security import' che lega automaticamente il cert alla chiave SE
-        // tramite confronto della chiave pubblica (stesso meccanismo di enroll.py).
         let tmpFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("zta_cert_\(cn).cer")
         
         try certData.write(to: tmpFile)
         defer { try? FileManager.default.removeItem(at: tmpFile) }
         
-        // security import lega cert ↔ chiave SE per fingerprint della chiave pubblica
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["import", tmpFile.path, "-t", "cert", "-k",
@@ -309,7 +296,6 @@ class HardwareManager {
         if process.terminationStatus == 0 {
             print("[✓] Certificato per \(cn) importato nel Keychain e collegato alla chiave SE.")
         } else {
-            // errSecDuplicateItem (-25299) = il cert è già nel Keychain, non è un errore
             if output.contains("already exists") || output.contains("duplicate") {
                 print("[✓] Certificato per \(cn) già presente nel Keychain (duplicato ignorato).")
             } else {
@@ -326,7 +312,6 @@ class HardwareManager {
         print("[DEBUG] keyFile: \(keyFile.path) exists: \(FileManager.default.fileExists(atPath: keyFile.path))")
         print("[DEBUG] certFile: \(certFile.path) exists: \(FileManager.default.fileExists(atPath: certFile.path))")
         
-        // 1. Tentativo file-based (robusto e indipendente da Keychain)
         if FileManager.default.fileExists(atPath: keyFile.path) &&
            FileManager.default.fileExists(atPath: certFile.path) {
             do {
@@ -362,7 +347,6 @@ class HardwareManager {
             }
         }
         
-        // 2. Tentativo Keychain lookup
         let query: [String: Any] = [
             kSecClass as String: kSecClassCertificate,
             kSecReturnRef as String: true,

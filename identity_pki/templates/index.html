@@ -458,7 +458,7 @@
       </div>
 
       <!-- Certs Tab Content -->
-      <div id="tab-certs" class="tab-content" style="display: none;">
+      <div id="tab-certs" class="tab-content">
         <section class="panel-grid single">
           <section class="panel">
             <h2>Registro Identità &amp; Revoche</h2>
@@ -809,9 +809,9 @@
           admType:
             '<option value="Emergency">Emergenza</option><option value="Urgent">Urgente</option><option value="Elective">Elettivo</option>',
           admStatus:
-            '<option value="Admitted">Ricoverato</option><option value="Discharged">Dimesso</option>',
+            '<option value="active">Ricoverato (Attivo)</option><option value="discharged">Dimesso</option><option value="transferred">Trasferito</option>',
           payStatus:
-            '<option value="Paid">Pagato</option><option value="Unpaid">Non Pagato</option><option value="Pending">In Sospeso</option>',
+            '<option value="paid">Pagato</option><option value="pending">In Sospeso</option><option value="disputed">Contestato</option><option value="written_off">Annullato</option>',
           provType:
             '<option value="doctor">Medico</option><option value="hospital">Ospedale</option>',
         };
@@ -1022,7 +1022,11 @@
             key: "status",
             label: "Stato",
             type: "select",
-            options: ["Admitted", "Discharged"],
+            options: [
+              { value: "active", label: "Ricoverato (Attivo)" },
+              { value: "discharged", label: "Dimesso" },
+              { value: "transferred", label: "Trasferito" }
+            ],
           },
           {
             key: "admission_type",
@@ -1037,7 +1041,12 @@
             key: "payment_status",
             label: "Stato Pagamento",
             type: "select",
-            options: ["Paid", "Unpaid", "Pending"],
+            options: [
+              { value: "paid", label: "Pagato" },
+              { value: "pending", label: "In Sospeso" },
+              { value: "disputed", label: "Contestato" },
+              { value: "written_off", label: "Annullato" }
+            ],
           },
           { key: "billing_amount", label: "Importo (€)", type: "number" },
           { key: "insurance_provider", label: "Assicurazione", type: "text" },
@@ -1182,10 +1191,17 @@
                 ? new Date(row.discharge_date.$date).toLocaleDateString("it-IT")
                 : new Date(row.discharge_date).toLocaleDateString("it-IT")
               : "N/A";
+            let sc = "badge-muted";
+            let statusLabel = row.status || "N/A";
+            const statLower = (row.status || "").toLowerCase();
+            if (statLower === "active") { sc = "badge-success"; statusLabel = "Ricoverato"; }
+            else if (statLower === "discharged") { sc = "badge-muted"; statusLabel = "Dimesso"; }
+            else if (statLower === "transferred") { sc = "badge-warning"; statusLabel = "Trasferito"; }
+
             return [
               `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
               row.patient_id || "N/A",
-              `<span class="badge ${row.status === "Admitted" ? "badge-success" : "badge-muted"}">${row.status || "N/A"}</span>`,
+              `<span class="badge ${sc}">${statusLabel}</span>`,
               row.admission_type || "N/A",
               inDate,
               outDate,
@@ -1210,14 +1226,18 @@
                 ? `€ ${parseFloat(row.billing_amount).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : "N/A";
             let sc = "badge-muted";
-            if (row.payment_status === "Paid") sc = "badge-success";
-            if (row.payment_status === "Unpaid") sc = "badge-danger";
-            if (row.payment_status === "Pending") sc = "badge-warning";
+            let label = row.payment_status || "N/A";
+            const statusLower = (row.payment_status || "").toLowerCase();
+            if (statusLower === "paid") { sc = "badge-success"; label = "Pagato"; }
+            else if (statusLower === "pending") { sc = "badge-warning"; label = "In Sospeso"; }
+            else if (statusLower === "disputed") { sc = "badge-danger"; label = "Contestato"; }
+            else if (statusLower === "written_off") { sc = "badge-danger"; label = "Annullato"; }
+
             return [
               `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
               row.patient_id || "N/A",
               amountStr,
-              `<span class="badge ${sc}">${row.payment_status || "N/A"}</span>`,
+              `<span class="badge ${sc}">${label}</span>`,
               row.insurance_provider || "N/A",
             ];
           };
@@ -1312,10 +1332,11 @@
           const val = row[f.key] !== undefined ? row[f.key] : "";
           if (f.type === "select") {
             const opts = f.options
-              .map(
-                (o) =>
-                  `<option value="${o}" ${o == val ? "selected" : ""}>${o}</option>`,
-              )
+              .map((o) => {
+                const optVal = typeof o === "object" ? o.value : o;
+                const optLabel = typeof o === "object" ? o.label : o;
+                return `<option value="${optVal}" ${optVal == val ? "selected" : ""}>${optLabel}</option>`;
+              })
               .join("");
             fieldsHtml += `<label><span>${f.label}</span><select id="ef-${idx}-${f.key}">${opts}</select></label>`;
           } else {

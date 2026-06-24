@@ -18,7 +18,6 @@ class PKIClient: NSObject, URLSessionDelegate {
     }
     
     func enroll(cn: String, role: String, department: String, enrollmentSessionToken: String = "") async throws -> String {
-        // ... (metodo enroll già implementato e funzionante)
         let challengeUrl = URL(string: "\(serverUrl)/api/challenge")!
         let (cData, _) = try await pkiSession.data(from: challengeUrl)
         let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
