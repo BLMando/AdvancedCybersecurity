@@ -125,27 +125,18 @@ get_cert_title(cert) := val if {
 }
 
 user_role_map := {
-	"mario.rossi":    "doctor",
-	"anna.verdi":     "billing_staff",
-	"giulia.bianchi": "auditor",
-	"luca.ferrari":   "receptionist",
-	"admin":          "admin",
-	"test.user":      "auditor",
-	"paolo.roselli":  "doctor",
-	"mattia.mando":   "doctor",
-	"test.doctor":    "doctor"
+	"test.doctor":    "doctor",
+	"test.auditor":  "auditor",
+	"test.billing":   "billing_staff",
+	"test.reception": "receptionist"
+
 }
 
 known_users := {
-	"mario.rossi",
-	"anna.verdi",
-	"giulia.bianchi", 
-	"luca.ferrari",
-	"admin",
-	"test.user",
-	"paolo.roselli",
-	"mattia.mando",
-	"test.doctor"
+	"test.doctor",
+	"test.auditor",
+	"test.billing",
+	"test.reception"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {

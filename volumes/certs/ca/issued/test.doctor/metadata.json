@@ -2,10 +2,10 @@
   "department": "Cardiologia",
   "enrollment_method": "hardware_proof",
   "hardware": {
-    "cpu": "Apple M4",
-    "mac": "A4E15032-0E91-5FFA-A80D-A693E486C4FB"
+    "cpu": "AMD Ryzen 7 5700U with Radeon Graphics",
+    "mac": "00-15-5D-FA-C3-4F"
   },
   "role": "doctor",
-  "timestamp": "2026-06-24T20:37:14.740338+00:00",
+  "timestamp": "2026-06-24T21:24:57.017928+00:00",
   "user": "test.doctor"
 }
