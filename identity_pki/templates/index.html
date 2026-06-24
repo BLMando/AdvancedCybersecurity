@@ -1809,13 +1809,33 @@
         });
 
       // CN to Corporate Email Map for Query Auth Modal
-      const cnToEmailMap = {
+      let cnToEmailMap = {
         "mario.rossi": "dr.mario.rossi@ospedale.it",
         "anna.verdi": "anna.verdi@ospedale.it",
         "giulia.bianchi": "giulia.bianchi@ospedale.it",
         "luca.ferrari": "luca.ferrari@ospedale.it",
         "paolo.roselli": "paolo.roselli@ospedale.it",
       };
+
+      async function loadADUsers() {
+        const select = document.getElementById("login-email");
+        if (!select) return;
+        try {
+          const response = await fetch("/api/auth/users");
+          const users = await response.json();
+          select.innerHTML = "";
+          cnToEmailMap = {};
+          for (const [email, info] of Object.entries(users)) {
+            cnToEmailMap[info.cn] = email;
+            const opt = document.createElement("option");
+            opt.value = email;
+            opt.textContent = `${email} (${info.cn} - ${info.role}/${info.department})`;
+            select.appendChild(opt);
+          }
+        } catch (err) {
+          console.error("Failed to load AD users:", err);
+        }
+      }
 
       let primaryAuthCallbacks = null;
 
@@ -2175,6 +2195,9 @@
             submitBtn.textContent = "Invia Query mTLS";
           }
         });
+
+      // Fetch AD users dynamically on page load
+      loadADUsers();
     </script>
   </body>
 </html>

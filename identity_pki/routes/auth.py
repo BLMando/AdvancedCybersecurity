@@ -16,6 +16,20 @@ from .utils import error_response
 auth_bp = Blueprint("auth", __name__)
 
 
+@auth_bp.get("/api/auth/users")
+def api_auth_users():
+    """Get simulated AD users for frontend login dropdown."""
+    users = {
+        email: {
+            "cn": info["cn"],
+            "role": info["role"],
+            "department": info["department"]
+        }
+        for email, info in AD_USERS.items()
+    }
+    return jsonify(users)
+
+
 @auth_bp.post("/api/auth/login")
 def api_auth_login():
     """Simulate Active Directory login and send OTP."""
