@@ -79,7 +79,7 @@ anomaly_risk := boost if {
 	# Effettua la richiesta sincrona a Splunk tramite il forwarder locale
 	resp := http.send({
 		"method": "POST",
-		"url": "http://opa-splunk-forwarder:5000/api/stats",
+		"url": "http://zta-log-forwarder:5000/api/stats",
 		"headers": {"Content-Type": "application/json"},
 		"body": {
 			"user": identity.user_identity,

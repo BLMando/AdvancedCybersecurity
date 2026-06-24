@@ -7,7 +7,7 @@ static_resources:
           address: 0.0.0.0
           port_value: 10000
       # Access log records every connection decision to a shared volume
-      # that the opa-splunk-forwarder reads and ships to Splunk.
+      # that the zta-log-forwarder reads and ships to Splunk.
       access_log:
         - name: envoy.access_loggers.file
           typed_config:

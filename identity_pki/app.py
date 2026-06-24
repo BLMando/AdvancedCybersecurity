@@ -143,7 +143,7 @@ def _send_audit_event_impl(logger: logging.Logger, user, role, collection, actio
                 "hardware_mode": hardware_mode,
             }).encode("utf-8")
             req = urllib.request.Request(
-                "http://opa-splunk-forwarder:5000/api/audit",
+                "http://zta-log-forwarder:5000/api/audit",
                 data=audit_payload,
                 headers={"Content-Type": "application/json"},
                 method="POST"
