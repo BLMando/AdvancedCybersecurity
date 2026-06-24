@@ -25,8 +25,6 @@ static_resources:
                 user: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-user)%"
                 device: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-device)%"
                 network_ip: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-network)%"
-                resource: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-collection)%"
-                command: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-command)%"
                 decision: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-decision)%"
                 risk_score: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-risk-score)%"
       listener_filters:

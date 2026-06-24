@@ -59,8 +59,6 @@ def extract_envoy_fields(log_entry: dict) -> dict:
         "user": log_entry.get("user") or "unknown",
         "device": log_entry.get("device") or "no-tpm",
         "network_ip": log_entry.get("network_ip") or "0.0.0.0",
-        "resource": log_entry.get("resource") or "unknown",
-        "command": log_entry.get("command") or "unknown",
         "decision": log_entry.get("decision") or "unknown",
         "risk_score": log_entry.get("risk_score") or "0",
     }
