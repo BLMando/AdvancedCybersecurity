@@ -9,6 +9,10 @@ import future.keywords
 user_identity := sanitize_user(raw_user)
 
 raw_user := user if {
+	claims := token_claims
+	user := claims.sub
+	user != ""
+} else := user if {
 	attrs := object.get(input, "attributes", {})
 	source := object.get(attrs, "source", {})
 	user := object.get(source, "principal", "")
@@ -87,6 +91,16 @@ is_internal_network if {
 # ─── Role Mapping & Matrix ────────────────────────────────────────────────────
 
 current_role := role if {
+	claims := token_claims
+	is_array(claims.role)
+	role := claims.role[0]
+	role != ""
+} else := role if {
+	claims := token_claims
+	is_string(claims.role)
+	role := claims.role
+	role != ""
+} else := role if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
 	cert_pem := urlquery.decode(cert_pem_raw)
@@ -245,6 +259,28 @@ verify_oidc_jwt(token) := claims if {
 	io.jwt.verify_rs256(token, jwks)
 	[_, claims, _] := io.jwt.decode(token)
 }
+
+# Helpers for Step-Up Authentication status
+token_claims := claims if {
+	payload_val := oidc_payload_field
+	payload_val != ""
+	token := extract_jwt_from_payload(payload_val)
+	token != "unknown"
+	claims := verify_oidc_jwt(token)
+}
+
+token_has_step_up if {
+	claims := token_claims
+	claims.step_up == true
+}
+
+token_step_up_fresh if {
+	claims := token_claims
+	claims.step_up == true
+	now_seconds := time.now_ns() / 1000000000
+	now_seconds - claims.step_up_time < 120
+}
+
 
 is_valid_token_binding(claims, cert_subject_cn) if {
 	# Direct client: CN matches sub, cert fingerprint matches cnf

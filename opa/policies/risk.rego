@@ -56,7 +56,7 @@ content_risk := 0 if {
 	identity.is_http_request
 } else := 100 if {
 	identity.normalized_collection_name == "clinical_records"
-	identity.action_name in {"find", "update"}
+	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 } else := 100 if {
 	identity.normalized_collection_name == "billing"
@@ -79,7 +79,7 @@ anomaly_risk := boost if {
 	# Effettua la richiesta sincrona a Splunk tramite il forwarder locale
 	resp := http.send({
 		"method": "POST",
-		"url": "http://opa-splunk-forwarder:5000/api/stats",
+		"url": "http://zta-log-forwarder:5000/api/stats",
 		"headers": {"Content-Type": "application/json"},
 		"body": {
 			"user": identity.user_identity,

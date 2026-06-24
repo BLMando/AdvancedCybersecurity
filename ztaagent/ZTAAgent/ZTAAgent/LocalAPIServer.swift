@@ -44,7 +44,6 @@ class LocalAPIServer {
         let method = parts[0]
         let path = parts[1]
         
-        // Handle CORS OPTIONS preflight requests globally
         if method == "OPTIONS" {
             self.sendOptionsResponse(connection: connection)
             return
@@ -96,8 +95,9 @@ class LocalAPIServer {
                 let cn = json?["common_name"] ?? "unknown"
                 let role = json?["role"] ?? "doctor"
                 let dept = json?["department"] ?? "Cardiologia"
+                let sessionToken = json?["enrollment_session_token"] ?? ""
                 
-                let result = try await PKIClient.shared.enroll(cn: cn, role: role, department: dept)
+                let result = try await PKIClient.shared.enroll(cn: cn, role: role, department: dept, enrollmentSessionToken: sessionToken)
                 let responseDict = ["status": "success", "message": result]
                 if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                    let responseString = String(data: responseData, encoding: .utf8) {
@@ -173,46 +173,67 @@ class LocalAPIServer {
         var items: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &items)
 
-        guard status == errSecSuccess else {
-            self.sendResponse(body: "{\"error\": \"Keychain empty\"}", status: "404 Not Found", connection: connection)
-            return
-        }
+        var targetCert: SecCertificate?
+        if status == errSecSuccess {
+            let allCerts: [SecCertificate]
+            if CFGetTypeID(items!) == CFArrayGetTypeID() {
+                allCerts = items as! [SecCertificate]
+            } else {
+                allCerts = [items as! SecCertificate]
+            }
 
-        let allCerts: [SecCertificate]
-        if CFGetTypeID(items!) == CFArrayGetTypeID() {
-            allCerts = items as! [SecCertificate]
-        } else {
-            allCerts = [items as! SecCertificate]
-        }
-
-        for cert in allCerts {
-            let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? ""
-            if summary == cn {
-                // Esporta il DER e converti in PEM
-                let derData = SecCertificateCopyData(cert) as Data
-                let b64 = derData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
-                let pem = "-----BEGIN CERTIFICATE-----\n\(b64)\n-----END CERTIFICATE-----\n"
-
-                let responseDict: [String: Any] = [
-                    "cert_pem": pem,
-                    "common_name": cn,
-                    "key_available": false,  // La chiave è nel Secure Enclave, non esportabile
-                    "source": "keychain"
-                ]
-                if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
-                   let responseString = String(data: responseData, encoding: .utf8) {
-                    print("[✓] Certificato PEM esportato per \(cn)")
-                    self.sendResponse(body: responseString, connection: connection)
+            for cert in allCerts {
+                let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? ""
+                if summary == cn {
+                    targetCert = cert
+                    break
                 }
-                return
             }
         }
 
-        self.sendResponse(
-            body: "{\"error\": \"Certificate for CN '\(cn)' not found in Keychain\"}",
-            status: "404 Not Found",
-            connection: connection
-        )
+        if let cert = targetCert {
+            // Esporta il DER e converti in PEM
+            let derData = SecCertificateCopyData(cert) as Data
+            let b64 = derData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+            let pem = "-----BEGIN CERTIFICATE-----\n\(b64)\n-----END CERTIFICATE-----\n"
+
+            let responseDict: [String: Any] = [
+                "cert_pem": pem,
+                "common_name": cn,
+                "key_available": false,  // La chiave è nel Secure Enclave, non esportabile
+                "source": "keychain"
+            ]
+            if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+               let responseString = String(data: responseData, encoding: .utf8) {
+                print("[✓] Certificato PEM esportato per \(cn)")
+                self.sendResponse(body: responseString, connection: connection)
+            }
+        } else {
+            // Fallback file-based
+            let certFile = HardwareManager.shared.ztaDir.appendingPathComponent("\(cn).crt")
+            if FileManager.default.fileExists(atPath: certFile.path),
+               let certData = try? Data(contentsOf: certFile) {
+                let b64 = certData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
+                let pem = "-----BEGIN CERTIFICATE-----\n\(b64)\n-----END CERTIFICATE-----\n"
+                let responseDict: [String: Any] = [
+                    "cert_pem": pem,
+                    "common_name": cn,
+                    "key_available": true,
+                    "source": "file"
+                ]
+                if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
+                   let responseString = String(data: responseData, encoding: .utf8) {
+                    print("[✓] Certificato PEM caricato da file per \(cn) (fallback)")
+                    self.sendResponse(body: responseString, connection: connection)
+                }
+            } else {
+                self.sendResponse(
+                    body: "{\"error\": \"Certificate for CN '\(cn)' not found in Keychain or file system\"}",
+                    status: "404 Not Found",
+                    connection: connection
+                )
+            }
+        }
     }
 
     private func handleAuth(request: String, connection: NWConnection) {
@@ -249,11 +270,12 @@ class LocalAPIServer {
         
         Task {
             do {
-                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
-                let cn = json?["common_name"] ?? json?["user"] ?? "paolo.roselli"
+                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+                let cn = json?["common_name"] as? String ?? json?["user"] as? String ?? "paolo.roselli"
+                let stepUp = (json?["step_up"] as? Bool ?? false) || (json?["step_up"] as? String == "true")
                 
-                print("[*] Generazione token OIDC con biometric sblocco per: \(cn)")
-                let token = try await PKIClient.shared.getOidcToken(cn: cn)
+                print("[*] Generazione token OIDC con biometric sblocco per: \(cn), stepUp: \(stepUp)")
+                let token = try await PKIClient.shared.getOidcToken(cn: cn, stepUp: stepUp)
                 
                 let responseDict = [
                     "status": "success",
@@ -267,7 +289,15 @@ class LocalAPIServer {
                 }
             } catch {
                 print("[!] Error generating OIDC token: \(error)")
-                self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
+                let nsErr = error as NSError
+                if nsErr.domain == "com.zta" {
+                    let desc = nsErr.userInfo[NSLocalizedDescriptionKey] as? String ?? ""
+                    let cleanDesc = desc.replacingOccurrences(of: "Server error: ", with: "")
+                    let status = nsErr.code == 401 ? "401 Unauthorized" : "500 Error"
+                    self.sendResponse(body: cleanDesc, status: status, connection: connection)
+                } else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
+                }
             }
         }
     }

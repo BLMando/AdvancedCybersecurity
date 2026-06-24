@@ -25,6 +25,45 @@ role_action_allowed if {
 
 # ─── Hard-Deny Rules ──────────────────────────────────────────────────────────
 
+# Actions update and delete are sensitive and require step-up
+is_sensitive_action if {
+	identity.action_name in {"update", "delete"}
+}
+
+# Queries on billing for amounts > 5000 are sensitive and require step-up
+is_sensitive_action if {
+	identity.normalized_collection_name == "billing"
+	walk(identity.query_doc, [path, value])
+	some segment in path
+	is_string(segment)
+	segment in {"billing_amount", "billing_amount_approx"}
+	is_number(value)
+	value > 5000
+}
+
+is_sensitive_action if {
+	identity.normalized_collection_name == "billing"
+	walk(identity.query_doc, [path, value])
+	some segment in path
+	is_string(segment)
+	segment in {"billing_amount", "billing_amount_approx"}
+	walk(value, [sub_path, sub_value])
+	is_number(sub_value)
+	sub_value > 5000
+}
+
+# Block sensitive actions unless there is a fresh step-up token
+hard_deny if {
+	is_sensitive_action
+	not identity.token_has_step_up
+}
+
+hard_deny if {
+	is_sensitive_action
+	identity.token_has_step_up
+	not identity.token_step_up_fresh
+}
+
 hard_deny if {
 	identity.current_role == "unknown"
 }
@@ -49,7 +88,7 @@ hard_deny if {
 inspection_violation if {
 	not identity.is_http_request
 	identity.normalized_collection_name == "clinical_records"
-	identity.action_name in {"find", "update"}
+	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 }
 

@@ -7,10 +7,13 @@ This project demonstrates a production-grade defense-in-depth system where ident
 ## 🚀 Key Features
 
 *   **Native macOS Agent**: Swift 6 agent managing Secure Enclave keys and mTLS handshakes.
-*   **Hardware-Bound Identity**: Private keys are non-exportable, stored in the **Secure Enclave (SEP)**.
-*   **Automated PKI**: Dynamic CA with automated Envoy server certificate synchronization.
-*   **Protocol-Aware Protection**: Envoy L7 inspection of MongoDB BSON traffic.
-*   **Risk-Based Authorization**: OPA policy engine evaluating user, device, and network risk.
+*   **Windows TPM Agent**: PowerShell/.NET agent leveraging TPM 2.0 via Windows CNG/Schannel for hardware-bound mTLS.
+*   **Hardware-Bound Identity**: Private keys are non-exportable, stored in the **Secure Enclave (SEP)** or **TPM 2.0**.
+*   **4-Layer Authentication**: Primary Session (12h MFA) → Hardware Certificate → Biometrics → Step-Up MFA (120s freshness for sensitive ops).
+*   **Automated PKI with OIDC & RFC 8705**: Dynamic CA with RFC 8705 Token Binding — JWTs are cryptographically bound to the hardware certificate.
+*   **Protocol-Aware Protection**: Envoy L7 inspection of MongoDB BSON traffic with Row-Level Security (RLS) views.
+*   **Risk-Based Authorization**: OPA policy engine evaluating user role, device hardware health, network risk, and Splunk-fed dynamic risk scoring.
+*   **CRL Integration**: Automatic CRL generation and Envoy-side certificate revocation enforcement.
 
 ## 🏗️ Architecture
 
@@ -42,13 +45,12 @@ python3 scripts/enroll.py --cn "paolo.roselli" --role "doctor" --department "Car
 ```
 *Note: This will trigger a Touch ID / Password prompt to authorize key generation.*
 
-### 5. Multi-Layer Authentication
-Verify your identity and access the protected resource:
-```bash
-python3 scripts/authenticate.py --cn "paolo.roselli"
-```
-*   **Layer 1**: Proof of Possession of the hardware key.
-*   **Layer 2**: mTLS handshake with Envoy (Hardware identity).
+### 5. Authenticate and Query
+Open the Web Console at `http://localhost:8080`:
+1. **Primary Authentication** (first time or after 12h): Enter your AD credentials (email + password) and the OTP shown on screen to establish a primary session.
+2. **Hardware Biometric Query**: Select a user and collection, then click **Submit mTLS Query**. Touch ID / Windows Hello will be prompted once per session.
+3. **Step-Up Auth** (for `update`/`delete` or billing > 5000): The console automatically prompts for a fresh OTP before executing sensitive operations.
+4. **Auto-Retry**: If a session expires mid-workflow, the console re-prompts for auth and automatically retries the original query.
 
 ## 📁 Repository Structure
 
@@ -63,10 +65,13 @@ python3 scripts/authenticate.py --cn "paolo.roselli"
 
 ## ⚖️ Security Principles
 
-*   **Trust Nothing**: Every request is authenticated and authorized.
-*   **Hardware Roots of Trust**: Identity cannot be cloned or exported from the device.
-*   **Fail-Closed**: Access is denied if any security layer fails.
-*   **Least Privilege**: Access granted only to the specific resources required.
+*   **Trust Nothing**: Every request is authenticated and authorized — no implicit trust based on network location.
+*   **Hardware Roots of Trust**: Identity cannot be cloned or exported from the device (SEP / TPM).
+*   **Human Session Gating**: Certificate validity ≠ session validity. A 12-hour primary session (AD Login + OTP) ensures a human is present, independent of the certificate's cryptographic validity.
+*   **Step-Up MFA**: Sensitive operations require a fresh OTP within 120 seconds, reducing the blast radius of compromised sessions.
+*   **RFC 8705 Token Binding**: JWTs are bound to the hardware certificate via `cnf` claim — stolen tokens cannot be reused from another machine.
+*   **Fail-Closed**: Access is denied if any security layer fails, expires, or is unavailable.
+*   **Least Privilege**: Access granted only to the specific resources required (RLS views, OPA policy matrix).
 
 ## 📜 References
 * [NIST SP 800-207 (Zero Trust Architecture)](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf)

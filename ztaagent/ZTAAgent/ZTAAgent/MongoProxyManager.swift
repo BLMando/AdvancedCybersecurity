@@ -28,7 +28,6 @@ class MongoProxySession {
     
     func start() throws {
         let localPort = NWEndpoint.Port(rawValue: self.port)!
-        // Bind parameters on localhost loopback ONLY to prevent external clients from connecting to our local plain socket
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(IPv4Address("127.0.0.1")!), port: .any)
         
@@ -100,7 +99,6 @@ class MongoProxySession {
             
             if let error = error {
                 let errDesc = error.localizedDescription
-                // Suppress common benign socket closure errors in logs
                 if !errDesc.contains("No message available on STREAM") &&
                    !errDesc.contains("Operation canceled") &&
                    !errDesc.contains("Socket is not connected") {
@@ -143,68 +141,10 @@ class MongoProxySession {
     }
     
     private func findIdentity(cn: String) throws -> SecIdentity {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassCertificate,
-            kSecReturnRef as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-        
-        var items: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &items)
-        guard status == errSecSuccess else {
-            print("[DEBUG] SecItemCopyMatching fallito con status: \(status)")
-            throw NSError(domain: "ZTA", code: 1, userInfo: [NSLocalizedDescriptionKey: "Keychain vuoto o accesso negato"])
-        }
-        
-        let certificates: [SecCertificate]
-        if CFGetTypeID(items!) == CFArrayGetTypeID() {
-            certificates = items as! [SecCertificate]
-        } else {
-            certificates = [items as! SecCertificate]
-        }
-        
-        var targetCert: SecCertificate?
-        for cert in certificates {
-            let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Senza nome"
-            if summary == cn {
-                targetCert = cert
-                break
-            }
-        }
-        
-        guard let cert = targetCert else {
-            throw NSError(domain: "ZTA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Identità per \(cn) non trovata nel Keychain"])
-        }
-        
-        // Cerca la chiave privata associando il contesto biometrico attivo per consentire il riutilizzo del Touch ID
-        let label = "com.zta.identity.\(cn)"
-        let tag = label.data(using: .utf8)!
-        var keyQuery: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrApplicationTag as String: tag,
-            kSecReturnRef as String: true
-        ]
-        if let context = PKIClient.shared.activeLAContext {
-            keyQuery[kSecUseAuthenticationContext as String] = context
-        }
-        
-        var keyItem: CFTypeRef?
-        let keyStatus = SecItemCopyMatching(keyQuery as CFDictionary, &keyItem)
-        
-        if keyStatus == errSecSuccess, let privateKey = keyItem as! SecKey?,
-           let identity = SecIdentityCreate(nil, cert, privateKey) {
-            print("[✓] Identità mTLS creata con successo combinando il Certificato e la SecKey con LAContext per \(cn)!")
+        if let identity = HardwareManager.shared.getIdentity(for: cn, context: PKIClient.shared.activeLAContext) {
             return identity
-        } else {
-            print("[!] Query chiave o SecIdentityCreate fallita con status \(keyStatus). Uso fallback SecIdentityCreateWithCertificate...")
-            var identity: SecIdentity?
-            let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
-            if idStatus == errSecSuccess, let id = identity {
-                print("[✓] Identità creata con successo per \(cn) (fallback)!")
-                return id
-            }
-            throw NSError(domain: "ZTA", code: 3, userInfo: [NSLocalizedDescriptionKey: "Impossibile creare identità per \(cn) (status \(idStatus))"])
         }
+        throw NSError(domain: "ZTA", code: 2, userInfo: [NSLocalizedDescriptionKey: "Identità per \(cn) non trovata"])
     }
     
     private func buildTLSParameters(for cn: String) throws -> NWParameters {
@@ -216,7 +156,6 @@ class MongoProxySession {
             sec_identity_create(identity)!
         )
         
-        // Accetta il certificato di Envoy auto-firmato per il lab
         sec_protocol_options_set_verify_block(tlsOptions.securityProtocolOptions, { _, _, complete in
             complete(true)
         }, .main)
@@ -233,7 +172,6 @@ class MongoProxyManager {
     private let lock = NSLock()
     
     func startSession(cn: String, ttl: TimeInterval) async throws -> (port: UInt16, token: String) {
-        // Gating biometrico: prompt Touch ID / password
         let context = LAContext()
         context.touchIDAuthenticationAllowableReuseDuration = 60.0
         var error: NSError?
@@ -257,7 +195,6 @@ class MongoProxyManager {
         lock.lock()
         defer { lock.unlock() }
         
-        // Ricerca di una porta libera
         var port = nextPort
         while sessions.values.contains(where: { $0.port == port }) {
             port += 1
@@ -269,7 +206,6 @@ class MongoProxyManager {
         
         sessions[session.sessionToken] = session
         
-        // Rilascio automatico dopo il TTL
         let delay = Int(ttl)
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(delay)) {
             self.stopSession(token: session.sessionToken)

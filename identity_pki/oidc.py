@@ -64,7 +64,7 @@ def get_jwks():
     }
     return {"keys": [jwk]}
 
-def issue_jwt(user, role, cert_sha256_hex):
+def issue_jwt(user, role, cert_sha256_hex, step_up=False):
     """Issue a signed JWT token containing claims and the certificate fingerprint (cnf)."""
     header = {
         "alg": "RS256",
@@ -90,6 +90,9 @@ def issue_jwt(user, role, cert_sha256_hex):
             "x5t#S256_hex": cert_sha256_hex
         }
     }
+    if step_up:
+        payload["step_up"] = True
+        payload["step_up_time"] = now
 
     
     def b64url_encode(data):

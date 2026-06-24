@@ -1,12 +1,3 @@
-"""
-ZTA Healthcare Database — Schema Validation & Collection Setup
-Equivalent of init-healthcare.js, ported to Python (pymongo).
-
-Usage:
-    python3 mongo/init-healthcare.py
-    python3 mongo/init-healthcare.py --uri mongodb://admin:secret@localhost:27017
-"""
-
 import argparse
 from dotenv import load_dotenv
 import os
@@ -21,7 +12,7 @@ try:
 except ImportError:
     ZTA_ROLES = {}
 
-load_dotenv()  # Load .env variables (e.g. MongoDB credentials)
+load_dotenv() 
 
 MONGO_URI = os.getenv(
     "MONGODB_URI", "mongodb://zta_user:zta_password@localhost:27017")
@@ -62,10 +53,7 @@ for col in ["patients", "admissions", "clinical_records", "billing", "providers"
     safe_drop(col)
 
 
-# ─── 1. PATIENTS — Identity layer (SENSITIVE) ─────────────────────────────────
-# Contains: demographic data and PII.
-# Accessible by: admin (CRUD), doctor/nurse (R), receptionist (R),
-#                billing_staff (R — limited fields).
+# ─── 1. PATIENTS ─────────────────────────────────
 db.create_collection(
     "patients",
     validator={
@@ -90,12 +78,10 @@ db.create_collection(
 )
 db.patients.create_index([("full_name", ASCENDING)])
 db.patients.create_index([("age", ASCENDING)])
-print("✓  Collection: patients")
+print("Collection: patients")
 
 
 # ─── 2. PROVIDERS — Doctors & Hospitals (INTERNAL) ───────────────────────────
-# Contains: doctor names, hospital names.
-# Accessible by: all authenticated users (R), admin (CRUD).
 db.create_collection(
     "providers",
     validator={
@@ -116,13 +102,10 @@ db.create_collection(
     validationAction="error",
 )
 db.providers.create_index([("type", ASCENDING), ("name", ASCENDING)])
-print("✓  Collection: providers")
+print("Collection: providers")
 
 
-# ─── 3. ADMISSIONS — Encounter records (SENSITIVE) ───────────────────────────
-# Contains: admission dates, type, room, discharge, FK to patient & provider.
-# Accessible by: admin (CRUD), doctor (CRUD), receptionist (CRUD),
-#                nurse (R), auditor (R).
+# ─── 3. ADMISSIONS  ───────────────────────────
 db.create_collection(
     "admissions",
     validator={
@@ -156,12 +139,10 @@ db.admissions.create_index([("patient_id", ASCENDING)])
 db.admissions.create_index([("doctor_id", ASCENDING)])
 db.admissions.create_index([("date_of_admission", DESCENDING)])
 db.admissions.create_index([("status", ASCENDING)])
-print("✓  Collection: admissions")
+print("Collection: admissions")
 
 
-# ─── 4. CLINICAL_RECORDS — Medical data (MOST SENSITIVE) ─────────────────────
-# Contains: diagnosis, medication, test results.
-# Accessible by: admin (CRUD), doctor (CRUD), nurse (R). ALL OTHERS: DENY.
+# ─── 4. CLINICAL_RECORDS  ─────────────────────
 db.create_collection(
     "clinical_records",
     validator={
@@ -193,12 +174,10 @@ db.clinical_records.create_index([("patient_id", ASCENDING)])
 db.clinical_records.create_index([("admission_id", ASCENDING)])
 db.clinical_records.create_index([("medical_condition", ASCENDING)])
 db.clinical_records.create_index([("test_results", ASCENDING)])
-print("✓  Collection: clinical_records")
+print("Collection: clinical_records")
 
 
-# ─── 5. BILLING — Financial records (SENSITIVE) ───────────────────────────────
-# Contains: billing amounts, insurance provider, FK to admission & patient.
-# Accessible by: admin (CRUD), billing_staff (CRUD), auditor (R). ALL OTHERS: DENY.
+# ─── 5. BILLING — Financial records ───────────────────────────────
 db.create_collection(
     "billing",
     validator={
@@ -230,7 +209,7 @@ db.billing.create_index([("patient_id", ASCENDING)])
 db.billing.create_index([("admission_id", ASCENDING)])
 db.billing.create_index([("insurance_provider", ASCENDING)])
 db.billing.create_index([("payment_status", ASCENDING)])
-print("✓  Collection: billing")
+print("Collection: billing")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -259,12 +238,12 @@ db.command("create", "v_patients_doctor", viewOn="patients", pipeline=[
             "full_name": 1,
             "age": 1,
             "gender": 1,
-            "blood_type": 1,   # ← visible: clinically relevant
+            "blood_type": 1, 
             "created_at": 1,
         }
     }
 ])
-print("✓  View: v_patients_doctor")
+print("View: v_patients_doctor")
 
 
 # ─── VIEW: patients — billing_staff ───────────────────────────────────────────
@@ -280,7 +259,7 @@ db.command("create", "v_patients_billing", viewOn="patients", pipeline=[
         }
     }
 ])
-print("✓  View: v_patients_billing")
+print("View: v_patients_billing")
 
 
 # ─── VIEW: patients — receptionist ────────────────────────────────────────────
@@ -297,7 +276,7 @@ db.command("create", "v_patients_reception", viewOn="patients", pipeline=[
         }
     }
 ])
-print("✓  View: v_patients_reception")
+print("View: v_patients_reception")
 
 
 # ─── VIEW: admissions — doctor / receptionist ─────────────────────────────────
@@ -312,9 +291,9 @@ _admissions_full_pipeline = [
     }
 ]
 db.command("create", "v_admissions_doctor",    viewOn="admissions", pipeline=_admissions_full_pipeline)
-print("✓  View: v_admissions_doctor")
+print("View: v_admissions_doctor")
 db.command("create", "v_admissions_reception", viewOn="admissions", pipeline=_admissions_full_pipeline)
-print("✓  View: v_admissions_reception")
+print("View: v_admissions_reception")
 
 
 # ─── VIEW: admissions — billing_staff ─────────────────────────────────────────
@@ -329,7 +308,7 @@ db.command("create", "v_admissions_billing", viewOn="admissions", pipeline=[
         }
     }
 ])
-print("✓  View: v_admissions_billing")
+print("View: v_admissions_billing")
 
 
 # ─── VIEW: admissions — auditor ───────────────────────────────────────────────
@@ -343,7 +322,7 @@ db.command("create", "v_admissions_auditor", viewOn="admissions", pipeline=[
         }
     }
 ])
-print("✓  View: v_admissions_auditor")
+print("View: v_admissions_auditor")
 
 
 # ─── VIEW: clinical_records — doctor ──────────────────────────────────────────
@@ -357,13 +336,11 @@ db.command("create", "v_clinical_doctor", viewOn="clinical_records", pipeline=[
         }
     }
 ])
-print("✓  View: v_clinical_doctor")
+print("View: v_clinical_doctor")
 
 
 # ─── VIEW: clinical_records — auditor ─────────────────────────────────────────
 # Auditors see clinical data for compliance but patient name is masked
-# to initials (joined from patients collection via $lookup).
-# This prevents the auditor from identifying specific individuals.
 db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
     {
         "$lookup": {
@@ -421,7 +398,7 @@ db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
         }
     },
 ])
-print("✓  View: v_clinical_auditor")
+print("View: v_clinical_auditor")
 
 
 # ─── VIEW: billing — billing_staff ────────────────────────────────────────────
@@ -435,7 +412,7 @@ db.command("create", "v_billing_staff", viewOn="billing", pipeline=[
         }
     }
 ])
-print("✓  View: v_billing_staff")
+print("View: v_billing_staff")
 
 
 # ─── VIEW: billing — auditor ──────────────────────────────────────────────────
@@ -471,7 +448,7 @@ db.command("create", "v_billing_auditor", viewOn="billing", pipeline=[
         }
     },
 ])
-print("✓  View: v_billing_auditor")
+print("View: v_billing_auditor")
 
 
 # ─── VIEW: providers — all roles ──────────────────────────────────────────────
@@ -479,7 +456,7 @@ print("✓  View: v_billing_auditor")
 db.command("create", "v_providers_all", viewOn="providers", pipeline=[
     {"$project": {"_id": 1, "type": 1, "name": 1}}
 ])
-print("✓  View: v_providers_all")
+print("View: v_providers_all")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -568,28 +545,28 @@ for role_doc in roles_def:
     db.command("createRole", role_doc["role"],
                privileges=role_doc["privileges"],
                roles=role_doc["roles"])
-    print(f"✓  Role created: {role_doc['role']}")
+    print(f"Role created: {role_doc['role']}")
 
 
-# ─── MongoDB Users ─────────────────────────────────────────────────────────────
-users_def = [
-    {"user": "mario.rossi",    "pwd": "MarioRossi2024!",    "roles": [{"role": "zta_doctor",       "db": "zta_db"}]},
-    {"user": "anna.verdi",     "pwd": "AnnaVerdi2024!",     "roles": [{"role": "zta_billing",      "db": "zta_db"}]},
-    {"user": "giulia.bianchi", "pwd": "GiuliaBianchi2024!", "roles": [{"role": "zta_auditor",      "db": "zta_db"}]},
-    {"user": "luca.ferrari",   "pwd": "LucaFerrari2024!",   "roles": [{"role": "zta_receptionist", "db": "zta_db"}]},
-]
+# # ─── MongoDB Users ─────────────────────────────────────────────────────────────
+# users_def = [
+#     {"user": "mario.rossi",    "pwd": "MarioRossi2024!",    "roles": [{"role": "zta_doctor",       "db": "zta_db"}]},
+#     {"user": "anna.verdi",     "pwd": "AnnaVerdi2024!",     "roles": [{"role": "zta_billing",      "db": "zta_db"}]},
+#     {"user": "giulia.bianchi", "pwd": "GiuliaBianchi2024!", "roles": [{"role": "zta_auditor",      "db": "zta_db"}]},
+#     {"user": "luca.ferrari",   "pwd": "LucaFerrari2024!",   "roles": [{"role": "zta_receptionist", "db": "zta_db"}]},
+# ]
 
-for user_doc in users_def:
-    try:
-        db.command("dropUser", user_doc["user"])
-    except OperationFailure:
-        pass
-    db.command(
-        "createUser", user_doc["user"],
-        pwd=user_doc["pwd"],
-        roles=user_doc["roles"],
-    )
-    print(f"✓  User created: {user_doc['user']}")
+# for user_doc in users_def:
+#     try:
+#         db.command("dropUser", user_doc["user"])
+#     except OperationFailure:
+#         pass
+#     db.command(
+#         "createUser", user_doc["user"],
+#         pwd=user_doc["pwd"],
+#         roles=user_doc["roles"],
+#     )
+#     print(f"User created: {user_doc['user']}")
 
 # Create the Envoy proxy X.509 user in $external database
 db_external = client["$external"]
@@ -607,10 +584,10 @@ try:
         ],
         roles=[]
     )
-    print("✓  Role 'impersonatorRole' created in admin")
+    print("Role 'impersonatorRole' created in admin")
 except OperationFailure as e:
     if "already exists" in str(e):
-        print("✓  Role 'impersonatorRole' already exists")
+        print("Role 'impersonatorRole' already exists")
     else:
         print(f"Warning: Failed to create impersonatorRole: {e}")
 
@@ -626,7 +603,7 @@ db_external.command(
     "createUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT",
     roles=envoy_roles
 )
-print("✓  X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
+print("X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
 
 print("\n╔══════════════════════════════════════════════════════════════╗")
 print("║  RLS complete: views + roles + users ready.                 ║")

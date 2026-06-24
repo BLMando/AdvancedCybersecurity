@@ -17,8 +17,7 @@ class PKIClient: NSObject, URLSessionDelegate {
         pkiSession = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     }
     
-    func enroll(cn: String, role: String, department: String) async throws -> String {
-        // ... (metodo enroll già implementato e funzionante)
+    func enroll(cn: String, role: String, department: String, enrollmentSessionToken: String = "") async throws -> String {
         let challengeUrl = URL(string: "\(serverUrl)/api/challenge")!
         let (cData, _) = try await pkiSession.data(from: challengeUrl)
         let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
@@ -43,9 +42,10 @@ class PKIClient: NSObject, URLSessionDelegate {
             "public_key_pem": pubKeyPEM, "attestation_sig_b64": signature.base64EncodedString(),
             "proof_string": proofString, "challenge_id": challengeId,
             "mac_address": hwInfo["mac"] ?? "unknown",
-            "cpu_id": hwInfo["cpu"] ?? "unknown"
+            "cpu_id": hwInfo["cpu"] ?? "unknown",
+            "enrollment_session_token": enrollmentSessionToken
         ]
-        print("[DEBUG] Payload Enrollment: \(body)")
+print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(department), enrollment_session_token=(redacted)")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (eData, eResp) = try await pkiSession.data(for: request)
@@ -118,79 +118,11 @@ class PKIClient: NSObject, URLSessionDelegate {
             
             print("[*] Envoy ha richiesto il certificato client (mTLS). Cerco l'identità hardware per \(expectedCN)...")
             
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassCertificate,
-                kSecReturnRef as String: true,
-                kSecMatchLimit as String: kSecMatchLimitAll
-            ]
-            
-            var items: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &items)
-            
-            if status == errSecSuccess {
-                let certificates: [SecCertificate]
-                if CFGetTypeID(items!) == CFArrayGetTypeID() {
-                    certificates = items as! [SecCertificate]
-                } else {
-                    certificates = [items as! SecCertificate]
-                }
-                
-                var targetCert: SecCertificate?
-                for cert in certificates {
-                    let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Senza nome"
-                    if summary == expectedCN {
-                        targetCert = cert
-                        break
-                    }
-                }
-                
-                guard let cert = targetCert else {
-                    print("[!] Certificato per \(expectedCN) non trovato nel Keychain.")
-                    completionHandler(.performDefaultHandling, nil)
-                    return
-                }
-                
-                // Cerca la chiave privata associando il contesto biometrico attivo per consentire il riutilizzo del Touch ID
-                let label = "com.zta.identity.\(expectedCN)"
-                let tag = label.data(using: .utf8)!
-                var keyQuery: [String: Any] = [
-                    kSecClass as String: kSecClassKey,
-                    kSecAttrApplicationTag as String: tag,
-                    kSecReturnRef as String: true
-                ]
-                if let context = activeLAContext {
-                    keyQuery[kSecUseAuthenticationContext as String] = context
-                }
-                
-                var keyItem: CFTypeRef?
-                let keyStatus = SecItemCopyMatching(keyQuery as CFDictionary, &keyItem)
-                
-                var foundIdentity: SecIdentity?
-                if keyStatus == errSecSuccess, let privateKey = keyItem as! SecKey?,
-                   let identity = SecIdentityCreate(nil, cert, privateKey) {
-                    print("[✓] Identità mTLS creata con successo combinando il Certificato e la SecKey con LAContext per \(expectedCN)!")
-                    foundIdentity = identity
-                } else {
-                    print("[!] Query mTLS chiave o SecIdentityCreate fallita con status \(keyStatus). Uso fallback SecIdentityCreateWithCertificate...")
-                    var identity: SecIdentity?
-                    let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
-                    if idStatus == errSecSuccess, let id = identity {
-                        print("[✓] Identità mTLS creata con successo per \(expectedCN) (fallback)!")
-                        foundIdentity = id
-                    } else {
-                        print("[!] Errore: Certificato trovato ma chiave privata NON associata (Status: \(idStatus))")
-                    }
-                }
-                
-                if let identity = foundIdentity {
-                    print("[*] Richiedo autorizzazione SEP per l'identità ZTA...")
-                    completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
-                } else {
-                    print("[!] Nessuna identità ZTA autentica trovata.")
-                    completionHandler(.performDefaultHandling, nil)
-                }
+            if let identity = HardwareManager.shared.getIdentity(for: expectedCN, context: activeLAContext) {
+                print("[✓] Identità mTLS caricata con successo per \(expectedCN)!")
+                completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
             } else {
-                print("[!] Errore nel recupero dei certificati dal Keychain (Status: \(status)).")
+                print("[!] Nessuna identità ZTA valida trovata per \(expectedCN).")
                 completionHandler(.performDefaultHandling, nil)
             }
             return
@@ -199,7 +131,7 @@ class PKIClient: NSObject, URLSessionDelegate {
         completionHandler(.performDefaultHandling, nil)
     }
 
-    func getOidcToken(cn: String) async throws -> String {
+    func getOidcToken(cn: String, stepUp: Bool = false) async throws -> String {
         let challengeUrl = URL(string: "\(serverUrl)/api/challenge")!
         let (cData, _) = try await pkiSession.data(from: challengeUrl)
         let challengeJson = try JSONSerialization.jsonObject(with: cData) as! [String: Any]
@@ -218,12 +150,15 @@ class PKIClient: NSObject, URLSessionDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "challenge_id": challengeId,
             "signature": signature.base64EncodedString(),
             "public_key_pem": pubKeyPEM,
             "proof_string": proofString
         ]
+        if stepUp {
+            body["step_up"] = true
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (tData, tResp) = try await pkiSession.data(for: request)

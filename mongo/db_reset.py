@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-db_reset.py — Cleans all collections data in the ZTA MongoDB database.
-
-Usage:
-  python3 scripts/db_reset.py [--uri URI] [--yes] [--dry-run]
-"""
-
 import os
 import sys
 import argparse
@@ -14,13 +6,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-# Force UTF-8 output on Windows to avoid charmap errors with emoji
 if sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-# Load environment variables from project root .env file
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -28,7 +19,7 @@ try:
     from pymongo import MongoClient
     from pymongo.errors import ConfigurationError
 except ImportError:
-    print("❌ ERROR: pymongo not installed. Run: pip install pymongo")
+    print("ERROR: pymongo not installed. Run: pip install pymongo")
     sys.exit(1)
 
 # List of all raw collections containing application data
@@ -53,7 +44,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Paths to certificates (relative to project root to allow execution from anywhere)
+    # Paths to certificates
     ca_file = PROJECT_ROOT / "volumes" / "certs" / "ca" / "ca.crt"
     cert_file = PROJECT_ROOT / "volumes" / "certs" / "server" / "mongo.pem"
 
@@ -66,11 +57,11 @@ def main():
             "tlsCAFile": str(ca_file),
             "tlsAllowInvalidCertificates": True
         }
-        print(f"ℹ️  Using TLS credentials:")
+        print(f"ℹUsing TLS credentials:")
         print(f"   CA: {ca_file}")
         print(f"   Cert/Key: {cert_file}")
     else:
-        print("⚠️  Warning: TLS cert files not found. Connecting without cert parameters.")
+        print("Warning: TLS cert files not found. Connecting without cert parameters.")
 
     print(f"🔌 Connecting to MongoDB...")
     
@@ -83,7 +74,7 @@ def main():
         # Ping database to confirm connectivity
         client.admin.command("ping")
     except Exception as e:
-        print(f"❌ ERROR: Cannot connect to MongoDB — {e}")
+        print(f"ERROR: Cannot connect to MongoDB — {e}")
         sys.exit(1)
 
     try:
@@ -92,12 +83,12 @@ def main():
         default_db = os.getenv("MONGO_INITDB_DATABASE", "zta_db")
         db = client.get_database(default_db)
     db_name = db.name
-    print(f"✅ Connected to database: {db_name}\n")
+    print(f"Connected to database: {db_name}\n")
 
     # Fetch document counts before reset
     counts = {}
     total_docs = 0
-    print("📊 Current collection counts:")
+    print("Current collection counts:")
     for col_name in COLLECTIONS:
         try:
             count = db[col_name].count_documents({})
@@ -109,25 +100,25 @@ def main():
             counts[col_name] = None
 
     if total_docs == 0:
-        print("\n✨ All collections are already empty. Nothing to clean.")
+        print("\nAll collections are already empty. Nothing to clean.")
         client.close()
         return
 
     if args.dry_run:
-        print(f"\n⚠️  [Dry Run] Would have deleted a total of {total_docs:,} documents across {len(COLLECTIONS)} collections.")
+        print(f"\n[Dry Run] Would have deleted a total of {total_docs:,} documents across {len(COLLECTIONS)} collections.")
         client.close()
         return
 
     # Ask for confirmation if not bypassed via --yes
     if not args.yes:
-        confirm = input(f"\n❓ Are you sure you want to delete ALL data from database '{db_name}'? (y/N): ")
+        confirm = input(f"\nAre you sure you want to delete ALL data from database '{db_name}'? (y/N): ")
         if confirm.strip().lower() not in ["y", "yes"]:
-            print("❌ Cancelled. No data was deleted.")
+            print("Cancelled. No data was deleted.")
             client.close()
             return
 
     # Clean the collections data
-    print("\n🧹 Cleaning collections data...")
+    print("\nCleaning collections data...")
     for col_name in COLLECTIONS:
         if counts.get(col_name) is None:
             print(f"   ⚠️  Skipping {col_name} due to read error.")
@@ -136,10 +127,10 @@ def main():
             result = db[col_name].delete_many({})
             print(f"   - {col_name:<20}: Deleted {result.deleted_count:,} documents")
         except Exception as e:
-            print(f"   - {col_name:<20}: ❌ Error deleting data — {e}")
+            print(f"   - {col_name:<20}: Error deleting data — {e}")
 
-    print("\n🎉 DB Reset Complete.")
-    print("📋 Final collection counts:")
+    print("\nDB Reset Complete.")
+    print("Final collection counts:")
     for col_name in COLLECTIONS:
         try:
             count = db[col_name].count_documents({})

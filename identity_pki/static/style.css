@@ -31,7 +31,7 @@ body {
 }
 
 .shell {
-  width: min(1160px, calc(100vw - 32px));
+  width: min(1400px, calc(100vw - 16px));
   margin: 0 auto;
   padding: 32px 0 48px;
 }
@@ -465,3 +465,387 @@ button:disabled {
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   padding-bottom: 16px;
 }
+
+/* Modal Overlay and Card */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 16, 0.82);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+.modal-card {
+  width: min(480px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow);
+  border-radius: 24px;
+  overflow: hidden;
+  animation: modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  min-height: 0;
+}
+
+.modal-close:hover {
+  color: var(--error);
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+/* ── Query control bar ──────────────────────────────────────────── */
+.query-control-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  margin-bottom: 0;
+}
+
+.qcb-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.qcb-group label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qcb-identity { flex: 2 1 260px; }
+.qcb-narrow   { flex: 0 0 90px; }
+.qcb-submit   { flex: 0 0 auto; }
+
+.qcb-group select,
+.qcb-group input[type="number"] {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+/* ── Filter chips row ───────────────────────────────────────────── */
+.filter-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 0 4px;
+  align-items: flex-end;
+}
+
+.filter-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  flex: 1 1 140px;
+  max-width: 260px;
+}
+
+.filter-chip span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-chip input,
+.filter-chip select {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+}
+
+/* ── Results header ─────────────────────────────────────────────── */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* ── Live search input override ─────────────────────────────────── */
+#table-live-search {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  width: 220px;
+}
+
+/* ── Tab query goes full width ──────────────────────────────────── */
+#tab-query > .panel {
+  padding: 24px 28px;
+}
+
+#tab-query #query-output-table-container {
+  /* let the table breathe — cells can be slightly more compact */
+  font-size: 0.84em;
+}
+
+#tab-query #query-output-table td,
+#tab-query #query-output-table th {
+  padding: 10px 12px;
+}
+
+/* ── Filter chips row ───────────────────────────────────────────── */
+.filter-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 0 4px;
+  align-items: flex-end;
+}
+
+.filter-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  flex: 1 1 140px;
+  max-width: 260px;
+}
+
+.filter-chip span {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-chip input,
+.filter-chip select {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+}
+
+/* ── Results header ─────────────────────────────────────────────── */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* ── Live search input override ─────────────────────────────────── */
+#table-live-search {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  width: 220px;
+}
+
+/* ── Tab query goes full width (single column) ──────────────────── */
+#tab-query > .panel {
+  padding: 28px 32px;
+}
+
+
+
+/* ── Inline table row action buttons ──────────────────────────── */
+.btn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  min-height: 0;
+}
+
+.btn-edit {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent);
+}
+.btn-edit:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: var(--accent);
+}
+
+.btn-delete {
+  background: rgba(251, 113, 133, 0.12);
+  border-color: rgba(251, 113, 133, 0.35);
+  color: var(--error);
+}
+.btn-delete:hover {
+  background: rgba(251, 113, 133, 0.25);
+  border-color: var(--error);
+}
+
+.action-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Inline edit row panel ──────────────────────────────────────── */
+.edit-row-panel {
+  background: rgba(8, 18, 34, 0.95);
+  border-top: 1px solid rgba(56, 189, 248, 0.18);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.18);
+  padding: 16px 20px;
+  animation: editPanelSlide 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes editPanelSlide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.edit-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.edit-row-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.edit-row-grid input,
+.edit-row-grid select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.edit-row-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn-save {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0ea5e9, #607fd4);
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.83rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-save:hover { opacity: 0.85; }
+
+.btn-cancel-edit {
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid rgba(148,163,184,0.3);
+  color: var(--muted);
+  font-size: 0.83rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  min-height: 0;
+}
+.btn-cancel-edit:hover { border-color: var(--muted); color: var(--text); }
+
+/* ── Confirm dialog (small modal variant) ───────────────────────── */
+.confirm-dialog {
+  width: min(400px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid rgba(251, 113, 133, 0.35);
+  box-shadow: 0 0 48px rgba(251, 113, 133, 0.15), var(--shadow);
+  border-radius: 20px;
+  padding: 28px 28px 24px;
+  animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-dialog h3 {
+  margin: 0 0 10px;
+  color: var(--error);
+  font-size: 1rem;
+}
+
+.confirm-dialog p {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 20px;
+  line-height: 1.55;
+}
+
+.confirm-dialog .confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.btn-confirm-delete {
+  padding: 8px 20px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fb7185, #e11d48);
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-confirm-delete:hover { opacity: 0.85; }
+
+.edit-status-msg {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: none;
+}
+.edit-status-msg.success { color: var(--success); display: inline; }
+.edit-status-msg.error { color: var(--error); display: inline; }
+
+/* Status Labels */
+.status-active {
+  color: var(--success);
+  font-weight: 600;
+}
+.status-revoked {
+  color: var(--error);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+

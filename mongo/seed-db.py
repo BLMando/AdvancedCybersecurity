@@ -1,19 +1,3 @@
-#!/usr/bin/env python3
-"""
-seed-db.py — Reads healthcare_dataset.csv and populates the ZTA MongoDB.
-
-Usage:
-  python3 mongo/seed-db.py [--uri mongodb://zta_user:zta_password@localhost:27017/zta_db?authSource=admin]
-                            [--csv path/to/healthcare_dataset.csv]
-                            [--limit N]   # rows to import (default: all)
-
-The script normalises the flat CSV into the five relational-style collections:
-  patients / providers / admissions / clinical_records / billing
-
-Each document receives a deterministic UUID derived from the row's natural key
-so re-running the script is idempotent (upsert, not insert).
-"""
-
 import sys
 import uuid
 import argparse
@@ -44,20 +28,17 @@ args = parser.parse_args()
 
 
 def det_uuid(namespace: str, key: str) -> str:
-    """Deterministic UUID5 from a namespace string + natural key."""
     ns = uuid.UUID(hashlib.md5(namespace.encode()).hexdigest())
     return str(uuid.uuid5(ns, key))
 
 
 def parse_date(val: Optional[Any]):
-    """Parse ISO date string → timezone-aware datetime."""
     if not val or pd.isna(val):
         return None
     return datetime.fromisoformat(str(val)).replace(tzinfo=timezone.utc)
 
 
 def norm_name(raw: Any) -> str:
-    """Normalise mixed-case names like 'Bobby JacksOn' → 'Bobby Jackson'."""
     return str(raw).strip().title()
 
 

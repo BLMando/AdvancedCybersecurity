@@ -23,6 +23,8 @@ services:
       - ./volumes/certs/server:/data/server
       - ./volumes/certs/client:/data/certs/client
       - ./shared:/app/shared:ro
+      - ./identity_pki/templates:/app/identity_pki/templates
+      - ./identity_pki/static:/app/identity_pki/static
     networks:
       - backend-net
     extra_hosts:
@@ -93,12 +95,12 @@ services:
       timeout: 2s
       retries: 5
 
-  # ── OPA Splunk Forwarder (Sidecar) ─────────────────
-  opa-splunk-forwarder:
+  # ── ZTA Log Forwarder (Sidecar) ─────────────────
+  zta-log-forwarder:
     build:
-      context: ./scripts/opa_splunk_forwarder
+      context: ./scripts/zta_log_forwarder
       dockerfile: Dockerfile
-    container_name: opa-splunk-forwarder
+    container_name: zta-log-forwarder
     restart: unless-stopped
     ports:
       - "127.0.0.1:5000:5000"
@@ -130,7 +132,7 @@ services:
     container_name: opa
     restart: unless-stopped
     depends_on:
-      - opa-splunk-forwarder
+      - zta-log-forwarder
     ports:
       - "127.0.0.1:8181:8181"
       - "127.0.0.1:9002:9002"
