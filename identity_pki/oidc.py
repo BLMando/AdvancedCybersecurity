@@ -1,6 +1,7 @@
 import datetime
 import json
 import base64
+import uuid
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
@@ -82,7 +83,7 @@ def issue_jwt(user, role, cert_sha256_hex, step_up=False):
         "aud": "mongo",
         "sub": user,
         "role": [role],
-
+        "jti": str(uuid.uuid4()),  # Unique JWT ID for per-token revocation
         "iat": now,
         "exp": now + 900, # 15 minutes validity
         "cnf": {

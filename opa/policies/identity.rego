@@ -18,6 +18,9 @@ raw_user := user if {
 	user := object.get(source, "principal", "")
 	user != ""
 } else := user if {
+	user := cert_subject_cn
+	user != ""
+} else := user if {
 	user := object.get(input.parsed_body, "user", "")
 	user != ""
 } else := user if {
@@ -103,7 +106,7 @@ current_role := role if {
 } else := role if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	role := get_cert_title(cert)
@@ -154,10 +157,15 @@ cert_pem_decoded(raw_pem) := decoded if {
 cert_subject_cn := cn if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	cn := get_cert_cn(cert)
+} else := cn if {
+	attrs := object.get(input, "attributes", {})
+	source := object.get(attrs, "source", {})
+	cn := object.get(source, "principal", "")
+	cn != ""
 }
 
 get_cert_cn(cert) := val if {
@@ -280,6 +288,14 @@ token_step_up_fresh if {
 	now_seconds := time.now_ns() / 1000000000
 	now_seconds - claims.step_up_time < 120
 }
+
+# Extract the JWT ID (jti) from the OIDC token for per-token revocation checks.
+# Falls back to empty string if the token is absent (system commands, saslStart without OIDC, etc.).
+jti := val if {
+	claims := token_claims
+	val := object.get(claims, "jti", "")
+	val != ""
+} else := ""
 
 
 is_valid_token_binding(claims, cert_subject_cn) if {

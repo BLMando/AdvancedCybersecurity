@@ -22,11 +22,8 @@ static_resources:
                 bytes_sent: "%BYTES_SENT%"
                 bytes_received: "%BYTES_RECEIVED%"
                 upstream_host: "%UPSTREAM_HOST%"
-                user: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-user)%"
-                device: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-device)%"
-                network_ip: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-network)%"
-                decision: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-decision)%"
-                risk_score: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-risk-score)%"
+                tls_subject: "%DOWNSTREAM_PEER_SUBJECT%"
+                tls_fingerprint: "%DOWNSTREAM_PEER_FINGERPRINT_256%"
       listener_filters:
         # Run before TLS termination so Envoy can inspect the ClientHello
         # and derive the JA3 fingerprint used as a device hint.
@@ -58,31 +55,18 @@ static_resources:
               # present a valid certificate.
               require_client_certificate: true
           filters:
-            # Mongo proxy inspects the MongoDB wire protocol so we can log the
-            # actual command and collection being accessed.
-            - name: envoy.filters.network.mongo_proxy
+            # Custom WebAssembly filter to parse MongoDB OP_MSG (opcode 2013) wire protocol
+            # and perform message-level authorization against OPA.
+            - name: envoy.filters.network.wasm
               typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.mongo_proxy.v3.MongoProxy
-                stat_prefix: mongo_stats
-                emit_dynamic_metadata: true
-
-            # Ask OPA for an allow/deny decision before forwarding traffic to
-            # MongoDB. This is the policy gate of the system.
-            - name: envoy.filters.network.ext_authz
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz #Ext Authz --> explicit authorization
-                stat_prefix: opa_authz
-                transport_api_version: V3
-                include_peer_certificate: true
-                metadata_context_namespaces:
-                  - envoy.filters.listener.tls_inspector
-                  - envoy.filters.network.mongo_proxy
-                grpc_service:
-                  envoy_grpc:
-                    cluster_name: opa_cluster
-                  timeout: 2s
-                failure_mode_allow: false
-                # Fail closed: if OPA is unavailable, the request is denied.
+                "@type": type.googleapis.com/envoy.extensions.filters.network.wasm.v3.Wasm
+                config:
+                  name: "mongo_op_msg_authz"
+                  vm_config:
+                    runtime: "envoy.wasm.runtime.v8"
+                    code:
+                      local:
+                        filename: "/etc/envoy/wasm/mongo_op_msg_filter.wasm"
 
             # If the request passes the checks, forward it to MongoDB.
             - name: envoy.filters.network.tcp_proxy
@@ -123,11 +107,6 @@ static_resources:
     - name: opa_cluster
       connect_timeout: 2s
       type: STRICT_DNS
-      typed_extension_protocol_options:
-        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-          explicit_http_config:
-            http2_protocol_options: {}
       load_assignment:
         cluster_name: opa_cluster
         endpoints:
@@ -136,7 +115,7 @@ static_resources:
                   address:
                     socket_address:
                       address: opa
-                      port_value: 9002
+                      port_value: 8181
 
 admin:
   access_log:

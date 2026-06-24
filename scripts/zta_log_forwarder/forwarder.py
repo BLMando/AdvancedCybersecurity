@@ -37,6 +37,7 @@ hec_envoy = HEClient(
 )
 
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
+ENVOY_PROC_LOG_PATH = Path("/var/log/envoy/envoy.log")
 SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
 NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
@@ -48,19 +49,51 @@ SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
 SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").lower() == "true"
 
 
+# Regex to extract CN and OU=MAC: from an X.509 subject DN string.
+# Envoy renders it as e.g. "CN=paolo.roselli,OU=MAC:AA:BB:CC,O=Ospedale,C=IT"
+_CN_RE  = re.compile(r'(?:^|[,/])\s*CN=([^,/]+)', re.IGNORECASE)
+_MAC_RE = re.compile(r'(?:^|[,/])\s*OU=MAC:([^,/]+)', re.IGNORECASE)
+
+
+def _parse_subject_dn(subject: str):
+    """Return (cn, mac) extracted from an X.509 subject DN string."""
+    cn_match  = _CN_RE.search(subject)
+    mac_match = _MAC_RE.search(subject)
+    cn  = cn_match.group(1).strip()  if cn_match  else "unknown"
+    mac = mac_match.group(1).strip() if mac_match else "no-tpm"
+    return cn, mac
+
+
 def extract_envoy_fields(log_entry: dict) -> dict:
+    # Primary source: tls_subject written by %DOWNSTREAM_PEER_SUBJECT%
+    tls_subject     = log_entry.get("tls_subject", "")
+    tls_fingerprint = log_entry.get("tls_fingerprint", "")
+
+    cn, mac = _parse_subject_dn(tls_subject)
+
+    # Device is the MAC address from the cert OU (proves hardware binding).
+    # If absent, fall back to the cert SHA-256 fingerprint prefix as a device hint.
+    if mac != "no-tpm":
+        device = mac
+    elif tls_fingerprint:
+        device = tls_fingerprint[:16]  # short fingerprint as opaque device ID
+    else:
+        device = "no-tpm"
+
     return {
-        "source_ip": log_entry.get("downstream_remote_address") or "unknown",
-        "downstream_local": log_entry.get("downstream_local_address") or "unknown",
-        "upstream_host": log_entry.get("upstream_host") or "unknown",
-        "duration_ms": log_entry.get("duration") or "0",
-        "bytes_sent": log_entry.get("bytes_sent") or "0",
-        "bytes_received": log_entry.get("bytes_received") or "0",
-        "user": log_entry.get("user") or "unknown",
-        "device": log_entry.get("device") or "no-tpm",
-        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
-        "decision": log_entry.get("decision") or "unknown",
-        "risk_score": log_entry.get("risk_score") or "0",
+        "source_ip":        log_entry.get("downstream_remote_address") or "unknown",
+        "downstream_local": log_entry.get("downstream_local_address")  or "unknown",
+        "upstream_host":    log_entry.get("upstream_host")             or "unknown",
+        "duration_ms":      log_entry.get("duration")                  or "0",
+        "bytes_sent":       log_entry.get("bytes_sent")                or "0",
+        "bytes_received":   log_entry.get("bytes_received")            or "0",
+        "user":             cn,
+        "device":           device,
+        "tls_subject":      tls_subject,
+        "tls_fingerprint":  tls_fingerprint,
+        "decision":         "WASM_MEDIATED",
+        "network_ip":       (log_entry.get("downstream_remote_address") or "0.0.0.0").split(":")[0],
+        "risk_score":       "0",
     }
 @app.route("/api/stats", methods=["POST"])
 def handle_stats_query():
@@ -490,6 +523,58 @@ def handle_app_audit():
     )
     return jsonify({"status": "queued"}), 202
 
+# ── Wasm Audit Log Tailer ─────────────────────────────────────────────────────
+# The Wasm filter writes one structured [WASM_AUDIT] line per OPA decision
+# via log::info!(). Envoy is started with --log-path /var/log/envoy/envoy.log,
+# so these lines land in the shared volume already mounted by the forwarder.
+
+# Regex to extract the JSON payload from an Envoy log line like:
+#   [2024-01-01 12:00:00.000][1][info][wasm] [WASM_AUDIT] {...}
+_WASM_AUDIT_RE = re.compile(r'\[WASM_AUDIT\]\s+(\{.*\})')
+
+
+def tail_wasm_audit_logs(stop_event: threading.Event) -> None:
+    """Background thread that tails Envoy's process log for [WASM_AUDIT] lines.
+
+    The Wasm filter writes one JSON audit event per MongoDB query decision.
+    This function extracts those events and ships them to Splunk HEC under
+    sourcetype 'zta:wasm:query' so analysts can see real-time PEP decisions
+    — including blocked NoSQL injections and revoked cert/JWT denials.
+    """
+    def handle_line(line: str) -> None:
+        m = _WASM_AUDIT_RE.search(line)
+        if not m:
+            return
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            logger.warning("Malformed WASM_AUDIT JSON: %s", line[:200])
+            return
+
+        event = {
+            "source":     "wasm_filter",
+            "user":       data.get("user", "unknown"),
+            "command":    data.get("command", "unknown"),
+            "collection": data.get("collection", "unknown"),
+            "decision":   data.get("decision", "unknown"),
+            "jti":        data.get("jti", ""),
+            "ctx":        data.get("ctx", 0),
+        }
+        hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:wasm:query")
+        logger.info(
+            "Wasm audit: user=%s cmd=%s coll=%s decision=%s jti=%s",
+            event["user"], event["command"], event["collection"],
+            event["decision"], event["jti"],
+        )
+
+    tail_log_file(
+        path=ENVOY_PROC_LOG_PATH,
+        stop_event=stop_event,
+        line_handler=handle_line,
+        post_batch_handler=hec_envoy.flush,
+        sleep_interval=1.0,  # Shorter poll interval for near-real-time audit
+    )
+
 
 def _run_splunk_search(query: str) -> list:
     """Run a Splunk search and return the list of raw results (dict)."""
@@ -602,6 +687,12 @@ def _ensure_tailer():
         t_mongo_audit = threading.Thread(target=tail_mongo_audit_logs, args=(_stop_event,), daemon=True)
         t_mongo_audit.start()
         logger.info("MongoDB Audit log tailer started")
+
+        # Thread: Wasm filter audit logs (parses [WASM_AUDIT] lines from /var/log/envoy/envoy.log)
+        # Envoy must be started with --log-path /var/log/envoy/envoy.log for this to work.
+        t_wasm = threading.Thread(target=tail_wasm_audit_logs, args=(_stop_event,), daemon=True)
+        t_wasm.start()
+        logger.info("Wasm audit log tailer started (watching %s)", ENVOY_PROC_LOG_PATH)
     except FileExistsError:
         logger.debug("Log tailer/sync already running in another worker (lock exists)")
     except Exception as e:

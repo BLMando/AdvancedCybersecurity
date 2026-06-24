@@ -18,8 +18,13 @@ import random
 import uuid
 from datetime import datetime, timedelta, timezone
 
-# Simulated Active Directory / HR database for ZTA Identity Verification
 AD_USERS = {
+    "paolo.roselli@ospedale.it": {
+        "cn": "paolo.roselli",
+        "role": "doctor",
+        "department": "Cardiologia",
+        "password": "password123"
+    },
     "test.doctor@ospedale.it": {
         "cn": "test.doctor",
         "role": "doctor",
@@ -49,6 +54,30 @@ AD_USERS = {
 PENDING_OTPS = {}          # email -> {"otp": "123456", "expires_at": datetime, "user_info": dict}
 ENROLLMENT_SESSIONS = {}   # token -> {"cn": cn, "role": role, "department": department, "expires_at": datetime}
 PRIMARY_SESSIONS = {}      # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+
+# ── JWT Revocation Denylist ─────────────────────────────────────────────────────
+# Set of revoked JWT IDs (jti claims). Persisted on disk across restarts.
+REVOKED_JTIS: set = set()
+
+def _load_revoked_jtis(cert_dir: str) -> set:
+    """Load the persisted JWT denylist from disk."""
+    path = os.path.join(cert_dir, "revoked_jtis.json")
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return set(json.load(f))
+        except Exception:
+            pass
+    return set()
+
+def _persist_revoked_jtis(cert_dir: str, jtis: set) -> None:
+    """Persist the JWT denylist to disk."""
+    path = os.path.join(cert_dir, "revoked_jtis.json")
+    try:
+        with open(path, "w") as f:
+            json.dump(list(jtis), f)
+    except Exception:
+        pass
 
 # Load ZTA roles
 try:
@@ -155,12 +184,16 @@ def _send_audit_event_impl(logger: logging.Logger, user, role, collection, actio
 
 
 def create_app(data_dir=None) -> Flask:
+    global REVOKED_JTIS
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
     
     # Use /data/certs by default for persistence in Docker
     cert_dir = data_dir or os.environ.get("ZTA_PKI_DATA_DIR", "/data/certs")
     service = PKIService(cert_dir=cert_dir)
+
+    # Load JWT denylist from disk on startup
+    REVOKED_JTIS = _load_revoked_jtis(cert_dir)
 
     def error_response(message: str, code: int = 400):
         return jsonify({"error": message, "code": code}), code
@@ -691,6 +724,50 @@ def create_app(data_dir=None) -> Flask:
         except ValueError as exc:
             return error_response(str(exc), 400)
         return jsonify({"status": "success", "message": f"User {user_cn} revoked"})
+
+    # ── Fast Revocation Read Endpoints (called by OPA with 2s TTL cache) ─────────
+
+    @app.get("/api/revocation/<identifier>")
+    def api_check_cert_revocation(identifier):
+        """Check if a certificate identified by CN is revoked.
+
+        Used by OPA's cert_is_revoked() rule on every MongoDB command.
+        Reads the .rev file written by revoke_certificate(); no PKI re-parse needed.
+        """
+        # Sanitize: only allow alphanumeric + dot/hyphen/underscore
+        import re
+        if not re.match(r'^[\w.\-@]+$', identifier):
+            return jsonify({"revoked": False, "error": "invalid identifier"}), 400
+
+        rev_file = os.path.join(service.revoked_dir, f"{identifier}.rev")
+        revoked = os.path.exists(rev_file)
+        return jsonify({"revoked": revoked, "cn": identifier}), 200
+
+    @app.get("/api/jwt/revocation/<jti>")
+    def api_check_jwt_revocation(jti):
+        """Check if a specific JWT (by jti claim) is in the denylist.
+
+        Used by OPA's jwt_is_revoked() rule on every MongoDB command.
+        Hot path — O(1) set lookup, no disk I/O.
+        """
+        revoked = jti in REVOKED_JTIS
+        return jsonify({"revoked": revoked, "jti": jti}), 200
+
+    @app.post("/api/admin/revoke-jwt")
+    def api_revoke_jwt():
+        """Add a JWT's jti to the in-memory denylist and persist to disk.
+
+        Enables per-token revocation without revoking the user's certificate.
+        Useful for logout or when a token is suspected compromised.
+        """
+        payload = request.get_json(silent=True) or {}
+        jti = payload.get("jti", "").strip()
+        if not jti:
+            return error_response("jti is required", 400)
+        REVOKED_JTIS.add(jti)
+        _persist_revoked_jtis(cert_dir, REVOKED_JTIS)
+        logger.info("JWT revoked: jti=%s", jti)
+        return jsonify({"status": "success", "message": f"JWT {jti} added to denylist"})
 
     @app.post("/api/query")
     def api_query():
