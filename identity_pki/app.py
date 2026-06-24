@@ -154,6 +154,249 @@ def _send_audit_event_impl(logger: logging.Logger, user, role, collection, actio
     _threading.Thread(target=_send, daemon=True).start()
 
 
+def _check_action_permissions(role: str, collection_name: str, mongo_action: str) -> bool:
+    """Check if the role is allowed to perform the given action on the collection."""
+    if role == "admin":
+        return True
+        
+    action_permission_map = {
+        "doctor": {
+            "patients": {"find"},
+            "providers": {"find"},
+            "admissions": {"find", "insert", "update"},
+            "clinical_records": {"find", "insert", "update"},
+            "billing": set()
+        },
+        "billing_staff": {
+            "patients": {"find"},
+            "providers": {"find"},
+            "admissions": {"find"},
+            "clinical_records": set(),
+            "billing": {"find", "insert", "update"}
+        },
+        "auditor": {
+            "patients": {"find"},
+            "providers": {"find"},
+            "admissions": {"find"},
+            "clinical_records": {"find"},
+            "billing": {"find"}
+        },
+        "receptionist": {
+            "patients": {"find", "insert", "update"},
+            "providers": {"find"},
+            "admissions": {"find", "insert", "update"},
+            "clinical_records": set(),
+            "billing": set()
+        }
+    }
+    
+    role_allowed_actions = action_permission_map.get(role, {}).get(collection_name, set())
+    return mongo_action in role_allowed_actions
+
+
+def _get_rls_view_name(role: str, collection_name: str) -> str:
+    """Map a raw collection name to the corresponding RLS view for the role."""
+    if role == "admin":
+        return collection_name
+        
+    rls_views = {
+        "doctor": {
+            "patients": "v_patients_doctor",
+            "providers": "v_providers_all",
+            "admissions": "v_admissions_doctor",
+            "clinical_records": "v_clinical_doctor",
+        },
+        "billing_staff": {
+            "patients": "v_patients_billing",
+            "providers": "v_providers_all",
+            "admissions": "v_admissions_billing",
+            "billing": "v_billing_staff",
+        },
+        "auditor": {
+            "patients": "v_patients_doctor",
+            "providers": "v_providers_all",
+            "admissions": "v_admissions_auditor",
+            "clinical_records": "v_clinical_auditor",
+            "billing": "v_billing_auditor",
+        },
+        "receptionist": {
+            "patients": "v_patients_reception",
+            "providers": "v_providers_all",
+            "admissions": "v_admissions_reception",
+        }
+    }
+    return rls_views.get(role, {}).get(collection_name, collection_name)
+
+
+def _extract_role_from_jwt(jwt_token: Optional[str], logger: logging.Logger) -> str:
+    """Parse JWT claims to extract the user's role."""
+    if not jwt_token:
+        return "unknown"
+    try:
+        parts = jwt_token.split(".")
+        if len(parts) == 3:
+            payload_b64 = parts[1]
+            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+            payload_data = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
+            claims = json.loads(payload_data)
+            role = claims.get("role", "unknown")
+            if isinstance(role, list):
+                role = role[0] if role else "unknown"
+            return role
+    except Exception as ex:
+        logger.warning(f"Failed to decode JWT claims: {ex}")
+    return "unknown"
+
+
+def _resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt_token: Optional[str], logger: logging.Logger) -> tuple[str, bool]:
+    """Resolve the user's role and hardware mode from metadata and JWT."""
+    role = _extract_role_from_jwt(jwt_token, logger)
+    hardware_mode = False
+
+    metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path) as f:
+                meta = json.load(f)
+                if role == "unknown":
+                    role = meta.get("role", "unknown")
+                hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
+        except Exception:
+            pass
+
+    if role == "unknown":
+        try:
+            from cryptography import x509
+            with open(cert_path, "rb") as f:
+                cert = x509.load_pem_x509_certificate(f.read())
+                titles = cert.subject.get_attributes_for_oid(x509.NameOID.TITLE)
+                if titles:
+                    role = titles[0].value
+        except Exception:
+            pass
+
+    return role, hardware_mode
+
+
+def _prepare_combined_pem(service: PKIService, user_cn: str, cert_path: str, key_path: str, jwt_token: Optional[str]) -> str:
+    """Prepares and writes the combined PEM cert+key file for TLS connections."""
+    if jwt_token and (not os.path.exists(key_path) or not os.path.exists(cert_path)):
+        # Hardware mode OIDC connection from Flask to Envoy: use Flask's own server cert/key
+        cert_path = "/data/server/envoy.crt"
+        key_path = "/data/server/envoy.key"
+        combined_pem_path = os.path.join(service.cert_dir, "client", "envoy_combined.pem")
+    else:
+        combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
+        
+    with open(combined_pem_path, "w") as out:
+        with open(cert_path) as c:
+            out.write(c.read())
+        with open(key_path) as k:
+            out.write(k.read())
+            
+    return combined_pem_path
+
+
+def _build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optional[int], jwt_token: Optional[str], combined_pem_path: Optional[str], ca_path: str) -> MongoClient:
+    """Build and configure the MongoClient based on credentials and proxy settings."""
+    mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
+    mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
+    
+    if jwt_token:
+        from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+
+        class StaticTokenCallback(OIDCCallback):
+            def __init__(self, token):
+                self.token = token
+            def fetch(self, context):
+                return OIDCCallbackResult(access_token=self.token)
+
+        callback_instance = StaticTokenCallback(jwt_token)
+
+        if local_proxy_port:
+            return MongoClient(
+                f"mongodb://host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                authMechanismProperties={
+                    "OIDC_CALLBACK": callback_instance,
+                    "authzId": f"oidc/{user_cn}"
+                },
+                serverSelectionTimeoutMS=8000
+            )
+        else:
+            return MongoClient(
+                f"mongodb://envoy:10000/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                authMechanismProperties={
+                    "OIDC_CALLBACK": callback_instance,
+                    "authzId": f"oidc/{user_cn}"
+                },
+                tls=True,
+                tlsCertificateKeyFile=combined_pem_path,
+                tlsCAFile=ca_path,
+                tlsAllowInvalidCertificates=True,
+                serverSelectionTimeoutMS=4000
+            )
+    else:
+        if local_proxy_port:
+            return MongoClient(
+                f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
+                serverSelectionTimeoutMS=8000
+            )
+        else:
+            return MongoClient(
+                f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
+                tls=True,
+                tlsCertificateKeyFile=combined_pem_path,
+                tlsCAFile=ca_path,
+                tlsAllowInvalidCertificates=True,
+                serverSelectionTimeoutMS=4000
+            )
+
+
+def _execute_mongo_operation(db, mongo_action: str, target_collection: str, query_filter: dict, update_fields: Optional[dict], limit: int) -> tuple[int, list, str]:
+    """Execute the database action (find, update, delete) and return status/results."""
+    results_json = []
+    count = 0
+    message = "Success"
+
+    if mongo_action == "find":
+        cursor = db[target_collection].find(query_filter).limit(limit)
+        from bson import json_util
+        results = list(cursor)
+        results_json = json.loads(json_util.dumps(results))
+        count = len(results_json)
+    elif mongo_action == "update":
+        if update_fields and isinstance(update_fields, dict):
+            # Sanitize: strip leading $ from keys to prevent operator injection
+            safe_fields = {k: v for k, v in update_fields.items() if not k.startswith("$")}
+            if target_collection != "providers":
+                set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc)}
+            else:
+                set_payload = safe_fields
+        else:
+            if target_collection != "providers":
+                set_payload = {
+                    "updated_at": datetime.now(timezone.utc)
+                }
+            else:
+                set_payload = {}
+        
+        if set_payload:
+            update_op = {"$set": set_payload}
+            res = db[target_collection].update_many(query_filter, update_op)
+            count = res.modified_count
+        else:
+            count = 0
+        message = f"Aggiornati {count} documenti in '{target_collection}'"
+    elif mongo_action == "delete":
+        res = db[target_collection].delete_many(query_filter)
+        count = res.deleted_count
+        message = f"Eliminati {count} documenti da '{target_collection}'"
+    else:
+        raise ValueError(f"Unsupported action: {mongo_action}")
+
+    return count, results_json, message
+
+
 def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
@@ -762,63 +1005,13 @@ def create_app(data_dir=None) -> Flask:
 
         combined_pem_path = None
         if not local_proxy_port:
-            if jwt_token and (not os.path.exists(key_path) or not os.path.exists(cert_path)):
-                # Hardware mode OIDC connection from Flask to Envoy: use Flask's own server cert/key
-                cert_path = "/data/server/envoy.crt"
-                key_path = "/data/server/envoy.key"
-                combined_pem_path = os.path.join(service.cert_dir, "client", "envoy_combined.pem")
-            else:
-                combined_pem_path = os.path.join(service.cert_dir, "client", f"{user_cn}_combined.pem")
             try:
-                with open(combined_pem_path, "w") as out:
-                    with open(cert_path) as c:
-                        out.write(c.read())
-                    with open(key_path) as k:
-                        out.write(k.read())
+                combined_pem_path = _prepare_combined_pem(service, user_cn, cert_path, key_path, jwt_token)
             except Exception as e:
                 return error_response(f"Failed to prepare combined PEM: {e}", 500)
 
-
-        # Get role to perform RLS view translation
-        role = "unknown"
-        hardware_mode = False
-        if jwt_token:
-            try:
-                parts = jwt_token.split(".")
-                if len(parts) == 3:
-                    payload_b64 = parts[1]
-                    payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
-                    payload_data = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
-                    claims = json.loads(payload_data)
-                    role = claims.get("role", "unknown")
-                    if isinstance(role, list):
-                        role = role[0] if role else "unknown"
-            except Exception as ex:
-                logger.warning(f"Failed to decode JWT claims: {ex}")
-
-        # Also get hardware_mode if metadata exists
-        metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
-        if os.path.exists(metadata_path):
-            try:
-                with open(metadata_path) as f:
-                    meta = json.load(f)
-                    if role == "unknown":
-                        role = meta.get("role", "unknown")
-                    hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
-            except Exception:
-                pass
-
-        if role == "unknown":
-            try:
-                from cryptography import x509
-                with open(cert_path, "rb") as f:
-                    cert = x509.load_pem_x509_certificate(f.read())
-                    titles = cert.subject.get_attributes_for_oid(x509.NameOID.TITLE)
-                    if titles:
-                        role = titles[0].value
-            except Exception:
-                pass
-
+        # Resolve role and hardware_mode
+        role, hardware_mode = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, app.logger)
 
         # Translate collection to RLS view
         view_name = collection_name
@@ -848,39 +1041,8 @@ def create_app(data_dir=None) -> Flask:
                     "translated_collection": view_name
                 }), 403
 
-            # Action-level permission check (mirrors criteria.rego permissions)
-            action_permission_map = {
-                "doctor": {
-                    "patients": {"find"},
-                    "providers": {"find"},
-                    "admissions": {"find", "insert", "update"},
-                    "clinical_records": {"find", "insert", "update"},
-                    "billing": set()
-                },
-                "billing_staff": {
-                    "patients": {"find"},
-                    "providers": {"find"},
-                    "admissions": {"find"},
-                    "clinical_records": set(),
-                    "billing": {"find", "insert", "update"}
-                },
-                "auditor": {
-                    "patients": {"find"},
-                    "providers": {"find"},
-                    "admissions": {"find"},
-                    "clinical_records": {"find"},
-                    "billing": {"find"}
-                },
-                "receptionist": {
-                    "patients": {"find", "insert", "update"},
-                    "providers": {"find"},
-                    "admissions": {"find", "insert", "update"},
-                    "clinical_records": set(),
-                    "billing": set()
-                }
-            }
-            role_allowed_actions = action_permission_map.get(role, {}).get(collection_name, set())
-            if mongo_action not in role_allowed_actions:
+            # Action-level permission check
+            if not _check_action_permissions(role, collection_name, mongo_action):
                 _send_audit_event(
                     user=user_cn,
                     role=role,
@@ -913,135 +1075,19 @@ def create_app(data_dir=None) -> Flask:
                         "translated_collection": view_name
                     }), 403
 
-            rls_views = {
-                "doctor": {
-                    "patients": "v_patients_doctor",
-                    "providers": "v_providers_all",
-                    "admissions": "v_admissions_doctor",
-                    "clinical_records": "v_clinical_doctor",
-                },
-                "billing_staff": {
-                    "patients": "v_patients_billing",
-                    "providers": "v_providers_all",
-                    "admissions": "v_admissions_billing",
-                    "billing": "v_billing_staff",
-                },
-                "auditor": {
-                    "patients": "v_patients_doctor",
-                    "providers": "v_providers_all",
-                    "admissions": "v_admissions_auditor",
-                    "clinical_records": "v_clinical_auditor",
-                    "billing": "v_billing_auditor",
-                },
-                "receptionist": {
-                    "patients": "v_patients_reception",
-                    "providers": "v_providers_all",
-                    "admissions": "v_admissions_reception",
-                }
-            }
-            view_name = rls_views.get(role, {}).get(collection_name, collection_name)
+            view_name = _get_rls_view_name(role, collection_name)
 
         mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
-        mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
-        mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
         ca_path = os.path.join(service.cert_dir, "ca.crt")
 
         try:
-            if jwt_token:
-                from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
-
-                class StaticTokenCallback(OIDCCallback):
-                    def __init__(self, token):
-                        self.token = token
-                    def fetch(self, context):
-                        return OIDCCallbackResult(access_token=self.token)
-
-                callback_instance = StaticTokenCallback(jwt_token)
-
-                if local_proxy_port:
-                    client = MongoClient(
-                        f"mongodb://host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
-                        authMechanismProperties={
-                            "OIDC_CALLBACK": callback_instance,
-                            "authzId": f"oidc/{user_cn}"
-                        },
-                        serverSelectionTimeoutMS=8000
-                    )
-                else:
-                    client = MongoClient(
-                        f"mongodb://envoy:10000/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
-                        authMechanismProperties={
-                            "OIDC_CALLBACK": callback_instance,
-                            "authzId": f"oidc/{user_cn}"
-                        },
-                        tls=True,
-                        tlsCertificateKeyFile=combined_pem_path,
-                        tlsCAFile=ca_path,
-                        tlsAllowInvalidCertificates=True,
-                        serverSelectionTimeoutMS=4000
-                    )
-            else:
-                if local_proxy_port:
-                    # Connect via the host's local proxy port
-                    client = MongoClient(
-                        f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
-                        serverSelectionTimeoutMS=8000
-                    )
-                else:
-                    # Connect to Envoy proxy inside the docker network
-                    client = MongoClient(
-                        f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
-                        tls=True,
-                        tlsCertificateKeyFile=combined_pem_path,
-                        tlsCAFile=ca_path,
-                        tlsAllowInvalidCertificates=True,
-                        serverSelectionTimeoutMS=4000
-                    )
-
+            client = _build_mongo_client(user_cn, mongo_db_name, local_proxy_port, jwt_token, combined_pem_path, ca_path)
             db = client[mongo_db_name]
             
-            results_json = []
-            count = 0
-            message = "Success"
             target_collection = view_name if mongo_action == "find" else collection_name
-            
-            if mongo_action == "find":
-                cursor = db[target_collection].find(query_filter).limit(limit)
-                from bson import json_util
-                results = list(cursor)
-                results_json = json.loads(json_util.dumps(results))
-                count = len(results_json)
-            elif mongo_action == "update":
-                # Build $set payload: use specific update_fields if provided, else generic stamp
-                if update_fields and isinstance(update_fields, dict):
-                    # Sanitize: strip leading $ from keys to prevent operator injection
-                    safe_fields = {k: v for k, v in update_fields.items() if not k.startswith("$")}
-                    if target_collection != "providers":
-                        set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc)}
-                    else:
-                        set_payload = safe_fields
-                else:
-                    if target_collection != "providers":
-                        set_payload = {
-                            "updated_at": datetime.now(timezone.utc)
-                        }
-                    else:
-                        set_payload = {}
-                
-                if set_payload:
-                    update_op = {"$set": set_payload}
-                    res = db[target_collection].update_many(query_filter, update_op)
-                    count = res.modified_count
-                else:
-                    count = 0
-                message = f"Aggiornati {count} documenti in '{target_collection}'"
-            elif mongo_action == "delete":
-                res = db[target_collection].delete_many(query_filter)
-                count = res.deleted_count
-                message = f"Eliminati {count} documenti da '{target_collection}'"
-            else:
-                client.close()
-                return error_response(f"Unsupported action: {mongo_action}", 400)
+            count, results_json, message = _execute_mongo_operation(
+                db, mongo_action, target_collection, query_filter, update_fields, limit
+            )
                 
             client.close()
 
