@@ -116,6 +116,50 @@ try {
                     return result;
                 }
             }
+
+            private static byte[] EncodeLength(int length) {
+                if (length < 128) {
+                    return new byte[] { (byte)length };
+                } else if (length <= 255) {
+                    return new byte[] { 0x81, (byte)length };
+                } else {
+                    return new byte[] { 0x82, (byte)(length >> 8), (byte)(length & 0xff) };
+                }
+            }
+
+            public static string ExportSpkiPublicKeyPem(byte[] modulus, byte[] exponent) {
+                byte[] modDer = EncodeInteger(modulus);
+                byte[] expDer = EncodeInteger(exponent);
+                
+                int rsaPubKeyLen = modDer.Length + expDer.Length;
+                byte[] rsaPubKeyLenBytes = EncodeLength(rsaPubKeyLen);
+                byte[] rsaPubKeyDer = new byte[1 + rsaPubKeyLenBytes.Length + rsaPubKeyLen];
+                rsaPubKeyDer[0] = 0x30;
+                Buffer.BlockCopy(rsaPubKeyLenBytes, 0, rsaPubKeyDer, 1, rsaPubKeyLenBytes.Length);
+                Buffer.BlockCopy(modDer, 0, rsaPubKeyDer, 1 + rsaPubKeyLenBytes.Length, modDer.Length);
+                Buffer.BlockCopy(expDer, 0, rsaPubKeyDer, 1 + rsaPubKeyLenBytes.Length + modDer.Length, expDer.Length);
+                
+                int bitStringValLen = 1 + rsaPubKeyDer.Length;
+                byte[] bitStringLenBytes = EncodeLength(bitStringValLen);
+                byte[] bitStringDer = new byte[1 + bitStringLenBytes.Length + bitStringValLen];
+                bitStringDer[0] = 0x03;
+                Buffer.BlockCopy(bitStringLenBytes, 0, bitStringDer, 1, bitStringLenBytes.Length);
+                bitStringDer[1 + bitStringLenBytes.Length] = 0x00;
+                Buffer.BlockCopy(rsaPubKeyDer, 0, bitStringDer, 2 + bitStringLenBytes.Length, rsaPubKeyDer.Length);
+                
+                byte[] algIdDer = new byte[] { 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00 };
+                
+                int spkiLen = algIdDer.Length + bitStringDer.Length;
+                byte[] spkiLenBytes = EncodeLength(spkiLen);
+                byte[] spkiDer = new byte[1 + spkiLenBytes.Length + spkiLen];
+                spkiDer[0] = 0x30;
+                Buffer.BlockCopy(spkiLenBytes, 0, spkiDer, 1, spkiLenBytes.Length);
+                Buffer.BlockCopy(algIdDer, 0, spkiDer, 1 + spkiLenBytes.Length, algIdDer.Length);
+                Buffer.BlockCopy(bitStringDer, 0, spkiDer, 1 + spkiLenBytes.Length + algIdDer.Length, bitStringDer.Length);
+                
+                string b64 = Convert.ToBase64String(spkiDer, Base64FormattingOptions.InsertLineBreaks);
+                return "-----BEGIN PUBLIC KEY-----\r\n" + b64 + "\r\n-----END PUBLIC KEY-----";
+            }
         }
     '
     [SSLBypass]::Bypass()
@@ -140,71 +184,7 @@ function Get-CertPem ($cert) {
 
 # Helper per esportare una chiave pubblica RSA in formato SubjectPublicKeyInfo (SPKI) PEM su .NET Framework
 function Export-SpkiPublicKeyPem ($modulus, $exponent) {
-    $encodeInteger = {
-        param([byte[]]$bytes)
-        if ($bytes[0] -ge 0x80) {
-            $bytes = ,0x00 + $bytes
-        }
-        $len = $bytes.Length
-        if ($len -lt 128) {
-            $lenBytes = ,[byte]$len
-        } else {
-            if ($len -le 255) {
-                $lenBytes = 0x81, [byte]$len
-            } else {
-                $lenBytes = 0x82, [byte]($len -shr 8), [byte]($len -band 0xff)
-            }
-        }
-        return [byte[]](,0x02 + $lenBytes + $bytes)
-    }
-
-    $modDer = &$encodeInteger $modulus
-    $expDer = &$encodeInteger $exponent
-    
-    $innerLen = $modDer.Length + $expDer.Length
-    if ($innerLen -lt 128) {
-        $seqLenBytes = ,[byte]$innerLen
-    } else {
-        if ($innerLen -le 255) {
-            $seqLenBytes = 0x81, [byte]$innerLen
-        } else {
-            $seqLenBytes = 0x82, [byte]($innerLen -shr 8), [byte]($innerLen -band 0xff)
-        }
-    }
-    $rsaPubKeyDer = [byte[]](,0x30 + $seqLenBytes + $modDer + $expDer)
-    
-    # Wrap in BIT STRING (prepend 0x00 unused bits byte)
-    $bitStringVal = ,[byte]0x00 + $rsaPubKeyDer
-    $bitStringLen = $bitStringVal.Length
-    if ($bitStringLen -lt 128) {
-        $bitStringLenBytes = ,[byte]$bitStringLen
-    } else {
-        if ($bitStringLen -le 255) {
-            $bitStringLenBytes = 0x81, [byte]$bitStringLen
-        } else {
-            $bitStringLenBytes = 0x82, [byte]($bitStringLen -shr 8), [byte]($bitStringLen -band 0xff)
-        }
-    }
-    $bitStringDer = [byte[]](,0x03 + $bitStringLenBytes + $bitStringVal)
-    
-    # AlgorithmIdentifier per rsaEncryption: 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00
-    $algIdDer = 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00
-    
-    # Wrap in SEQUENCE
-    $spkiInnerLen = $algIdDer.Length + $bitStringDer.Length
-    if ($spkiInnerLen -lt 128) {
-        $spkiSeqLenBytes = ,[byte]$spkiInnerLen
-    } else {
-        if ($spkiInnerLen -le 255) {
-            $spkiSeqLenBytes = 0x81, [byte]$spkiInnerLen
-        } else {
-            $spkiSeqLenBytes = 0x82, [byte]($spkiInnerLen -shr 8), [byte]($spkiInnerLen -band 0xff)
-        }
-    }
-    $spkiDer = [byte[]](,0x30 + $spkiSeqLenBytes + $algIdDer + $bitStringDer)
-    
-    $b64 = [Convert]::ToBase64String($spkiDer, [Base64FormattingOptions]::InsertLineBreaks)
-    return "-----BEGIN PUBLIC KEY-----`n$b64`n-----END PUBLIC KEY-----"
+    return [RSASoftKeyHelper]::ExportSpkiPublicKeyPem($modulus, $exponent)
 }
 
 # Helper per estrarre la chiave pubblica PEM dal certificato
@@ -212,7 +192,7 @@ function Get-PublicKeyPem ($cert) {
     $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($cert)
     if ($rsa) {
         $params = $rsa.ExportParameters($false)
-        return Export-SpkiPublicKeyPem $params.Modulus $params.Exponent
+        return [RSASoftKeyHelper]::ExportSpkiPublicKeyPem($params.Modulus, $params.Exponent)
     }
     return $null
 }
@@ -245,49 +225,29 @@ function Get-ZtaCertificate ($cn) {
     return $cert
 }
 
-# Helper per pipe bidirezionale asincrona dei dati TCP
-function Start-Pipe ($sourceStream, $targetStream, $connectionName) {
-    $ps = [System.Management.Automation.PowerShell]::Create()
-    $null = $ps.AddScript({
-        param($src, $tgt)
-        $buffer = New-Object byte[] 65536
-        try {
-            while ($true) {
-                $bytesRead = $src.Read($buffer, 0, $buffer.Length)
-                if ($bytesRead -le 0) { break }
-                $tgt.Write($buffer, 0, $bytesRead)
-                $tgt.Flush()
-            }
-        } catch {
-            # Connessione interrotta
-        } finally {
-            $src.Close()
-            $tgt.Close()
-        }
-    }).AddArgument($sourceStream).AddArgument($targetStream) | Out-Null
-    return $ps
-}
-
-# Avvia il Listener TCP Proxy mTLS locale per una sessione
-function Start-ProxySession ($cn, $ttlSeconds) {
-    # 1. Trova il certificato nel Windows Store
+# Helper che esegue la ricerca del certificato con fallback su file
+function Get-ZtaCertificateWithFallback ($cn) {
     $cert = Get-ZtaCertificate $cn
     if (-not $cert) {
         Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
         $cert = Get-FileCertWithKey $cn
-        if (-not $cert) {
-            throw "Certificato non trovato né in Windows Store né su disco per CN=$cn"
-        }
-        Write-Host "[API] Cert caricato da file per CN=$cn" -ForegroundColor Green
     } elseif (-not $cert.HasPrivateKey) {
         Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
         $fileCert = Get-FileCertWithKey $cn
         if ($fileCert) {
             $cert = $fileCert
             Write-Host "[API] Cert+key caricati da file per CN=$cn" -ForegroundColor Green
-        } else {
-            Write-Host "[API] Fallback file non disponibile per CN=$cn. Uso store cert senza private key (potrebbe fallire)." -ForegroundColor Yellow
         }
+    }
+    return $cert
+}
+
+# Avvia il Listener TCP Proxy mTLS locale per una sessione
+function Start-ProxySession ($cn, $ttlSeconds) {
+    # 1. Trova il certificato nel Windows Store o su disco
+    $cert = Get-ZtaCertificateWithFallback $cn
+    if (-not $cert) {
+        throw "Certificato non trovato né in Windows Store né su disco per CN=$cn"
     }
 
     # 2. Crea un listener TCP su una porta dinamica (porta 0)
@@ -504,16 +464,14 @@ function Start-HttpServer {
             
             try {
                 $jsonBody = if ($body) { ConvertFrom-Json $body } else { $null }
+                $cn = $null
+                if ($jsonBody) {
+                    $cn = if ($jsonBody.common_name) { $jsonBody.common_name } else { $jsonBody.user }
+                }
                 
                 if ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/cert") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
                     Write-Host "[API] Ricevuto /cert per CN=$cn" -ForegroundColor Gray
-                    $cert = Get-ZtaCertificate $cn
-                    if (-not $cert) {
-                        Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
-                        $cert = Get-FileCertWithKey $cn
-                    }
+                    $cert = Get-ZtaCertificateWithFallback $cn
                     if ($cert) {
                         $responseObj = @{
                             cert_pem = Get-CertPem $cert
@@ -525,8 +483,6 @@ function Start-HttpServer {
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/enroll") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
                     $role = $jsonBody.role
                     if (-not $role) { $role = "doctor" }
                     $dept = $jsonBody.department
@@ -664,8 +620,6 @@ function Start-HttpServer {
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/proxy/start") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
                     $ttl = if ($jsonBody.ttl_seconds) { $jsonBody.ttl_seconds } else { 900 }
                     Write-Host "[API] Ricevuto /proxy/start per CN=$cn, TTL=$ttl" -ForegroundColor Gray
                     
@@ -695,12 +649,9 @@ function Start-HttpServer {
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/oidc/token") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
-                    if (-not $cn) { $cn = "paolo.roselli" }
-                    $stepUp = $jsonBody.step_up
-                    if ($stepUp -eq "true" -or $stepUp -eq $true) { $stepUp = $true } else { $stepUp = $false }
-                    Write-Host "[API] Ricevuto /oidc/token per CN=$cn, StepUp=$stepUp" -ForegroundColor Gray
+                    $tokenCN = if ($cn) { $cn } else { "paolo.roselli" }
+                    $stepUp = $jsonBody.step_up -eq "true" -or $jsonBody.step_up -eq $true
+                    Write-Host "[API] Ricevuto /oidc/token per CN=$tokenCN, StepUp=$stepUp" -ForegroundColor Gray
                     
                     try {
                         # 1. Recupera challenge dal server PKI
@@ -709,30 +660,19 @@ function Start-HttpServer {
                         $challengeId = $challengeResp.challenge_id
                         
                         # 2. Trova il certificato nel Windows Store (con fallback su file)
-                        $cert = Get-ZtaCertificate $cn
+                        $cert = Get-ZtaCertificateWithFallback $tokenCN
                         if (-not $cert) {
-                            Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
-                            $cert = Get-FileCertWithKey $cn
-                            if (-not $cert) {
-                                throw "Certificato non trovato in Windows Store né su disco per CN=$cn"
-                            }
-                        } elseif (-not $cert.HasPrivateKey) {
-                            Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
-                            $fileCert = Get-FileCertWithKey $cn
-                            if ($fileCert) {
-                                $cert = $fileCert
-                                Write-Host "[API] Cert+key caricati da file per CN=$cn" -ForegroundColor Green
-                            }
+                            throw "Certificato non trovato in Windows Store né su disco per CN=$tokenCN"
                         }
                         
                         # 3. Costruisci il proof_string e firmalo con la chiave TPM/Software
                         $timestamp = (Get-Date -uformat "%Y-%m-%dT%H:%M:%SZ")
-                        $proofString = "ZTA-CERT-BINDING|CN=$cn|TIME=$timestamp"
+                        $proofString = "ZTA-CERT-BINDING|CN=$tokenCN|TIME=$timestamp"
                         $proofBytes = [System.Text.Encoding]::UTF8.GetBytes($proofString)
                         
                         $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
                         if (-not $rsa) {
-                            throw "Impossibile recuperare la chiave privata per CN=$cn"
+                            throw "Impossibile recuperare la chiave privata per CN=$tokenCN"
                         }
                         $sigBytes = $rsa.SignData($proofBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
                         $sigB64 = [Convert]::ToBase64String($sigBytes)
@@ -757,7 +697,7 @@ function Start-HttpServer {
                             token = $oidcResp.access_token
                             access_token = $oidcResp.access_token
                         }
-                        Write-Host "[API] /oidc/token completato con successo per CN=$cn" -ForegroundColor Green
+                        Write-Host "[API] /oidc/token completato con successo per CN=$tokenCN" -ForegroundColor Green
                     } catch {
                         $statusCode = 500
                         $responseObj = @{ status = "error"; message = $_.Exception.Message }
@@ -774,24 +714,14 @@ function Start-HttpServer {
                                 # Fallback: keep the default $responseObj set above
                             }
                         }
-                        Write-Host "[API] /oidc/token fallito per CN=$cn : $_" -ForegroundColor Red
+                        Write-Host "[API] /oidc/token fallito per CN=$tokenCN : $_" -ForegroundColor Red
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/sign") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
                     $dataB64 = $jsonBody.data_b64
                     Write-Host "[API] Ricevuto /sign per CN=$cn" -ForegroundColor Gray
                     
-                    $cert = Get-ZtaCertificate $cn
-                    if (-not $cert) {
-                        Write-Host "[API] Cert non trovato in Windows Store per CN=$cn. Cerco su disco..." -ForegroundColor Yellow
-                        $cert = Get-FileCertWithKey $cn
-                    } elseif (-not $cert.HasPrivateKey) {
-                        Write-Host "[API] Cert in Windows Store per CN=$cn non ha private key. Cerco su disco..." -ForegroundColor Yellow
-                        $fileCert = Get-FileCertWithKey $cn
-                        if ($fileCert) { $cert = $fileCert }
-                    }
+                    $cert = Get-ZtaCertificateWithFallback $cn
                     
                     if ($cert) {
                         try {
@@ -819,16 +749,11 @@ function Start-HttpServer {
                     }
                 }
                 elseif ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/auth") {
-                    $cn = $jsonBody.common_name
-                    if (-not $cn) { $cn = $jsonBody.user }
                     Write-Host "[API] Ricevuto /auth per CN=$cn" -ForegroundColor Gray
                     
                     try {
-                        # Trova il certificato nel Windows Store
-                        $cert = Get-ZtaCertificate $cn
-                        if (-not $cert) {
-                            $cert = Get-FileCertWithKey $cn
-                        }
+                        # Trova il certificato nel Windows Store o su disco
+                        $cert = Get-ZtaCertificateWithFallback $cn
                         if (-not $cert) {
                             throw "Certificato non trovato per CN=$cn"
                         }
