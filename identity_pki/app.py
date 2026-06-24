@@ -347,7 +347,7 @@ def create_app(data_dir=None) -> Flask:
         # Clean up pending
         PENDING_OTPS.pop(email, None)
 
-        app.logger.info(f"MFA Verified for {email}. Enrollment session token issued: {token}")
+        app.logger.info(f"MFA Verified for {email}. Enrollment session token issued (redacted)")
         return jsonify({
             "status": "success",
             "enrollment_session_token": token,
@@ -561,7 +561,7 @@ def create_app(data_dir=None) -> Flask:
         if not session or (now - session["login_time"]) > timedelta(hours=12):
             return jsonify({
                 "error": "primary_auth_required",
-                "reason": "session_expired",
+                "reason": "primary_session_required",
                 "message": "Autenticazione primaria scaduta o non trovata. Esegui il login AD + MFA."
             }), 401
             
@@ -569,7 +569,7 @@ def create_app(data_dir=None) -> Flask:
             if (now - session["last_mfa_time"]) > timedelta(seconds=120):
                 return jsonify({
                     "error": "primary_auth_required",
-                    "reason": "step_up",
+                    "reason": "step_up_required",
                     "message": "Step-up Authentication richiesta. Reinserisci la password e l'OTP."
                 }), 401
         

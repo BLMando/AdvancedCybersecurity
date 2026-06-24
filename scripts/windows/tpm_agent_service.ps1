@@ -523,7 +523,7 @@ function Start-HttpServer {
                     $dept = $jsonBody.department
                     if (-not $dept) { $dept = "Cardiologia" }
                     $sessionToken = $jsonBody.enrollment_session_token
-                    Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept, Token=$sessionToken" -ForegroundColor Gray
+                    Write-Host "[API] Ricevuto /enroll per CN=$cn, Ruolo=$role, Reparto=$dept, Token=(redacted)" -ForegroundColor Gray
                     
                     # Inizializza mac e cpu per l'utilizzo anche nel blocco catch di fallback
                     $mac = ""

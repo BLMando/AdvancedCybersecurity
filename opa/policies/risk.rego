@@ -56,7 +56,7 @@ content_risk := 0 if {
 	identity.is_http_request
 } else := 100 if {
 	identity.normalized_collection_name == "clinical_records"
-	identity.action_name in {"find", "update"}
+	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 } else := 100 if {
 	identity.normalized_collection_name == "billing"
