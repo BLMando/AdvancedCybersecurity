@@ -46,7 +46,7 @@ class PKIClient: NSObject, URLSessionDelegate {
             "cpu_id": hwInfo["cpu"] ?? "unknown",
             "enrollment_session_token": enrollmentSessionToken
         ]
-        print("[DEBUG] Payload Enrollment: \(body)")
+print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(department), enrollment_session_token=(redacted)")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (eData, eResp) = try await pkiSession.data(for: request)
