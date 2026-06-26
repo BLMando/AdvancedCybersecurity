@@ -113,5 +113,5 @@ adaptive_threshold := t if {
 	t := 15
 } else := t if {
 	identity.action_name == "delete"
-	t := 10
+	t := 20
 } else := 15

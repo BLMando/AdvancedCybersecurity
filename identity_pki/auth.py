@@ -47,8 +47,8 @@ def check_action_permissions(role: str, collection_name: str, mongo_action: str)
         "doctor": {
             "patients": {"find"},
             "providers": {"find"},
-            "admissions": {"find", "insert", "update"},
-            "clinical_records": {"find", "insert", "update"},
+            "admissions": {"find", "insert", "update", "delete"},
+            "clinical_records": {"find", "insert", "update", "delete"},
             "billing": set()
         },
         "billing_staff": {
@@ -56,7 +56,7 @@ def check_action_permissions(role: str, collection_name: str, mongo_action: str)
             "providers": {"find"},
             "admissions": {"find"},
             "clinical_records": set(),
-            "billing": {"find", "insert", "update"}
+            "billing": {"find", "insert", "update", "delete"}
         },
         "auditor": {
             "patients": {"find"},
@@ -68,7 +68,7 @@ def check_action_permissions(role: str, collection_name: str, mongo_action: str)
         "receptionist": {
             "patients": {"find", "insert", "update"},
             "providers": {"find"},
-            "admissions": {"find", "insert", "update"},
+            "admissions": {"find", "insert", "update", "delete"},
             "clinical_records": set(),
             "billing": set()
         }

@@ -123,8 +123,8 @@ permissions := {
 	"doctor": {
 		"patients":         {"find"},
 		"providers":        {"find"},
-		"admissions":       {"find", "insert", "update"},
-		"clinical_records": {"find", "insert", "update"},
+		"admissions":       {"find", "insert", "update", "delete"},
+		"clinical_records": {"find", "insert", "update", "delete"},
 		"billing":          {}
 	},
 	"billing_staff": {
@@ -132,7 +132,7 @@ permissions := {
 		"providers":        {"find"},
 		"admissions":       {"find"},
 		"clinical_records": {},
-		"billing":          {"find", "insert", "update"}
+		"billing":          {"find", "insert", "update", "delete"}
 	},
 	"auditor": {
 		"patients":         {"find"},
@@ -144,7 +144,7 @@ permissions := {
 	"receptionist": {
 		"patients":         {"find", "insert", "update"},
 		"providers":        {"find"},
-		"admissions":       {"find", "insert", "update"},
+		"admissions":       {"find", "insert", "update", "delete"},
 		"clinical_records": {},
 		"billing":          {}
 	},

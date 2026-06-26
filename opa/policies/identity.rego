@@ -129,7 +129,8 @@ user_role_map := {
 	"test.auditor":   "auditor",
 	"test.billing":   "billing_staff",
 	"test.reception": "receptionist",
-	"test.receptionist": "receptionist"
+	"test.receptionist": "receptionist",
+	"admin":          "admin"
 }
 
 known_users := {
@@ -137,7 +138,8 @@ known_users := {
 	"test.auditor",
 	"test.billing",
 	"test.reception",
-	"test.receptionist"
+	"test.receptionist",
+	"admin"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {

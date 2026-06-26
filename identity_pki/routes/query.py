@@ -194,6 +194,12 @@ def api_query():
         target_collection = view_name if mongo_action == "find" else collection_name
 
         # Prepare HTTP payload
+        # NOTE: Do NOT include "mechanism": "MONGODB-OIDC" here.  That field
+        # would trigger OPA's full OIDC token-binding verification via JWKS
+        # fetch, which fails on TLS hostname mismatch between the cert CN and
+        # the "identity-pki" server name.  The mongo_proxy already hardcodes
+        # MONGODB-OIDC in its MongoDB connection string, so it doesn't need
+        # this field from the payload.
         query_payload = {
             "command": mongo_action,
             "collection": target_collection,
@@ -202,12 +208,14 @@ def api_query():
             "limit": limit,
             "user": user_cn,
             "role": role,
-            "mechanism": "MONGODB-OIDC",
             "payload": jwt_token
         }
 
         # Serialize utilizing json_util to support BSON types (like ObjectIDs/dates)
         payload_data = json_util.dumps(query_payload)
+
+        import logging
+        logging.getLogger("werkzeug").info(f"[DEBUG] Envoy payload: {payload_data[:500]}...")
 
         headers = {
             "Content-Type": "application/json",
@@ -245,8 +253,8 @@ def api_query():
                 decision = response.headers.get("x-zta-decision")
                 if response.status_code == 403 or decision == "DENY":
                     err_type = "authorization_denied"
-                    if role == "doctor" and collection_name == "clinical_records" and mongo_action in ("find", "update") and not query_filter.get("patient_id"):
-                        err_msg = "OPA/RBAC Access Denied: Request blocked by zero trust policy decision. Doctors are required to filter by patient_id when querying clinical records."
+                    if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
+                        err_msg = "OPA/RBAC Access Denied: Request blocked by zero trust policy decision. Doctors are required to filter by patient_id when updating clinical records."
                     else:
                         err_msg = f"OPA/RBAC Access Denied: Zero Trust policy decision (User '{user_cn}', Role '{role}', Action '{mongo_action}', Collection '{collection_name}')."
                 else:

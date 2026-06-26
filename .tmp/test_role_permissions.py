@@ -11,10 +11,10 @@ if sys.platform == 'win32':
 OPA_URL = "http://127.0.0.1:8181/v1/data/envoy/authz"
 
 ROLE_TO_USER = {
-    "doctor": "mario.rossi",
-    "billing_staff": "anna.verdi",
-    "auditor": "giulia.bianchi",
-    "receptionist": "luca.ferrari",
+    "doctor": "test.doctor",
+    "billing_staff": "test.billing",
+    "auditor": "test.auditor",
+    "receptionist": "test.receptionist",
     "admin": "admin"
 }
 
@@ -35,8 +35,8 @@ PERMISSIONS = {
     "doctor": {
         "patients": {"find"},
         "providers": {"find"},
-        "admissions": {"find", "insert", "update"},
-        "clinical_records": {"find", "insert", "update"},
+        "admissions": {"find", "insert", "update", "delete"},
+        "clinical_records": {"find", "insert", "update", "delete"},
         "billing": set()
     },
     "billing_staff": {
@@ -44,7 +44,7 @@ PERMISSIONS = {
         "providers": {"find"},
         "admissions": {"find"},
         "clinical_records": set(),
-        "billing": {"find", "insert", "update"}
+        "billing": {"find", "insert", "update", "delete"}
     },
     "auditor": {
         "patients": {"find"},
@@ -56,7 +56,7 @@ PERMISSIONS = {
     "receptionist": {
         "patients": {"find", "insert", "update"},
         "providers": {"find"},
-        "admissions": {"find", "insert", "update"},
+        "admissions": {"find", "insert", "update", "delete"},
         "clinical_records": set(),
         "billing": set()
     }
