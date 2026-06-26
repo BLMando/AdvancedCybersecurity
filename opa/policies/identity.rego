@@ -103,7 +103,7 @@ current_role := role if {
 } else := role if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	role := get_cert_title(cert)
@@ -126,17 +126,18 @@ get_cert_title(cert) := val if {
 
 user_role_map := {
 	"test.doctor":    "doctor",
-	"test.auditor":  "auditor",
+	"test.auditor":   "auditor",
 	"test.billing":   "billing_staff",
-	"test.reception": "receptionist"
-
+	"test.reception": "receptionist",
+	"test.receptionist": "receptionist"
 }
 
 known_users := {
 	"test.doctor",
 	"test.auditor",
 	"test.billing",
-	"test.reception"
+	"test.reception",
+	"test.receptionist"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {
@@ -147,7 +148,7 @@ cert_pem_decoded(raw_pem) := decoded if {
 cert_subject_cn := cn if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	cn := get_cert_cn(cert)
@@ -243,13 +244,13 @@ verify_oidc_jwt(token) := claims if {
 	jwks_resp := http.send({
 		"method": "get",
 		"url": "https://identity-pki:8080/.well-known/jwks.json",
-		"tls_insecure_skip_verify": true,
+		"tls_ca_cert_file": "/etc/certs/ca/ca.crt",
+		"tls_server_name": "identity-pki",
 		"timeout": 1000000000
 	})
 	jwks_resp.status_code == 200
-	jwks := json.marshal(jwks_resp.body)
 	
-	io.jwt.verify_rs256(token, jwks)
+	io.jwt.verify_rs256(token, jwks_resp.body)
 	[_, claims, _] := io.jwt.decode(token)
 }
 

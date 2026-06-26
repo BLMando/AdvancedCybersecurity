@@ -58,6 +58,21 @@ test_doctor_clinical_find if {
 	}
 }
 
+# Doctors may query clinical_records without patient_id filter (only update requires it)
+test_doctor_clinical_find_no_patient_id_allowed if {
+	allow with input as {
+		"attributes": {"source": {"principal": "mario.rossi"}},
+		"parsed_body": {
+			"user": "mario.rossi",
+			"device": "device-laptop-001",
+			"network_ip": "172.20.0.5",
+			"command": "find",
+			"collection": "clinical_records",
+			"query": "{}"
+		}
+	}
+}
+
 test_doctor_billing_denied if {
 	deny with input as {
 		"parsed_body": {

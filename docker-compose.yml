@@ -153,6 +153,7 @@ services:
     restart: unless-stopped
     depends_on:
       - zta-log-forwarder
+      - identity-pki
     ports:
       - "127.0.0.1:8181:8181"
       - "127.0.0.1:9002:9002"

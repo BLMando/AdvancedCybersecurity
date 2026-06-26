@@ -65,8 +65,13 @@ PERMISSIONS = {
 def calculate_expected_allowed(user, collection, command, device="device-laptop-001", network_ip="172.20.0.5"):
     # Replicates the OPA policy logic:
     # 1. Resolve role
-    role = ROLE_TO_USER.get(user)
+    USER_TO_ROLE = {v: k for k, v in ROLE_TO_USER.items()}
+    role = USER_TO_ROLE.get(user)
     if not role or role not in PERMISSIONS:
+        return False
+        
+    # Actions update and delete are sensitive and require step-up (not simulated here)
+    if command in ("update", "delete"):
         return False
         
     # 2. RBAC check (role_action_allowed)
