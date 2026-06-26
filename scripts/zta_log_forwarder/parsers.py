@@ -24,13 +24,6 @@ def extract_envoy_fields(log_entry: dict) -> dict:
         "duration_ms": log_entry.get("duration") or "0",
         "bytes_sent": log_entry.get("bytes_sent") or "0",
         "bytes_received": log_entry.get("bytes_received") or "0",
-        "user": log_entry.get("user") or "unknown",
-        "device": log_entry.get("device") or "no-tpm",
-        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
-        "decision": log_entry.get("decision") or "unknown",
-        "risk_score": log_entry.get("risk_score") or "0",
-        "command": log_entry.get("command") or "unknown",
-        "collection": log_entry.get("collection") or "unknown",
     }
 
 

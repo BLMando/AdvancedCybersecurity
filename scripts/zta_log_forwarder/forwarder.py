@@ -69,8 +69,8 @@ def handle_stats_query():
         f'| eval eta_min = (now() - _time) / 60 '
         f'| eval peso = if(index="zta_envoy", 1.0, exp(-0.231 * eta_min)) '
         f'| eval type=case('
-        f'  index="zta_envoy" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
-        f'  index="zta_envoy" AND sourcetype="envoy:access" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
+        f'  index="zta_envoy" AND sourcetype="zta:app:query" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
+        f'  index="zta_envoy" AND sourcetype="zta:app:query" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
         f'  index="zta_snort", "snort_alerts",'
         f'  index="zta_nftables", "nftables_drops",'
         f'  index="zta_mongodb_audit", "mongo_failures"'
@@ -108,7 +108,7 @@ def handle_stats_query():
     current_count = 0.0
 
     baseline_query = (
-        f'search index=zta_envoy user="{esc(user)}" earliest=-7d '
+        f'search index=zta_envoy sourcetype="zta:app:query" user="{esc(user)}" earliest=-7d '
         f'| eval is_current = if(_time >= now() - 900, 1, 0) '
         f'| bucket _time span=15m '
         f'| stats count as query_count by _time, is_current '
@@ -311,6 +311,7 @@ def handle_app_audit():
         "message": body.get("message", ""),
         "jwt_auth": body.get("jwt_auth", False),
         "hardware_mode": body.get("hardware_mode", False),
+        "risk_score": body.get("risk_score", 0),
     }
 
     hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:app:query")

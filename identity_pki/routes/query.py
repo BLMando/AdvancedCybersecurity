@@ -41,6 +41,7 @@ def health():
 @query_bp.post("/api/query")
 def api_query():
     """Execute a MongoDB query via Envoy presenting the user's client certificate."""
+    response = None
     payload = request.get_json(silent=True) or {}
     user_cn = payload.get("user")
     collection_name = payload.get("collection")
@@ -109,6 +110,13 @@ def api_query():
         )
 
     def _send_audit_event(*args, **kwargs):
+        risk_score = 0
+        if 'response' in locals() and response is not None:
+            try:
+                risk_score = int(response.headers.get("x-zta-risk-score", 0))
+            except ValueError:
+                pass
+        kwargs.setdefault("risk_score", risk_score)
         _send_audit_event_impl(current_app.logger, *args, **kwargs)
 
     combined_pem_path = None
