@@ -7,7 +7,7 @@ import threading as _threading
 def send_audit_event_impl(logger: logging.Logger, user, role, collection, action, translated_view,
                           query_filter, decision, count=0, error_type="",
                           message="", jwt_auth=False, hardware_mode=False,
-                          risk_score=0):
+                          risk_score=0, device="unknown"):
 
     def _send():
         try:
@@ -26,6 +26,7 @@ def send_audit_event_impl(logger: logging.Logger, user, role, collection, action
                 "jwt_auth": jwt_auth,
                 "hardware_mode": hardware_mode,
                 "risk_score": risk_score,
+                "device": device,
             }).encode("utf-8")
             req = urllib.request.Request(
                 "http://zta-log-forwarder:5000/api/audit",

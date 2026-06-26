@@ -132,10 +132,11 @@ def extract_role_from_jwt(jwt_token: Optional[str], logger: logging.Logger) -> s
     return "unknown"
 
 
-def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt_token: Optional[str], logger: logging.Logger) -> tuple[str, bool]:
-    """Resolve the user's role and hardware mode from metadata and JWT."""
+def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt_token: Optional[str], logger: logging.Logger) -> tuple[str, bool, str]:
+    """Resolve the user's role, hardware mode, and device details from metadata and JWT."""
     role = extract_role_from_jwt(jwt_token, logger)
     hardware_mode = False
+    device_info = "no-tpm"
 
     metadata_path = os.path.join(service.cert_dir, f"issued/{user_cn}/metadata.json")
     if os.path.exists(metadata_path):
@@ -144,7 +145,13 @@ def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt
                 meta = json.load(f)
                 if role == "unknown":
                     role = str(meta.get("role", "unknown"))
-                hardware_mode = meta.get("enrollment_method", "manual") in ("random", "tpm")
+                enroll_method = meta.get("enrollment_method", "manual")
+                hardware_mode = enroll_method in ("random", "tpm", "hardware_proof")
+                if hardware_mode:
+                    hw = meta.get("hardware", {})
+                    cpu = hw.get("cpu", "CPU-UNKNOWN")
+                    mac = hw.get("mac", "MAC-UNKNOWN")
+                    device_info = f"Hardware-Bound (CPU: {cpu}, MAC: {mac})"
         except Exception:
             pass
 
@@ -160,4 +167,4 @@ def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt
         except Exception:
             pass
 
-    return role, hardware_mode
+    return role, hardware_mode, device_info

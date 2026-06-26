@@ -98,7 +98,7 @@
           <query><![CDATA[index=zta_envoy sourcetype="zta:app:query" decision="DENY"
             | eval reason = case(
                 match(user, "urn:device:"), "Certificato Non Registrato",
-                hardware_mode == "false" OR hardware_mode == 0, "Dispositivo Non Sotto Controllo (No TPM)",
+                device == "no-tpm" OR hardware_mode == "false" OR hardware_mode == 0, "Dispositivo Non Sotto Controllo (No TPM)",
                 risk_score > 15, "Risk Score Superiore alla Soglia",
                 1=1, "Violazione Policy Accesso"
               )
@@ -174,7 +174,7 @@
       <chart>
         <search>
           <query>index=zta_envoy sourcetype="zta:app:query"
-            | eval device_type = if(hardware_mode="true" OR hardware_mode=1, "Hardware-Bound", "No TPM (Software)")
+            | eval device_type = if(device="no-tpm" OR device="unknown" OR hardware_mode="false" OR hardware_mode=0, "No TPM (Software)", "Hardware-Bound")
             | stats count by device_type decision
             | table device_type decision count</query>
           <earliest>-24h</earliest>
@@ -192,7 +192,7 @@
       <table>
         <search>
           <query><![CDATA[index=zta_envoy sourcetype="zta:app:query"
-            | eval device = if(hardware_mode="true" OR hardware_mode=1, "Hardware-Bound", "No TPM (Software)")
+            | eval device = if(device="no-tpm" OR device="unknown", "No TPM (Software)", device)
             | table _time user resource command decision risk_score device
             | head 25]]></query>
           <earliest>-24h</earliest>

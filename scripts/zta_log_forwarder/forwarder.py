@@ -312,6 +312,7 @@ def handle_app_audit():
         "jwt_auth": body.get("jwt_auth", False),
         "hardware_mode": body.get("hardware_mode", False),
         "risk_score": body.get("risk_score", 0),
+        "device": body.get("device", "unknown"),
     }
 
     hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:app:query")

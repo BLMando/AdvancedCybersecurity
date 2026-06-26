@@ -117,6 +117,7 @@ def api_query():
             except ValueError:
                 pass
         kwargs.setdefault("risk_score", risk_score)
+        kwargs.setdefault("device", device_info)
         _send_audit_event_impl(current_app.logger, *args, **kwargs)
 
     combined_pem_path = None
@@ -127,7 +128,7 @@ def api_query():
             return error_response(f"Failed to prepare combined PEM: {e}", 500)
 
     # Resolve role and hardware_mode
-    role, hardware_mode = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, current_app.logger)
+    role, hardware_mode, device_info = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, current_app.logger)
 
     # Translate collection to RLS view
     view_name = collection_name
