@@ -6,22 +6,6 @@ static_resources:
         socket_address:
           address: 0.0.0.0
           port_value: 10000
-      # Access log records every connection decision to a shared volume
-      # that the zta-log-forwarder reads and ships to Splunk.
-      access_log:
-        - name: envoy.access_loggers.file
-          typed_config:
-            "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
-            path: /var/log/envoy/access.log
-            log_format:
-              json_format:
-                timestamp: "%START_TIME%"
-                downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
-                downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
-                duration: "%DURATION%"
-                bytes_sent: "%BYTES_SENT%"
-                bytes_received: "%BYTES_RECEIVED%"
-                upstream_host: "%UPSTREAM_HOST%"
       listener_filters:
         # Run before TLS termination so Envoy can inspect the ClientHello
         # and derive the JA3 fingerprint used as a device hint.
@@ -57,6 +41,20 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress_http
+                access_log:
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /var/log/envoy/access.log
+                      log_format:
+                        json_format:
+                          timestamp: "%START_TIME%"
+                          downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
+                          downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
+                          duration: "%DURATION%"
+                          bytes_sent: "%BYTES_SENT%"
+                          bytes_received: "%BYTES_RECEIVED%"
+                          upstream_host: "%UPSTREAM_HOST%"
                 route_config:
                   name: local_route
                   virtual_hosts:
