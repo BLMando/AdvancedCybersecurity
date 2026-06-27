@@ -660,54 +660,12 @@ test_mongo_failures_raises_risk_and_denies if {
 }
 
 # ─── NoSQL Injection & WAF Tests ──────────────────────────────────────────────
-
-test_nosql_injection_where_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"$where\": \"this.age > 30\"}"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {"test.doctor": {"device-laptop-001": ["172.20.0.5"]}}
-}
-
-test_nosql_injection_function_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"$function\": \"function() { return true; }\"}"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {"test.doctor": {"device-laptop-001": ["172.20.0.5"]}}
-}
-
-test_nosql_injection_sleep_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"name\": \"test; sleep(5000);\"}"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {"test.doctor": {"device-laptop-001": ["172.20.0.5"]}}
-}
+# NOTE: L'ispezione del payload (NoSQL Injection, DoS patterns) è ora gestita
+# esclusivamente dal filtro Lua L7 WAF inline in Envoy, posizionato dopo
+# ext_authz (OPA). OPA non valuta più is_malicious; la responsabilità è:
+#   - OPA  → identità, RBAC, rischio, step-up, segregation of duties
+#   - Lua  → ispezione contenuto query (pattern matching raw sul body)
+# I test relativi a $where, $function, sleep() sono stati rimossi da qui.
 
 
 

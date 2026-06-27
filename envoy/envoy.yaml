@@ -92,35 +92,32 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       inline_code: |
                         function envoy_on_request(request_handle)
-                          local req_headers = request_handle:headers()
-                          local decision = req_headers:get("x-zta-decision")
-                          
-                          if decision == "ALLOW" then
-                            local body = request_handle:body()
-                            if body then
-                              local len = body:length()
-                              if len > 0 then
-                                local body_str = tostring(body:getBytes(0, len))
-                                local blocked_patterns = { "%$where", "%$function", "%$regex", "%$ne", "%$gt", "sleep%(", "while%(" }
-                                local is_blocked = false
-                                local matched_pattern = nil
-                                
-                                for _, pattern in ipairs(blocked_patterns) do
-                                  if string.match(body_str, pattern) then
-                                    is_blocked = true
-                                    matched_pattern = pattern
-                                    break
-                                  end
+                          local body = request_handle:body()
+                          if body then
+                            local len = body:length()
+                            if len > 0 then
+                              local body_str = tostring(body:getBytes(0, len))
+                              local blocked_patterns = { "%$where", "%$function", "%$regex", "%$ne", "%$gt", "sleep%(", "while%(" }
+                              local is_blocked = false
+                              local matched_pattern = nil
+                              
+                              for _, pattern in ipairs(blocked_patterns) do
+                                if string.match(body_str, pattern) then
+                                  is_blocked = true
+                                  matched_pattern = pattern
+                                  break
                                 end
-                                
-                                if is_blocked then
-                                  local request_id = req_headers:get("x-request-id") or "unknown"
-                                  local user = req_headers:get("x-zta-user") or "unknown"
-                                  local role = req_headers:get("x-zta-role") or "unknown"
-                                  local command = req_headers:get("x-zta-command") or "unknown"
-                                  local collection = req_headers:get("x-zta-collection") or "unknown"
-                                  local device = req_headers:get("x-zta-device") or "unknown"
-                                  local risk_score = req_headers:get("x-zta-risk-score") or "0"
+                              end
+                              
+                              if is_blocked then
+                                local req_headers = request_handle:headers()
+                                local request_id = req_headers:get("x-request-id") or "unknown"
+                                local user = req_headers:get("x-zta-user") or "unknown"
+                                local role = req_headers:get("x-zta-role") or "unknown"
+                                local command = req_headers:get("x-zta-command") or "unknown"
+                                local collection = req_headers:get("x-zta-collection") or "unknown"
+                                local device = req_headers:get("x-zta-device") or "unknown"
+                                local risk_score = req_headers:get("x-zta-risk-score") or "0"
                                   
                                   local timestamp = "2026-06-27T15:48:08Z"
                                   pcall(function()
@@ -208,7 +205,6 @@ static_resources:
                               end
                             end
                           end
-                        end
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

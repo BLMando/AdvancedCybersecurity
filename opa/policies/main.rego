@@ -6,7 +6,6 @@ import future.keywords
 import data.envoy.authz.identity
 import data.envoy.authz.criteria
 import data.envoy.authz.risk
-import data.envoy.authz.policy
 
 # ─── Hybrid ZTA Decision Rule ─────────────────────────────────────────────────
 
@@ -15,7 +14,6 @@ default allow := false
 allow if {
 	criteria.criteria_allow
 	risk.risk_score_allow
-	not policy.is_malicious
 	is_valid_oidc_if_present
 }
 
@@ -65,9 +63,6 @@ deny_reason := reason if {
 	not identity.valid_oidc_token
 	reason := "OIDC_TOKEN_INVALID"
 } else := reason if {
-	policy.is_malicious
-	reason := "MALICIOUS_REQUEST"
-} else := reason if {
 	not risk.risk_score_allow
 	reason := "RISK_THRESHOLD_EXCEEDED"
 } else := reason if {
@@ -112,9 +107,6 @@ is_segregation_violation if {
 deny_message := msg if {
 	deny_reason == "OIDC_TOKEN_INVALID"
 	msg := "Sessione di autenticazione non valida o scaduta. Effettua nuovamente il login hardware."
-} else := msg if {
-	deny_reason == "MALICIOUS_REQUEST"
-	msg := "Rilevato tentativo di injection o query malevola."
 } else := msg if {
 	deny_reason == "RISK_THRESHOLD_EXCEEDED"
 	msg := sprintf("Accesso negato: il livello di rischio calcolato (%d) supera la soglia di sicurezza consentita.", [risk.risk_score])
