@@ -2,6 +2,25 @@ http_test_listener serve solo a validare la parte mTLS crittografica/hardware is
 
 Gli eventi UNKNOWN del firewall l4 rappresentano semplicemente traffico in uscita consentito che è stato registrato a fini di audit e monitoraggio.   
 
+
+Quando fai la chiamata, OPA legge il valore dall'estensione OU (Organizational Unit) all'interno del certificato client mTLS presentato. Quel   
+certificato è fisicamente firmato con quel MAC specifico e non può essere cambiato al volo senza rigenerare il certificato (rifacendo           
+l'enrollment).                                                                                                                                  
+                                                                                                                                                
+Quindi, fa sempre riferimento al tuo PC, ma identifica l'interfaccia di rete virtuale (WSL/Hyper-V) o fisica che l'agente ha selezionato durante
+l'enrollment.     
+
+
+ Più nello specifico:                                                                                                                            
+                                                                                                                                                  
+  1. Rete  frontend-net : In Docker Compose hai configurato la rete  frontend-net  che gestisce l'ingresso (traffico verso il proxy Envoy). Questa
+  rete ha la subnet  172.18.0.0/16 .                                                                                                              
+  2. Gateway: L'indirizzo  .1  di ogni rete bridge di Docker è l'interfaccia virtuale del tuo computer host (il tuo PC Windows).                  
+                                                                                                                                                  
+  Quindi, dal punto di vista dei container Docker (ad esempio Envoy, che su quella rete ha l'IP  172.18.0.2 ), l'IP  172.18.0.1  rappresenta il   
+  tuo computer fisico (l'host che avvia le richieste o che fa da router verso l'esterno).  
+
+
 ATTUALE FLUSSO:
 
 ### Diagramma di Flusso delle Operazioni
