@@ -92,17 +92,120 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       inline_code: |
                         function envoy_on_request(request_handle)
-                          local body = request_handle:body()
-                          if body then
-                            local len = body:length()
-                            if len > 0 then
-                              local body_str = tostring(body:getBytes(0, len))
-                              local command = string.match(body_str, '"command"%s*:%s*"([^"]+)"') or "unknown"
-                              local collection = string.match(body_str, '"collection"%s*:%s*"([^"]+)"') or "unknown"
-                              
-                              local meta = request_handle:streamInfo():dynamicMetadata()
-                              meta:set("envoy.filters.http.lua", "command", command)
-                              meta:set("envoy.filters.http.lua", "collection", collection)
+                          local req_headers = request_handle:headers()
+                          local decision = req_headers:get("x-zta-decision")
+                          
+                          if decision == "ALLOW" then
+                            local body = request_handle:body()
+                            if body then
+                              local len = body:length()
+                              if len > 0 then
+                                local body_str = tostring(body:getBytes(0, len))
+                                local blocked_patterns = { "%$where", "%$function", "%$regex", "%$ne", "%$gt", "sleep%(", "while%(" }
+                                local is_blocked = false
+                                local matched_pattern = nil
+                                
+                                for _, pattern in ipairs(blocked_patterns) do
+                                  if string.match(body_str, pattern) then
+                                    is_blocked = true
+                                    matched_pattern = pattern
+                                    break
+                                  end
+                                end
+                                
+                                if is_blocked then
+                                  local request_id = req_headers:get("x-request-id") or "unknown"
+                                  local user = req_headers:get("x-zta-user") or "unknown"
+                                  local role = req_headers:get("x-zta-role") or "unknown"
+                                  local command = req_headers:get("x-zta-command") or "unknown"
+                                  local collection = req_headers:get("x-zta-collection") or "unknown"
+                                  local device = req_headers:get("x-zta-device") or "unknown"
+                                  local risk_score = req_headers:get("x-zta-risk-score") or "0"
+                                  
+                                  local timestamp = "2026-06-27T15:48:08Z"
+                                  pcall(function()
+                                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                                  end)
+                                  local decision_id = "lua-waf-" .. request_id
+                                  
+                                  local block_reason = "WAF_GENERIC_INJECTION"
+                                  local block_message = "Bloccato da WAF L7: Rilevato pattern di query non autorizzato."
+                                  
+                                  if matched_pattern == "%$where" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$where' non consentito)."
+                                  elseif matched_pattern == "%$function" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$function' non consentito)."
+                                  elseif matched_pattern == "sleep%(" or matched_pattern == "while%(" then
+                                    block_reason = "WAF_DOS_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di Denial of Service (pattern time-delay o ciclo infinito)."
+                                  elseif matched_pattern == "%$regex" or matched_pattern == "%$ne" or matched_pattern == "%$gt" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    local operator_name = string.gsub(matched_pattern, "%%", "")
+                                    block_message = string.format("Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '%s' non consentito).", operator_name)
+                                  end
+                                  
+                                  local payload = string.format([[
+                                    {
+                                      "decision_id": "%s",
+                                      "timestamp": "%s",
+                                      "input": {
+                                        "attributes": {
+                                          "request": {
+                                            "http": {
+                                              "headers": {
+                                                "x-request-id": "%s",
+                                                "x-zta-user": "%s"
+                                              },
+                                              "method": "%s",
+                                              "path": "%s"
+                                            }
+                                          },
+                                          "source": {
+                                            "principal": "%s"
+                                          }
+                                        },
+                                        "parsed_body": {
+                                          "query": {}
+                                        }
+                                      },
+                                      "result": {
+                                        "allowed": false,
+                                        "response_headers_to_add": {
+                                          "x-zta-role": "%s",
+                                          "x-zta-command": "%s",
+                                          "x-zta-collection": "%s",
+                                          "x-zta-risk-score": "%s",
+                                          "x-zta-device": "%s",
+                                          "x-zta-block-reason": "%s"
+                                        }
+                                      }
+                                    }
+                                  ]], decision_id, timestamp, request_id, user, req_headers:get(":method") or "POST", req_headers:get(":path") or "/query", device, role, command, collection, risk_score, device, block_reason)
+                                  
+                                  local log_headers = {
+                                    [":method"] = "POST",
+                                    [":path"] = "/logs",
+                                    [":authority"] = "zta-log-forwarder:5000",
+                                    ["content-type"] = "application/json"
+                                  }
+                                  request_handle:httpCall("zta_log_forwarder_cluster", log_headers, payload, 1000)
+                                  
+                                  local response_headers = {
+                                    [":status"] = "403",
+                                    ["content-type"] = "application/json"
+                                  }
+                                  local response_body = string.format('{"status":"error","error_type":"waf_blocked","reason":"%s","message":"%s"}', block_reason, block_message)
+                                  request_handle:respond(response_headers, response_body)
+                                else
+                                  local command = string.match(body_str, '"command"%s*:%s*"([^"]+)"') or "unknown"
+                                  local collection = string.match(body_str, '"collection"%s*:%s*"([^"]+)"') or "unknown"
+                                  local meta = request_handle:streamInfo():dynamicMetadata()
+                                  meta:set("envoy.filters.http.lua", "command", command)
+                                  meta:set("envoy.filters.http.lua", "collection", collection)
+                                end
+                              end
                             end
                           end
                         end
@@ -156,6 +259,19 @@ static_resources:
                     socket_address:
                       address: opa
                       port_value: 9002
+
+    - name: zta_log_forwarder_cluster
+      connect_timeout: 0.5s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: zta_log_forwarder_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: zta-log-forwarder
+                      port_value: 5000
 
 admin:
   access_log:

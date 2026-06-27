@@ -1414,7 +1414,7 @@
           }
         } catch (err) {
           msgEl.className = "edit-status-msg error";
-          msgEl.textContent = `❌ ${err.message}`;
+          msgEl.textContent = `{err.message}`;
         }
       }
 
@@ -1570,7 +1570,7 @@
           }
         } catch (err) {
           if (dataRow) dataRow.style.opacity = "1";
-          alert(`❌ Errore eliminazione: ${err.message}`);
+          alert(`Errore eliminazione: ${err.message}`);
         }
       }
 
@@ -1679,7 +1679,7 @@
             document.getElementById("enroll-step-login").style.display = "none";
             document.getElementById("enroll-step-otp").style.display = "block";
           } catch (error) {
-            errorBox.textContent = `❌ Accesso AD fallito: ${error.message}`;
+            errorBox.textContent = `Accesso AD fallito: ${error.message}`;
             errorBox.style.display = "block";
           } finally {
             loginBtn.disabled = false;
@@ -1726,7 +1726,7 @@
             document.getElementById("enroll-step-trigger").style.display =
               "block";
           } catch (error) {
-            errorBox.textContent = `❌ Verifica OTP fallita: ${error.message}`;
+            errorBox.textContent = `Verifica OTP fallita: ${error.message}`;
             errorBox.style.display = "block";
           } finally {
             otpBtn.disabled = false;
@@ -1780,7 +1780,7 @@
               await loadActiveCertificates();
             }
           } catch (error) {
-            errorBox.textContent = `❌ Errore durante l'enrollment: ${error.message}`;
+            errorBox.textContent = `Errore durante l'enrollment: ${error.message}`;
             errorBox.style.display = "block";
           } finally {
             autoBtn.disabled = false;
@@ -1878,7 +1878,7 @@
             document.getElementById("modal-step-login").style.display = "none";
             document.getElementById("modal-step-otp").style.display = "block";
           } catch (error) {
-            errorBox.textContent = `❌ Errore login: ${error.message}`;
+            errorBox.textContent = `Errore login: ${error.message}`;
             errorBox.style.display = "block";
           } finally {
             btn.disabled = false;
@@ -1941,7 +1941,7 @@
               primaryAuthCallbacks = null;
             }
           } catch (error) {
-            errorBox.textContent = `❌ Errore OTP: ${error.message}`;
+            errorBox.textContent = `Errore OTP: ${error.message}`;
             errorBox.style.display = "block";
           } finally {
             btn.disabled = false;
@@ -1975,7 +1975,7 @@
 
           if (!user) {
             errBox.textContent =
-              "❌ Seleziona un utente con certificato attivo.";
+              "Seleziona un utente con certificato attivo.";
             errBox.style.display = "block";
             return;
           }
@@ -2114,7 +2114,7 @@
 
             if (response.status === 403) {
               mainPanel.classList.add("forbidden-card");
-              errBox.textContent = `❌ ${data.message || "Accesso negato da OPA/RBAC."}`;
+              errBox.textContent = `${data.message || "Accesso negato da OPA/RBAC."}`;
               errBox.style.display = "block";
 
               document.getElementById("query-resp-role").textContent =
@@ -2156,7 +2156,7 @@
 
             resSection.style.display = "block";
           } catch (err) {
-            errBox.textContent = `❌ Errore: ${err.message}`;
+            errBox.textContent = `Errore: ${err.message}`;
             errBox.style.display = "block";
           } finally {
             if (proxyToken) {

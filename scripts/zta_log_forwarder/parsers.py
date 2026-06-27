@@ -162,6 +162,7 @@ def extract_opa_decision_fields(log_entry: dict) -> dict:
         "collection": resp_headers.get("x-zta-collection", "unknown"),
         "risk_score": resp_headers.get("x-zta-risk-score", "0"),
         "device": resp_headers.get("x-zta-device", "unknown"),
+        "block_reason": resp_headers.get("x-zta-block-reason", "none"),
         "source_address": (source.get("address", {}) or {}).get("socketAddress", {}).get("address", "unknown"),
         "destination_port": (destination.get("address", {}) or {}).get("socketAddress", {}).get("portValue", 0),
         "request_method": request.get("method", ""),
