@@ -73,12 +73,11 @@ content_risk := 100 if {
 	identity.is_empty_query
 } else := 0
 
-# Anomaly Risk Dimension (20% weight) - Query sincrona a Splunk via sidecar forwarder
+# Anomaly Risk Dimension (20% weight) - Query sincrona a Splunk via  forwarder
 anomaly_risk := boost if {
 	# Evitiamo chiamate esterne per i comandi di sistema esclusi (bypass)
 	not identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo", "ping", "getLog", "getCmdLineOpts", "serverStatus"}
 
-	# Effettua la richiesta sincrona a Splunk tramite il forwarder locale
 	resp := http.send({
 		"method": "POST",
 		"url": "http://zta-log-forwarder:5000/api/stats",
@@ -110,7 +109,7 @@ adaptive_threshold := t if {
 	t := 20
 } else := t if {
 	identity.action_name == "update"
-	t := 15
+	t := 20
 } else := t if {
 	identity.action_name == "delete"
 	t := 20
