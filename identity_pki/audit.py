@@ -7,12 +7,13 @@ import threading as _threading
 def send_audit_event_impl(logger: logging.Logger, user, role, collection, action, translated_view,
                           query_filter, decision, count=0, error_type="",
                           message="", jwt_auth=False, hardware_mode=False,
-                          risk_score=0, device="unknown"):
+                          risk_score=0, device="unknown", request_id="unknown"):
 
     def _send():
         try:
             audit_payload = json.dumps({
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "request_id": request_id,
                 "user": user,
                 "role": role,
                 "resource": collection,

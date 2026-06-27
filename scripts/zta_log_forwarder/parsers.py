@@ -18,6 +18,7 @@ NFT_LOG_PATTERN = re.compile(
 def extract_envoy_fields(log_entry: dict) -> dict:
     """Extract standard fields from Envoy access log JSON entries."""
     return {
+        "request_id": log_entry.get("request_id") or "unknown",
         "source_ip": log_entry.get("downstream_remote_address") or "unknown",
         "downstream_local": log_entry.get("downstream_local_address") or "unknown",
         "upstream_host": log_entry.get("upstream_host") or "unknown",
@@ -113,3 +114,57 @@ def parse_nftables_line(line: str) -> dict | None:
             logger.warning("Error parsing counter line: %s, error: %s", line, e)
             
     return None
+
+
+def extract_opa_decision_fields(log_entry: dict) -> dict:
+    """Extract relevant fields from an OPA console decision log entry.
+
+    OPA decision log entries contain the full input, result and metadata
+    of each policy evaluation.  We flatten the most useful fields into a
+    Splunk-friendly dict.
+    """
+    result = log_entry.get("result", {}) or {}
+    inp = log_entry.get("input", {}) or {}
+    attrs = inp.get("attributes", {}) or {}
+    request = (attrs.get("request", {}) or {}).get("http", {}) or {}
+    source = attrs.get("source", {}) or {}
+    destination = attrs.get("destination", {}) or {}
+
+    # The result set by main.rego contains allowed, response_headers, etc.
+    allowed = result.get("allowed", False)
+    resp_headers = result.get("response_headers_to_add", {}) or {}
+
+    headers = request.get("headers", {}) or {}
+    request_id = headers.get("x-request-id") or headers.get("X-Request-ID") or "unknown"
+
+    # Extract cryptographic hardware CN from peer certificate principal
+    device_cn = source.get("principal") or "unknown"
+
+    # Extract human-readable username from incoming Flask header or fallback
+    user = headers.get("x-zta-user") or headers.get("X-ZTA-User") or resp_headers.get("x-zta-user") or "unknown"
+
+    # Extract query filter from incoming request body parsed by Envoy/OPA
+    import json
+    parsed_body = inp.get("parsed_body") or {}
+    query_filter = parsed_body.get("query") or parsed_body.get("filter") or {}
+    query_filter_str = json.dumps(query_filter)
+
+    return {
+        "request_id": request_id,
+        "decision_id": log_entry.get("decision_id", ""),
+        "timestamp": log_entry.get("timestamp", ""),
+        "decision": "ALLOW" if allowed else "DENY",
+        "user": user,
+        "device_cn": device_cn,
+        "filter": query_filter_str,
+        "role": resp_headers.get("x-zta-role", "unknown"),
+        "command": resp_headers.get("x-zta-command", "unknown"),
+        "collection": resp_headers.get("x-zta-collection", "unknown"),
+        "risk_score": resp_headers.get("x-zta-risk-score", "0"),
+        "device": resp_headers.get("x-zta-device", "unknown"),
+        "source_address": (source.get("address", {}) or {}).get("socketAddress", {}).get("address", "unknown"),
+        "destination_port": (destination.get("address", {}) or {}).get("socketAddress", {}).get("portValue", 0),
+        "request_method": request.get("method", ""),
+        "request_path": request.get("path", ""),
+        "eval_ns": (log_entry.get("metrics", {}) or {}).get("timer_rego_query_eval_ns", 0),
+    }

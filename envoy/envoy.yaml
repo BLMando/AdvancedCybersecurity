@@ -49,6 +49,7 @@ static_resources:
                       log_format:
                         json_format:
                           timestamp: "%START_TIME%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
                           downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
                           downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
                           duration: "%DURATION%"

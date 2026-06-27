@@ -41,6 +41,8 @@ def health():
 @query_bp.post("/api/query")
 def api_query():
     """Execute a MongoDB query via Envoy presenting the user's client certificate."""
+    import uuid
+    request_id = str(uuid.uuid4())
     response = None
     payload = request.get_json(silent=True) or {}
     user_cn = payload.get("user")
@@ -110,15 +112,7 @@ def api_query():
         )
 
     def _send_audit_event(*args, **kwargs):
-        risk_score = 0
-        if 'response' in locals() and response is not None:
-            try:
-                risk_score = int(response.headers.get("x-zta-risk-score", 0))
-            except ValueError:
-                pass
-        kwargs.setdefault("risk_score", risk_score)
-        kwargs.setdefault("device", device_info)
-        _send_audit_event_impl(current_app.logger, *args, **kwargs)
+        pass
 
     combined_pem_path = None
     if not local_proxy_port:
@@ -230,7 +224,8 @@ def api_query():
             "Content-Type": "application/json",
             "x-zta-user": user_cn,
             "x-zta-role": role,
-            "Authorization": f"Bearer {jwt_token}"
+            "Authorization": f"Bearer {jwt_token}",
+            "x-request-id": request_id
         }
 
         if local_proxy_port:

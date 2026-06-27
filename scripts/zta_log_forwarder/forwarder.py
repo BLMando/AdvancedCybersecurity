@@ -14,6 +14,7 @@ from parsers import (
     extract_snort_fields,
     extract_mongo_fields,
     parse_nftables_line,
+    extract_opa_decision_fields,
 )
 from risk import calculate_risk_boost
 from splunk_search import run_splunk_search, SPLUNK_PASSWORD
@@ -69,8 +70,8 @@ def handle_stats_query():
         f'| eval eta_min = (now() - _time) / 60 '
         f'| eval peso = if(index="zta_envoy", 1.0, exp(-0.231 * eta_min)) '
         f'| eval type=case('
-        f'  index="zta_envoy" AND sourcetype="zta:app:query" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
-        f'  index="zta_envoy" AND sourcetype="zta:app:query" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
+        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
+        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
         f'  index="zta_snort", "snort_alerts",'
         f'  index="zta_nftables", "nftables_drops",'
         f'  index="zta_mongodb_audit", "mongo_failures"'
@@ -108,7 +109,7 @@ def handle_stats_query():
     current_count = 0.0
 
     baseline_query = (
-        f'search index=zta_envoy sourcetype="zta:app:query" user="{esc(user)}" earliest=-7d '
+        f'search index=zta_envoy sourcetype="opa:decision" user="{esc(user)}" earliest=-7d '
         f'| eval is_current = if(_time >= now() - 900, 1, 0) '
         f'| bucket _time span=15m '
         f'| stats count as query_count by _time, is_current '
@@ -263,6 +264,35 @@ def tail_mongo_audit_logs(stop_event: threading.Event) -> None:
     )
 
 
+@app.route("/logs", methods=["POST"])
+@app.route("/v1/logs", methods=["POST"])
+def handle_opa_logs():
+    """Receive HTTP decision logs pushed by OPA, decompress if gzipped, and forward to Splunk."""
+    import gzip
+    try:
+        content_encoding = request.headers.get("Content-Encoding", "").lower()
+        if "gzip" in content_encoding:
+            data = gzip.decompress(request.data)
+        else:
+            data = request.data
+            
+        logs = json.loads(data)
+        if not isinstance(logs, list):
+            logs = [logs]
+            
+        for log_entry in logs:
+            if "decision_id" not in log_entry:
+                continue
+            fields = extract_opa_decision_fields(log_entry)
+            hec_envoy.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+            
+        hec_envoy.flush()
+        return "", 200
+    except Exception as e:
+        logger.error("Error processing OPA decision logs: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -282,46 +312,7 @@ def handle_envoy_log():
     return jsonify({"status": "queued"}), 202
 
 
-@app.route("/api/audit", methods=["POST"])
-def handle_app_audit():
-    """Receive application-level audit events from Flask and forward to Splunk.
 
-    Unlike Envoy access logs (which only capture connection-level metadata),
-    this endpoint receives the *actual* query details (collection, command,
-    filter, result) from the Flask application layer after each /api/query
-    execution.  Events are indexed separately as sourcetype 'zta:app:query'
-    so Splunk dashboards can correlate them with Envoy connection logs.
-    """
-    try:
-        body = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "invalid json"}), 400
-
-    event = {
-        "timestamp": body.get("timestamp", ""),
-        "user": body.get("user", "unknown"),
-        "role": body.get("role", "unknown"),
-        "resource": body.get("resource", "unknown"),
-        "command": body.get("command", "unknown"),
-        "translated_view": body.get("translated_view", "unknown"),
-        "filter": body.get("filter", "{}"),
-        "decision": body.get("decision", "unknown"),
-        "count": body.get("count", 0),
-        "error_type": body.get("error_type", ""),
-        "message": body.get("message", ""),
-        "jwt_auth": body.get("jwt_auth", False),
-        "hardware_mode": body.get("hardware_mode", False),
-        "risk_score": body.get("risk_score", 0),
-        "device": body.get("device", "unknown"),
-    }
-
-    hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:app:query")
-    logger.info(
-        "App audit: user=%s role=%s cmd=%s resource=%s decision=%s",
-        event["user"], event["role"], event["command"],
-        event["resource"], event["decision"],
-    )
-    return jsonify({"status": "queued"}), 202
 
 
 _stop_event = threading.Event()

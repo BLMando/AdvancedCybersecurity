@@ -167,6 +167,10 @@ services:
       - --addr=0.0.0.0:8181
       - --set=plugins.envoy_ext_authz_grpc.addr=:9002
       - --set=plugins.envoy_ext_authz_grpc.path=envoy/authz/main
+      - --set=services.log-forwarder.url=http://zta-log-forwarder:5000
+      - --set=decision_logs.service=log-forwarder
+      - --set=decision_logs.reporting.min_delay_seconds=1
+      - --set=decision_logs.reporting.max_delay_seconds=2
       - --log-level=info
       - /policies
     networks:
