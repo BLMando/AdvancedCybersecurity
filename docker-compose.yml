@@ -98,7 +98,6 @@ services:
         condition: service_started
     ports:
       - "10000:10000"
-      # - "10001:10001" # Commentato poiché il listener HTTP di test in envoy.yaml è disabilitato
       - "127.0.0.1:9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
@@ -110,7 +109,7 @@ services:
       - frontend-net
       - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'"]
+      test: [ "CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'" ]
       interval: 5s
       timeout: 2s
       retries: 5
@@ -200,7 +199,7 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-        
+
         # In sidecar mode, sniffa sull'interfaccia eth1 di Envoy (backend-net)
         if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth1" -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
@@ -231,7 +230,7 @@ services:
       - |
         echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
         mkdir -p /var/log/snort
-        
+
         # In sidecar mode, sniffa sull'interfaccia eth0 di MongoDB
         if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
           echo "[snort-resource] ERROR: Snort failed to start"
@@ -258,17 +257,17 @@ services:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
       - nftables-logs:/var/log/nftables
     healthcheck:
-      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
+      test: [ "CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1" ]
       interval: 10s
       timeout: 2s
       retries: 3
     command:
       - |
         apk add --no-cache nftables
-        
+
         # Crea directory log
         mkdir -p /var/log/nftables
-        
+
         # Applica regole nftables nel namespace di Envoy
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
@@ -281,26 +280,25 @@ services:
         else
           echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
-        
+
         # Cattura log da nft counter (polling periodico)
         echo "[nftables] Starting counter log capture..."
         while true; do
           nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
           sleep 30
         done &
-        
+
         echo "[nftables] Sidecar ready (Envoy namespace)"
         tail -f /dev/null
 
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
-    # removed platform: linux/amd64 to use native arm64 on Apple Silicon
-    # nome utente: admin
+    platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
       - SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com
-      - SPLUNK_PASSWORD=SplunkPassword123!
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD}
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
     ports:

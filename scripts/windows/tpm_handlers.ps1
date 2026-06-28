@@ -178,7 +178,7 @@ function Handle-AuthRequest ($cn) {
             throw "Certificato non trovato per CN=$cn"
         }
 
-        $uri = [System.Uri]"https://localhost:10001/api/resource"
+        $uri = [System.Uri]"https://localhost:10000/api/resource"
         $tcp = [System.Net.Sockets.TcpClient]::new($uri.Host, $uri.Port)
         $ssl = [System.Net.Security.SslStream]::new($tcp.GetStream(), $false, { $true })
         $certsCollection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new($cert)

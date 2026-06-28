@@ -7,7 +7,7 @@ class PKIClient: NSObject, URLSessionDelegate {
     static let shared = PKIClient()
     var activeLAContext: LAContext?
     private let serverUrl = "https://127.0.0.1:8080"
-    private let envoyUrl = "https://localhost:10001"
+    private let envoyUrl = "https://localhost:10000"
     private var activeCNs: [URLSession: String] = [:]
     private let activeCNsLock = NSLock()
     private var pkiSession: URLSession!

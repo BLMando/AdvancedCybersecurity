@@ -1,11 +1,5 @@
----------------------------------------------------------------------------
--- Snort 3 Configuration — Zero Trust Architecture NIDS
--- Basato sul template ufficiale Talos
----------------------------------------------------------------------------
 
----------------------------------------------------------------------------
 -- 1. configure defaults
----------------------------------------------------------------------------
 
 -- HOME_NET and EXTERNAL_NET must be set now
 -- setup the network addresses you are protecting
@@ -16,9 +10,8 @@ EXTERNAL_NET = '!$HOME_NET'
 
 include 'snort_defaults.lua'
 
----------------------------------------------------------------------------
+
 -- 2. configure inspection
----------------------------------------------------------------------------
 
 stream = { }
 stream_ip = { }
@@ -75,9 +68,8 @@ js_norm = default_js_norm
 
 appid = { }
 
----------------------------------------------------------------------------
+
 -- 3. configure bindings
----------------------------------------------------------------------------
 
 wizard = default_wizard
 
@@ -126,13 +118,7 @@ binder =
     { use = { type = 'wizard' } }
 }
 
----------------------------------------------------------------------------
--- 4. configure performance
----------------------------------------------------------------------------
-
----------------------------------------------------------------------------
--- 5. configure detection
----------------------------------------------------------------------------
+-- 4. configure detection
 
 references = default_references
 classifications = default_classifications
@@ -149,19 +135,13 @@ ips =
             HTTP_SERVERS = HOME_NET,
         },
         ports = {
-            HTTP_PORTS = '80 443 8000 8080 10001',
+            HTTP_PORTS = '80 443 8000 8080 10000',
             SSH_PORTS = '22',
         },
     },
 }
 
----------------------------------------------------------------------------
--- 6. configure filters
----------------------------------------------------------------------------
-
----------------------------------------------------------------------------
--- 7. configure outputs
----------------------------------------------------------------------------
+-- 5. configure outputs
 
 -- JSON Alert output per inoltro log a Splunk HEC
 alert_json = {
@@ -170,9 +150,7 @@ alert_json = {
     fields = 'timestamp msg src_addr src_port dst_addr dst_port proto action gid sid rev priority',
 }
 
----------------------------------------------------------------------------
--- 8. configure tweaks
----------------------------------------------------------------------------
+-- 6. configure tweaks
 
 if ( tweaks ~= nil ) then
     include(tweaks .. '.lua')
