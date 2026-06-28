@@ -7,7 +7,7 @@
 # ── Bulk Read anomalo (possibile data exfiltration) ──
 # Molte connessioni MongoDB in poco tempo dallo stesso source
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-001: Bulk MongoDB access - possible data exfiltration"; \
+    msg:"Bulk MongoDB access - possible data exfiltration"; \
     flow:to_server,established; \
     detection_filter: track by_src, count 100, seconds 10; \
     classtype:policy-violation; \
@@ -16,7 +16,7 @@ alert tcp any any -> any 27017 ( \
 
 # ── Comando admin: dropDatabase ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-002: MongoDB admin command (dropDatabase)"; \
+    msg:"MongoDB admin command (dropDatabase)"; \
     flow:to_server,established; \
     content:"dropDatabase"; \
     classtype:attempted-admin; \
@@ -25,7 +25,7 @@ alert tcp any any -> any 27017 ( \
 
 # ── Comando admin: shutdown ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-003: MongoDB admin command (shutdown)"; \
+    msg:"MongoDB admin command (shutdown)"; \
     flow:to_server,established; \
     content:"shutdown"; \
     classtype:attempted-admin; \
@@ -34,7 +34,7 @@ alert tcp any any -> any 27017 ( \
 
 # ── Accesso a collection di sistema ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-004: Access to system collection (system.users)"; \
+    msg:"Access to system collection (system.users)"; \
     flow:to_server,established; \
     content:"system.users"; \
     classtype:attempted-admin; \
@@ -43,7 +43,7 @@ alert tcp any any -> any 27017 ( \
 
 # ── Comando admin: dropUser ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-005: MongoDB admin command (dropUser)"; \
+    msg:"MongoDB admin command (dropUser)"; \
     flow:to_server,established; \
     content:"dropUser"; \
     classtype:attempted-admin; \
@@ -52,7 +52,7 @@ alert tcp any any -> any 27017 ( \
 
 # ── Comando admin: createUser (privilege escalation) ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-006: MongoDB admin command (createUser) - possible privilege escalation"; \
+    msg:"MongoDB admin command (createUser) - possible privilege escalation"; \
     flow:to_server,established; \
     content:"createUser"; \
     classtype:attempted-admin; \
@@ -63,7 +63,7 @@ alert tcp any any -> any 27017 ( \
 # In condizioni normali, solo Envoy (sulla Docker bridge) si connette a MongoDB.
 # Traffico da IP esterni alla rete Docker indica bypass del PEP.
 alert tcp !172.16.0.0/12 any -> any 27017 ( \
-    msg:"ZTA-RES-007: MongoDB access from non-Docker network (PEP bypass)"; \
+    msg:"MongoDB access from non-Docker network (PEP bypass)"; \
     flow:to_server,established; \
     classtype:policy-violation; \
     sid:4000007; rev:1; \
@@ -71,7 +71,7 @@ alert tcp !172.16.0.0/12 any -> any 27017 ( \
 
 # ── Comando admin: replSetReconfig ──
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-RES-008: MongoDB replication reconfiguration attempt"; \
+    msg:"MongoDB replication reconfiguration attempt"; \
     flow:to_server,established; \
     content:"replSetReconfig"; \
     classtype:attempted-admin; \

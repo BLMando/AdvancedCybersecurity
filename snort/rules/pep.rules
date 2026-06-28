@@ -7,7 +7,7 @@
 # ── NoSQL Injection: $where ──
 # Tentativo di injection nel traffico MongoDB via Envoy
 alert tcp any any -> any 10000 ( \
-    msg:"ZTA-PEP-001: NoSQL injection attempt ($where) in MongoDB traffic"; \
+    msg:"NoSQL injection attempt ($where) in MongoDB traffic"; \
     flow:to_server,established; \
     content:"$where",nocase; \
     classtype:web-application-attack; \
@@ -16,7 +16,7 @@ alert tcp any any -> any 10000 ( \
 
 # ── NoSQL Injection: $function ──
 alert tcp any any -> any 10000 ( \
-    msg:"ZTA-PEP-002: NoSQL injection attempt ($function) in MongoDB traffic"; \
+    msg:"NoSQL injection attempt ($function) in MongoDB traffic"; \
     flow:to_server,established; \
     content:"$function",nocase; \
     classtype:web-application-attack; \
@@ -25,7 +25,7 @@ alert tcp any any -> any 10000 ( \
 
 # ── NoSQL Injection: $regex (ReDoS) ──
 alert tcp any any -> any 10000 ( \
-    msg:"ZTA-PEP-003: NoSQL injection attempt ($regex) - possible ReDoS"; \
+    msg:"NoSQL injection attempt ($regex) - possible ReDoS"; \
     flow:to_server,established; \
     content:"$regex",nocase; \
     classtype:web-application-attack; \
@@ -34,7 +34,7 @@ alert tcp any any -> any 10000 ( \
 
 # ── Lateral Movement: scansione est-ovest tra container ──
 alert tcp any any -> any any ( \
-    msg:"ZTA-PEP-004: Internal lateral movement detected (east-west scan)"; \
+    msg:"Internal lateral movement detected (east-west scan)"; \
     flags:S; \
     detection_filter: track by_src, count 50, seconds 30; \
     classtype:attempted-recon; \
@@ -43,7 +43,7 @@ alert tcp any any -> any any ( \
 
 # ── Envoy Admin access da rete non-localhost ──
 alert tcp any any -> any 9901 ( \
-    msg:"ZTA-PEP-005: Envoy admin access attempt"; \
+    msg:"Envoy admin access attempt"; \
     flow:to_server,established; \
     classtype:policy-violation; \
     sid:3000005; rev:1; \
@@ -51,7 +51,7 @@ alert tcp any any -> any 9901 ( \
 
 # ── Port scan verso Envoy ──
 alert tcp any any -> any any ( \
-    msg:"ZTA-PEP-006: TCP SYN port scan targeting PEP"; \
+    msg:"TCP SYN port scan targeting PEP"; \
     flags:S; \
     detection_filter: track by_src, count 20, seconds 5; \
     classtype:attempted-recon; \
@@ -60,7 +60,7 @@ alert tcp any any -> any any ( \
 
 # ── ICMP verso Envoy (possibile tunneling) ──
 alert icmp any any -> any any ( \
-    msg:"ZTA-PEP-007: Suspicious ICMP large payload (possible exfiltration via PEP)"; \
+    msg:"Suspicious ICMP large payload (possible exfiltration via PEP)"; \
     dsize:>100; \
     itype:8; \
     classtype:misc-activity; \
