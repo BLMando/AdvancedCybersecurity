@@ -1,24 +1,21 @@
-<dashboard version="1.1">
-  <label>ZTA - Zero Trust Security Command Center</label>
-  <description>Threat Monitoring, User Behavior Analytics, and Performance SLA dashboard for the Zero Trust Architecture</description>
+<form version="1.1">
+  <label>ZTA - Centro di comando per la sicurezza</label>
+  <description>Dashboard di monitoraggio delle minacce, analisi del comportamento utente (UBA) per l'Architettura Zero Trust</description>
   
   <fieldset submitButton="true">
     <input type="time" token="timerange">
-      <label>Time Range</label>
+      <label>Intervallo Temporale</label>
       <default>
         <earliest>-24h</earliest>
         <latest>now</latest>
       </default>
     </input>
   </fieldset>
-
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <!-- SEZIONE 1: ZERO TRUST SECURITY POSTURE & ACCESS CONTROL         -->
-  <!-- ════════════════════════════════════════════════════════════════ -->
+  
   <row>
     <panel>
       <html>
-        <h2 style="color:#1a73e8;border-bottom:1px solid #1a73e8;padding-bottom:5px;margin-top:0;">1. Zero Trust Posture &amp; Access Control</h2>
+        <h2 style="color:#1a73e8;border-bottom:1px solid #1a73e8;padding-bottom:5px;margin-top:0;">1. Postura Zero Trust &amp; Controllo degli Accessi</h2>
       </html>
     </panel>
   </row>
@@ -45,20 +42,21 @@
       <chart>
         <search>
           <query>index=zta_envoy sourcetype="opa:decision"
-            | eval device_type = if(device="no-tpm" OR device="unknown", "Software Cert (No TPM / High Risk)", "Hardware-Bound (TPM / Low Risk)")
+            | eval device_type = if(device="no-tpm" OR device="unknown", "Certificato Software (No TPM / Alto Rischio)", "Vincolato all'Hardware (TPM / Basso Rischio)")
             | stats count by device_type</query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
         <option name="charting.chart">pie</option>
-        <option name="charting.fieldColors">{"Hardware-Bound (TPM / Low Risk)": 0x137333, "Software Cert (No TPM / High Risk)": 0xe67c73}</option>
+        <option name="charting.fieldColors">{"Vincolato all'Hardware (TPM / Basso Rischio)": 0x137333, "Certificato Software (No TPM / Alto Rischio)": 0xe67c73}</option>
       </chart>
     </panel>
     <panel>
-      <title>Distribuzione delle Categorie di Blocco OPA/WAF</title>
+      <title>Distribuzione delle Categorie di Blocco</title>
       <chart>
         <search>
-          <query><![CDATA[index=zta_envoy sourcetype="opa:decision" decision="DENY"
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision" decision="DENY"
             | eval reason = case(
                 block_reason == "OIDC_TOKEN_INVALID", "Token OIDC Invalido o Scaduto",
                 block_reason == "RISK_THRESHOLD_EXCEEDED", "Soglia Rischio Adattiva Superata",
@@ -72,7 +70,8 @@
                 block_reason == "WAF_BLOCKED", "Bloccato da WAF Envoy (Lua)",
                 1=1, coalesce(block_reason, "Politica Generica")
               )
-            | stats count by reason]]></query>
+            | stats count by reason]]>
+          </query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
@@ -80,14 +79,10 @@
       </chart>
     </panel>
   </row>
-
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <!-- SEZIONE 2: THREAT HUNTING & INDICATORS OF COMPROMISE (IOC)      -->
-  <!-- ════════════════════════════════════════════════════════════════ -->
   <row>
     <panel>
       <html>
-        <h2 style="color:#c5221f;border-bottom:1px solid #c5221f;padding-bottom:5px;margin-top:10px;">2. Threat Hunting &amp; Indicators of Compromise (IoC)</h2>
+        <h2 style="color:#c5221f;border-bottom:1px solid #c5221f;padding-bottom:5px;margin-top:10px;">2. Threat Hunting &amp; Indicatori di Compromissione (IoC)</h2>
       </html>
     </panel>
   </row>
@@ -97,7 +92,7 @@
       <chart>
         <search>
           <query>index=zta_snort sourcetype="snort:alert_json"
-            | eval sensor_type = if(sensor=="pep", "Perimetro (PEP)", "Risorsa (DB)")
+            | eval sensor_type = if(sensor=="pep", "PEP", "Risorsa")
             | stats count by sensor_type, msg</query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
@@ -107,16 +102,18 @@
       </chart>
     </panel>
     <panel>
-      <title>Attività di Reconnaissance (Scansione Rete nftables)</title>
+      <title>Attività di Ricognizione (Scansione Rete nftables)</title>
       <table>
         <search>
-          <query><![CDATA[index=zta_nftables sourcetype="nftables:log" action="DROP"
+          <query>
+            <![CDATA[index=zta_nftables sourcetype="nftables:log" action="DROP"
             | bin _time span=1m
             | stats count as drops by src_ip, _time
             | where drops > 15
             | stats sum(drops) as total_drops, count(eval(drops > 15)) as active_scanning_minutes by src_ip
             | rename src_ip as "IP Attaccante", total_drops as "Pacchetti Droppati", active_scanning_minutes as "Minuti di Scansione Rilevati"
-            | sort - "Pacchetti Droppati"]]></query>
+            | sort - "Pacchetti Droppati"]]>
+          </query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
@@ -125,7 +122,7 @@
       </table>
     </panel>
     <panel>
-      <title>Tentativi Brute Force / Login Falliti su MongoDB</title>
+      <title>Tentativi Brute Force / Accessi Falliti su MongoDB</title>
       <table>
         <search>
           <query><![CDATA[index=zta_mongodb_audit sourcetype="mongodb:audit" result!=0 (atype="authenticate" OR "auth")
@@ -142,23 +139,20 @@
       </table>
     </panel>
   </row>
-
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <!-- SEZIONE 3: USER BEHAVIOR ANALYTICS (UBA) & DYNAMIC RISK         -->
-  <!-- ════════════════════════════════════════════════════════════════ -->
   <row>
     <panel>
       <html>
-        <h2 style="color:#f9ab00;border-bottom:1px solid #f9ab00;padding-bottom:5px;margin-top:10px;">3. User &amp; Entity Behavior Analytics (UEBA) &amp; Dynamic Risk</h2>
+        <h2 style="color:#f9ab00;border-bottom:1px solid #f9ab00;padding-bottom:5px;margin-top:10px;">3. Analisi Comportamentale Utenti ed Entità (UEBA) &amp; Rischio Dinamico</h2>
       </html>
     </panel>
   </row>
   <row>
     <panel>
-      <title>UBA: Rilevamento anomalie nel Volume delle Query (Z-Score &gt; 2.0)</title>
+      <title>UBA: Rilevamento Anomalie (Z-Score &gt; 2.0)</title>
       <table>
         <search>
-          <query><![CDATA[index=zta_envoy sourcetype="opa:decision"
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
             | bucket _time span=15m
             | stats count as query_count by user, _time
             | eventstats avg(query_count) as media, stdev(query_count) as dev_std by user
@@ -168,7 +162,8 @@
             | eval z_score = round(z_score, 2), media = round(media, 1), dev_std = round(dev_std, 1)
             | rename user as "Utente", query_count as "Query Correnti (15m)", media as "Media Storica", dev_std as "Deviazione Standard", z_score as "Z-Score (Anomalia)"
             | table "Utente" "Query Correnti (15m)" "Media Storica" "Deviazione Standard" "Z-Score (Anomalia)"
-            | sort - "Z-Score (Anomalia)"]]></query>
+            | sort - "Z-Score (Anomalia)"]]>
+          </query>
           <earliest>-7d</earliest>
           <latest>now</latest>
         </search>
@@ -177,16 +172,18 @@
       </table>
     </panel>
     <panel>
-      <title>Top Entità ad Alto Rischio (Utente x IP x Max Risk Score)</title>
+      <title>Top entità ad alto rischio</title>
       <table>
         <search>
-          <query><![CDATA[index=zta_envoy sourcetype="opa:decision"
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
             | eval risk_num = tonumber(risk_score)
             | stats max(risk_num) as max_risk, avg(risk_num) as avg_risk, count(eval(decision="DENY")) as total_denies, values(device) as devices by user, source_address
             | eval avg_risk = round(avg_risk, 1)
             | rename user as "Utente", source_address as "IP Chiamante", max_risk as "Risk Score Max", avg_risk as "Risk Score Medio", total_denies as "Totale Dinieghi", devices as "Dispositivo"
             | sort - "Risk Score Max"
-            | head 15]]></query>
+            | head 15]]>
+          </query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
@@ -195,51 +192,6 @@
       </table>
     </panel>
   </row>
-
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <!-- SEZIONE 4: PERFORMANCE, SLA & OVERHEAD DELLE POLICY             -->
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <row>
-    <panel>
-      <html>
-        <h2 style="color:#137333;border-bottom:1px solid #137333;padding-bottom:5px;margin-top:10px;">4. Performance, SLA &amp; Policy Overhead</h2>
-      </html>
-    </panel>
-  </row>
-  <row>
-    <panel>
-      <title>Latenza di Valutazione delle Policy OPA (Nanosecondi -> Millisecondi)</title>
-      <chart>
-        <search>
-          <query>index=zta_envoy sourcetype="opa:decision"
-            | eval eval_ms = tonumber(eval_ns) / 1000000
-            | timechart span=10m avg(eval_ms) as "Latenza Rego PDP (ms)" max(eval_ms) as "Latenza Picco Rego (ms)"</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
-        </search>
-        <option name="charting.chart">line</option>
-        <option name="charting.axisTitleY.text">Tempo (ms)</option>
-      </chart>
-    </panel>
-    <panel>
-      <title>Latenza di Rete e Proxy Envoy (Overhead PEP)</title>
-      <chart>
-        <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | eval duration_num = tonumber(duration_ms)
-            | timechart span=10m avg(duration_num) as "Latenza Richiesta PEP (ms)" max(duration_num) as "Latenza Picco PEP (ms)"</query>
-          <earliest>$timerange.earliest$</earliest>
-          <latest>$timerange.latest$</latest>
-        </search>
-        <option name="charting.chart">area</option>
-        <option name="charting.axisTitleY.text">Tempo (ms)</option>
-      </chart>
-    </panel>
-  </row>
-
-  <!-- ════════════════════════════════════════════════════════════════ -->
-  <!-- SEZIONE 5: TRANSACTIONS AUDIT JOURNAL                           -->
-  <!-- ════════════════════════════════════════════════════════════════ -->
   <row>
     <panel>
       <html>
@@ -249,14 +201,16 @@
   </row>
   <row>
     <panel>
-      <title>Ultimi 50 Eventi di Controllo Accessi OPA PDP</title>
+      <title>Ultimi 50 Eventi di Controllo Accessi</title>
       <table>
         <search>
-          <query><![CDATA[index=zta_envoy sourcetype="opa:decision"
-            | eval device_type = if(device="no-tpm" OR device="unknown", "Software", "TPM Hardware")
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
+            | eval device_type = if(device="no-tpm" OR device="unknown", "Software", "Hardware TPM")
             | table _time user role collection command decision risk_score device_type source_address block_reason
             | rename _time as "Data/Ora", user as "Utente", role as "Ruolo", collection as "Collezione", command as "Azione", decision as "Decisione", risk_score as "Rischio", device_type as "Sicurezza HW", source_address as "IP Client", block_reason as "Motivo Blocco"
-            | head 50]]></query>
+            | head 50]]>
+          </query>
           <earliest>$timerange.earliest$</earliest>
           <latest>$timerange.latest$</latest>
         </search>
@@ -265,4 +219,4 @@
       </table>
     </panel>
   </row>
-</dashboard>
+</form>
