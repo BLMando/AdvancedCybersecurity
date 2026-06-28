@@ -1,3 +1,4 @@
+import os
 import sys
 import uuid
 import argparse
@@ -5,7 +6,6 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-
 import pandas as pd
 
 try:
@@ -15,36 +15,35 @@ except ImportError:
     print("ERROR: pymongo not installed. Run: pip install pymongo --break-system-packages")
     sys.exit(1)
 
-# ─── CLI args ──────────────────────────────────────────────────────────────
+MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
+MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
+MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
+MONGO_PORT = os.getenv("MONGO_PORT", "27017")
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:{MONGO_PORT}/{MONGO_DB}?authSource=admin"
+
+# CLI args
 parser = argparse.ArgumentParser(description="Seed ZTA Healthcare DB from CSV")
-parser.add_argument(
-    "--uri",   default="mongodb://zta_user:zta_password@localhost:27017/zta_db?authSource=admin")
+parser.add_argument("--uri",   default=MONGO_URI)
 parser.add_argument("--csv",   default="mongo/dataset/healthcare_dataset.csv")
-parser.add_argument("--limit", type=int, default=10,
-                    help="Max rows to import")
+parser.add_argument("--limit", type=int, default=10, help="Max rows to import")
 args = parser.parse_args()
 
-# ─── Helpers ────────────────────────────────────────────────────────────────
-
-
+# Helpers
 def det_uuid(namespace: str, key: str) -> str:
     ns = uuid.UUID(hashlib.md5(namespace.encode()).hexdigest())
     return str(uuid.uuid5(ns, key))
 
-
 def parse_date(val: Optional[Any]):
     if not val or pd.isna(val):
         return None
-    return datetime.fromisoformat(str(val)).replace(tzinfo=timezone.utc)
-
+    return pd.to_datetime(val).to_pydatetime().replace(tzinfo=timezone.utc)
 
 def norm_name(raw: Any) -> str:
     return str(raw).strip().title()
 
-
 NOW = datetime.now(timezone.utc)
 
-# ─── Load CSV ───────────────────────────────────────────────────────────────
+# Load CSV
 csv_path = Path(args.csv)
 if not csv_path.exists():
     print(f"ERROR: CSV not found at {csv_path}")
@@ -62,13 +61,16 @@ df["Hospital"] = df["Hospital"].apply(norm_name)
 total_rows = len(df)
 print(f"  {total_rows:,} rows loaded")
 
-# ─── Connect ────────────────────────────────────────────────────────────────
+# Connect
 print(f"Connecting to {args.uri} …", flush=True)
-client: MongoClient[dict[str, Any]] = MongoClient(
+CA_PATH = "/etc/certs/ca/ca.crt"
+CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
+
+client = MongoClient(
     args.uri,
     tls=True,
-    tlsCertificateKeyFile="volumes/certs/server/mongo.pem",
-    tlsCAFile="volumes/certs/ca/ca.crt",
+    tlsCertificateKeyFile=CLIENT_PEM_PATH,
+    tlsCAFile=CA_PATH,
     tlsAllowInvalidCertificates=True,
     serverSelectionTimeoutMS=5000
 )
@@ -81,9 +83,9 @@ except Exception as e:
 db: Any = client.get_database()
 print("  Connected\n")
 
-# ─── 1. PROVIDERS ───────────────────────────────────────────────────────────
+# 1. PROVIDERS
 print("→ Seeding: providers …", flush=True)
-provider_ops: list[UpdateOne] = []
+provider_ops = []
 
 doctors = df["Doctor"].dropna().unique()
 hospitals = df["Hospital"].dropna().unique()
@@ -108,9 +110,9 @@ if provider_ops:
     db.providers.bulk_write(provider_ops, ordered=False)
 print(f"   {len(doctors):,} doctors, {len(hospitals):,} hospitals")
 
-# ─── 2. PATIENTS ─────────────────────────────────────────────────────────────
+# 2. PATIENTS
 print("→ Seeding: patients …", flush=True)
-patient_ops: list[UpdateOne] = []
+patient_ops = []
 patient_id_map = {}  # name → uuid
 
 unique_patients = df.drop_duplicates(subset=["Name"]).copy()
@@ -134,11 +136,11 @@ if patient_ops:
     db.patients.bulk_write(patient_ops, ordered=False)
 print(f"   {len(unique_patients):,} unique patients")
 
-# ─── 3. ADMISSIONS + 4. CLINICAL RECORDS + 5. BILLING ───────────────────────
+# 3. ADMISSIONS + 4. CLINICAL RECORDS + 5. BILLING
 print("→ Seeding: admissions / clinical_records / billing …", flush=True)
-admission_ops: list[UpdateOne] = []
-clinical_ops: list[UpdateOne] = []
-billing_ops: list[UpdateOne] = []
+admission_ops = []
+clinical_ops = []
+billing_ops = []
 
 for row_num, (_, row) in enumerate(df.iterrows(), start=1):
     patient_id = det_uuid("patient",  row["Name"])
@@ -149,7 +151,7 @@ for row_num, (_, row) in enumerate(df.iterrows(), start=1):
     adm_key = f"{row['Name']}|{row['Date of Admission']}"
     adm_id = det_uuid("admission", adm_key)
 
-    # 3. Admissions
+    # 3. ADMISSIONS
     discharge = parse_date(row.get("Discharge Date"))
     status = "discharged" if discharge else "active"
 
@@ -171,7 +173,7 @@ for row_num, (_, row) in enumerate(df.iterrows(), start=1):
         upsert=True
     ))
 
-    # 4. Clinical records
+    # 4. CLINICAL_RECORDS
     clin_key = f"{adm_key}|clinical"
     clin_id = det_uuid("clinical", clin_key)
 
@@ -190,7 +192,7 @@ for row_num, (_, row) in enumerate(df.iterrows(), start=1):
         upsert=True
     ))
 
-    # 5. Billing
+    # 5. BILLING 
     bill_key = f"{adm_key}|billing"
     bill_id = det_uuid("billing", bill_key)
     amount = float(row["Billing Amount"]) if pd.notna(
@@ -217,7 +219,7 @@ for row_num, (_, row) in enumerate(df.iterrows(), start=1):
 # Flush in batches
 
 
-def bulk(collection: Any, ops: list[UpdateOne], label: str) -> None:
+def bulk(collection: Any, ops, label: str) -> None:
     if not ops:
         return
     try:
@@ -233,10 +235,10 @@ bulk(db.admissions,       admission_ops, "admissions       ")
 bulk(db.clinical_records, clinical_ops,  "clinical_records ")
 bulk(db.billing,          billing_ops,   "billing          ")
 
-# ─── Summary ────────────────────────────────────────────────────────────────
+# Summary
 print()
 print("╔══════════════════════════════════════════════════════════════╗")
-print("║  Seed complete — collection counts                          ║")
+print("║  Seed complete — collection counts                           ║")
 print("╚══════════════════════════════════════════════════════════════╝")
 for col in ["patients", "providers", "admissions", "clinical_records", "billing"]:
     n = db[col].count_documents({})

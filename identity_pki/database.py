@@ -20,20 +20,22 @@ MongoClient = MongoClientProxy
 def provision_mongo_user(service: PKIService, logger: logging.Logger, username: str, role: str) -> None:
     """Auto-provisions a MongoDB SCRAM and external OIDC user with role permissions."""
     try:
-        mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
-        mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
-        mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+        MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
+        MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
+        MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
+        MONGO_PORT = os.getenv("MONGO_PORT", "27017")
+        ENVOY_PROXY_PORT = os.getenv("ENVOY_PROXY_PORT", "10000")
         ca_path = os.path.join(service.cert_dir, "ca.crt")
         
         client = MongoClient(
-            f"mongodb://{mongo_root_user}:{mongo_root_pass}@mongo:27017/admin",
+            f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo:{MONGO_PORT}/admin",
             serverSelectionTimeoutMS=2000,
             tls=True,
             tlsCertificateKeyFile="/data/server/mongo.pem",
             tlsCAFile=ca_path,
             tlsAllowInvalidCertificates=True
         )
-        db = client[mongo_db_name]
+        db = client[MONGO_DB]
         
         # Load ZTA roles
         try:
@@ -80,9 +82,8 @@ def provision_mongo_user(service: PKIService, logger: logging.Logger, username: 
 
 
 def build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optional[int], jwt_token: Optional[str], combined_pem_path: Optional[str], ca_path: str) -> MongoClient:
-    """Build and configure the MongoClient based on credentials and proxy settings."""
-    mongo_root_user = os.environ.get("MONGO_ROOT_USERNAME", "admin")
-    mongo_root_pass = os.environ.get("MONGO_ROOT_PASSWORD", "secret")
+    MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
+    MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
     
     if jwt_token:
         from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
@@ -97,7 +98,7 @@ def build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optio
 
         if local_proxy_port:
             return MongoClient(
-                f"mongodb://host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                f"mongodb://host.docker.internal:{local_proxy_port}/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
                 authMechanismProperties={
                     "OIDC_CALLBACK": callback_instance,
                     "authzId": f"oidc/{user_cn}"
@@ -106,7 +107,7 @@ def build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optio
             )
         else:
             return MongoClient(
-                f"mongodb://envoy:10000/{mongo_db_name}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+                f"mongodb://envoy:{ENVOY_PROXY_PORT}/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
                 authMechanismProperties={
                     "OIDC_CALLBACK": callback_instance,
                     "authzId": f"oidc/{user_cn}"
@@ -120,12 +121,12 @@ def build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optio
     else:
         if local_proxy_port:
             return MongoClient(
-                f"mongodb://{mongo_root_user}:{mongo_root_pass}@host.docker.internal:{local_proxy_port}/{mongo_db_name}?authSource=admin&directConnection=true",
+                f"mongodb://{MONGO_USER}:{MONGO_PASS}@host.docker.internal:{local_proxy_port}/{MONGO_DB}?authSource=admin&directConnection=true",
                 serverSelectionTimeoutMS=8000
             )
         else:
             return MongoClient(
-                f"mongodb://{mongo_root_user}:{mongo_root_pass}@envoy:10000/{mongo_db_name}?authSource=admin&directConnection=true",
+                f"mongodb://{MONGO_USER}:{MONGO_PASS}@envoy:{ENVOY_PROXY_PORT}/{MONGO_DB}?authSource=admin&directConnection=true",
                 tls=True,
                 tlsCertificateKeyFile=combined_pem_path,
                 tlsCAFile=ca_path,

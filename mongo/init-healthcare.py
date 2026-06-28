@@ -1,59 +1,57 @@
 import argparse
-from dotenv import load_dotenv
 import os
 import sys
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
 
-# Import the centralized ZTA roles
 try:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from shared.zta_roles import ZTA_ROLES
 except ImportError:
     ZTA_ROLES = {}
 
-load_dotenv() 
+MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
+MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
+MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
+MONGO_PORT = os.getenv("MONGO_PORT", "27017")
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:{MONGO_PORT}/{MONGO_DB}?authSource=admin"
 
-MONGO_URI = os.getenv(
-    "MONGODB_URI", "mongodb://zta_user:zta_password@localhost:27017")
-# ─── CLI args ─────────────────────────────────────────────────────────────────
+# CLI args  
 parser = argparse.ArgumentParser(description="Init ZTA Healthcare DB")
-parser.add_argument(
-    "--uri",
-    default=MONGO_URI,
-    help="MongoDB connection URI (default: mongodb://zta_user:zta_password@localhost:27017)",
-)
+parser.add_argument("--uri", default=MONGO_URI, help="MongoDB connection URI")
 args = parser.parse_args()
+
+# Connect
+CA_PATH = "/etc/certs/ca/ca.crt"
+CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
 
 client = MongoClient(
     args.uri,
     tls=True,
-    tlsCertificateKeyFile="volumes/certs/server/mongo.pem",
-    tlsCAFile="volumes/certs/ca/ca.crt",
+    tlsCertificateKeyFile=CLIENT_PEM_PATH,
+    tlsCAFile=CA_PATH,
     tlsAllowInvalidCertificates=True
 )
-db = client["zta_db"]
+db = client[MONGO_DB]
 
+print()
 print("╔══════════════════════════════════════════════════════════════╗")
-print("║  ZTA Healthcare DB — initialising …                        ║")
+print("║  ZTA Healthcare DB — initialising …                          ║")
 print("╚══════════════════════════════════════════════════════════════╝")
 
 
-# ─── Helper: safe drop ────────────────────────────────────────────────────────
+# Helper
 def safe_drop(name: str) -> None:
-    """Drop a collection or view without raising if it doesn't exist."""
     try:
         db[name].drop()
     except OperationFailure:
         pass
 
-
-# ─── Drop existing collections (idempotent init) ─────────────────────────────
 for col in ["patients", "admissions", "clinical_records", "billing", "providers"]:
     safe_drop(col)
 
 
-# ─── 1. PATIENTS ─────────────────────────────────
+# 1. PATIENTS
 db.create_collection(
     "patients",
     validator={
@@ -81,7 +79,7 @@ db.patients.create_index([("age", ASCENDING)])
 print("Collection: patients")
 
 
-# ─── 2. PROVIDERS — Doctors & Hospitals (INTERNAL) ───────────────────────────
+# 2. PROVIDERS — Doctors & Hospitals (INTERNAL)
 db.create_collection(
     "providers",
     validator={
@@ -105,7 +103,7 @@ db.providers.create_index([("type", ASCENDING), ("name", ASCENDING)])
 print("Collection: providers")
 
 
-# ─── 3. ADMISSIONS  ───────────────────────────
+# 3. ADMISSIONS
 db.create_collection(
     "admissions",
     validator={
@@ -142,7 +140,7 @@ db.admissions.create_index([("status", ASCENDING)])
 print("Collection: admissions")
 
 
-# ─── 4. CLINICAL_RECORDS  ─────────────────────
+# 4. CLINICAL_RECORDS
 db.create_collection(
     "clinical_records",
     validator={
@@ -177,7 +175,7 @@ db.clinical_records.create_index([("test_results", ASCENDING)])
 print("Collection: clinical_records")
 
 
-# ─── 5. BILLING — Financial records ───────────────────────────────
+# 5. BILLING — Financial records
 db.create_collection(
     "billing",
     validator={
@@ -212,9 +210,7 @@ db.billing.create_index([("payment_status", ASCENDING)])
 print("Collection: billing")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # VIEWS — Field-Level Row-Level Security
-# ═══════════════════════════════════════════════════════════════════════════════
 # Every role reads from a VIEW, never from the raw collection directly.
 
 # Drop existing views (idempotent)
@@ -229,7 +225,7 @@ for view in [
     safe_drop(view)
 
 
-# ─── VIEW: patients — doctor ──────────────────────────────────────────────────
+# VIEW: patients — doctor
 # Doctors see all demographic fields (blood type is clinically relevant).
 db.command("create", "v_patients_doctor", viewOn="patients", pipeline=[
     {
@@ -246,7 +242,7 @@ db.command("create", "v_patients_doctor", viewOn="patients", pipeline=[
 print("View: v_patients_doctor")
 
 
-# ─── VIEW: patients — billing_staff ───────────────────────────────────────────
+# VIEW: patients — billing_staff
 # Billing staff sees name + age to match invoices.
 # blood_type and gender are NOT needed for billing and are hidden.
 db.command("create", "v_patients_billing", viewOn="patients", pipeline=[
@@ -262,7 +258,7 @@ db.command("create", "v_patients_billing", viewOn="patients", pipeline=[
 print("View: v_patients_billing")
 
 
-# ─── VIEW: patients — receptionist ────────────────────────────────────────────
+# VIEW: patients — receptionist
 # Receptionists handle check-in: need name, age, gender. Not blood type.
 db.command("create", "v_patients_reception", viewOn="patients", pipeline=[
     {
@@ -279,7 +275,7 @@ db.command("create", "v_patients_reception", viewOn="patients", pipeline=[
 print("View: v_patients_reception")
 
 
-# ─── VIEW: admissions — doctor / receptionist ─────────────────────────────────
+# VIEW: admissions — doctor / receptionist
 # Full admission record (both roles need this for scheduling/clinical work).
 _admissions_full_pipeline = [
     {
@@ -296,7 +292,7 @@ db.command("create", "v_admissions_reception", viewOn="admissions", pipeline=_ad
 print("View: v_admissions_reception")
 
 
-# ─── VIEW: admissions — billing_staff ─────────────────────────────────────────
+# VIEW: admissions — billing_staff
 # Billing needs dates and type to compute fees, but not room details.
 db.command("create", "v_admissions_billing", viewOn="admissions", pipeline=[
     {
@@ -311,7 +307,7 @@ db.command("create", "v_admissions_billing", viewOn="admissions", pipeline=[
 print("View: v_admissions_billing")
 
 
-# ─── VIEW: admissions — auditor ───────────────────────────────────────────────
+# VIEW: admissions — auditor
 # Auditors see everything in admissions (for compliance verification).
 db.command("create", "v_admissions_auditor", viewOn="admissions", pipeline=[
     {
@@ -325,7 +321,7 @@ db.command("create", "v_admissions_auditor", viewOn="admissions", pipeline=[
 print("View: v_admissions_auditor")
 
 
-# ─── VIEW: clinical_records — doctor ──────────────────────────────────────────
+# VIEW: clinical_records — doctor
 # Doctors see full clinical record — this is their core job.
 db.command("create", "v_clinical_doctor", viewOn="clinical_records", pipeline=[
     {
@@ -339,7 +335,7 @@ db.command("create", "v_clinical_doctor", viewOn="clinical_records", pipeline=[
 print("View: v_clinical_doctor")
 
 
-# ─── VIEW: clinical_records — auditor ─────────────────────────────────────────
+# VIEW: clinical_records — auditor
 # Auditors see clinical data for compliance but patient name is masked
 db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
     {
@@ -401,7 +397,7 @@ db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
 print("View: v_clinical_auditor")
 
 
-# ─── VIEW: billing — billing_staff ────────────────────────────────────────────
+# VIEW: billing — billing_staff
 # Full billing access for billing_staff — this is their core job.
 db.command("create", "v_billing_staff", viewOn="billing", pipeline=[
     {
@@ -415,7 +411,7 @@ db.command("create", "v_billing_staff", viewOn="billing", pipeline=[
 print("View: v_billing_staff")
 
 
-# ─── VIEW: billing — auditor ──────────────────────────────────────────────────
+# VIEW: billing — auditor
 # Auditors see billing for compliance but amounts are rounded to nearest 1000
 # and insurance provider is partially masked.
 db.command("create", "v_billing_auditor", viewOn="billing", pipeline=[
@@ -451,7 +447,7 @@ db.command("create", "v_billing_auditor", viewOn="billing", pipeline=[
 print("View: v_billing_auditor")
 
 
-# ─── VIEW: providers — all roles ──────────────────────────────────────────────
+# VIEW: providers — all roles
 # Providers (doctors/hospitals) are not sensitive — all roles see the same.
 db.command("create", "v_providers_all", viewOn="providers", pipeline=[
     {"$project": {"_id": 1, "type": 1, "name": 1}}
@@ -459,9 +455,7 @@ db.command("create", "v_providers_all", viewOn="providers", pipeline=[
 print("View: v_providers_all")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # ROLES — each role reads from views, writes to raw collections
-# ═══════════════════════════════════════════════════════════════════════════════
 
 roles_def = [
     {
@@ -469,7 +463,7 @@ roles_def = [
         "privileges": [
             # Admin has full access to raw collections AND views
             {
-                "resource": {"db": "zta_db", "collection": ""},
+                "resource": {"db": MONGO_DB, "collection": ""},
                 "actions": [
                     "find", "insert", "update", "remove",
                     "createCollection", "dropCollection", "createIndex", "listCollections",
@@ -482,13 +476,13 @@ roles_def = [
         "role": "zta_doctor",
         "privileges": [
             # Reads from views (field-level RLS enforced by the view pipeline)
-            {"resource": {"db": "zta_db", "collection": "v_patients_doctor"},   "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_providers_all"},     "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_admissions_doctor"}, "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_clinical_doctor"},   "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_patients_doctor"},   "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_providers_all"},     "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_admissions_doctor"}, "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_clinical_doctor"},   "actions": ["find"]},
             # Writes go to raw collections (schema validation still applies)
-            {"resource": {"db": "zta_db", "collection": "admissions"},       "actions": ["insert", "update"]},
-            {"resource": {"db": "zta_db", "collection": "clinical_records"}, "actions": ["insert", "update"]},
+            {"resource": {"db": MONGO_DB, "collection": "admissions"},       "actions": ["insert", "update"]},
+            {"resource": {"db": MONGO_DB, "collection": "clinical_records"}, "actions": ["insert", "update"]},
             # Explicitly NO access to: billing
         ],
         "roles": [],
@@ -498,12 +492,12 @@ roles_def = [
         "privileges": [
             # Views: patients without blood_type, admissions without room/doctor,
             #        billing full access (it's their core job)
-            {"resource": {"db": "zta_db", "collection": "v_patients_billing"},   "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_admissions_billing"}, "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_providers_all"},      "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_billing_staff"},      "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_patients_billing"},   "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_admissions_billing"}, "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_providers_all"},      "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_billing_staff"},      "actions": ["find"]},
             # Writes to billing raw collection
-            {"resource": {"db": "zta_db", "collection": "billing"}, "actions": ["insert", "update"]},
+            {"resource": {"db": MONGO_DB, "collection": "billing"}, "actions": ["insert", "update"]},
             # Explicitly NO access to: clinical_records
         ],
         "roles": [],
@@ -512,11 +506,11 @@ roles_def = [
         "role": "zta_auditor",
         "privileges": [
             # Auditors see everything but with masked sensitive fields via views
-            {"resource": {"db": "zta_db", "collection": "v_patients_doctor"},   "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_providers_all"},     "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_admissions_auditor"}, "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_clinical_auditor"},  "actions": ["find"]},  # patient name → initials
-            {"resource": {"db": "zta_db", "collection": "v_billing_auditor"},   "actions": ["find"]},  # amount rounded, provider masked
+            {"resource": {"db": MONGO_DB, "collection": "v_patients_doctor"},   "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_providers_all"},     "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_admissions_auditor"}, "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_clinical_auditor"},  "actions": ["find"]},  # patient name → initials
+            {"resource": {"db": MONGO_DB, "collection": "v_billing_auditor"},   "actions": ["find"]},  # amount rounded, provider masked
             # Auditors NEVER write anything
         ],
         "roles": [],
@@ -525,12 +519,12 @@ roles_def = [
         "role": "zta_receptionist",
         "privileges": [
             # Receptionists see patients (no blood_type) and manage admissions
-            {"resource": {"db": "zta_db", "collection": "v_patients_reception"},   "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_providers_all"},        "actions": ["find"]},
-            {"resource": {"db": "zta_db", "collection": "v_admissions_reception"}, "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_patients_reception"},   "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_providers_all"},        "actions": ["find"]},
+            {"resource": {"db": MONGO_DB, "collection": "v_admissions_reception"}, "actions": ["find"]},
             # Writes
-            {"resource": {"db": "zta_db", "collection": "patients"},   "actions": ["insert", "update"]},
-            {"resource": {"db": "zta_db", "collection": "admissions"},  "actions": ["insert", "update"]},
+            {"resource": {"db": MONGO_DB, "collection": "patients"},   "actions": ["insert", "update"]},
+            {"resource": {"db": MONGO_DB, "collection": "admissions"},  "actions": ["insert", "update"]},
             # Explicitly NO access to: clinical_records, billing
         ],
         "roles": [],
@@ -546,27 +540,6 @@ for role_doc in roles_def:
                privileges=role_doc["privileges"],
                roles=role_doc["roles"])
     print(f"Role created: {role_doc['role']}")
-
-
-# # ─── MongoDB Users ─────────────────────────────────────────────────────────────
-# users_def = [
-#     {"user": "mario.rossi",    "pwd": "MarioRossi2024!",    "roles": [{"role": "zta_doctor",       "db": "zta_db"}]},
-#     {"user": "anna.verdi",     "pwd": "AnnaVerdi2024!",     "roles": [{"role": "zta_billing",      "db": "zta_db"}]},
-#     {"user": "giulia.bianchi", "pwd": "GiuliaBianchi2024!", "roles": [{"role": "zta_auditor",      "db": "zta_db"}]},
-#     {"user": "luca.ferrari",   "pwd": "LucaFerrari2024!",   "roles": [{"role": "zta_receptionist", "db": "zta_db"}]},
-# ]
-
-# for user_doc in users_def:
-#     try:
-#         db.command("dropUser", user_doc["user"])
-#     except OperationFailure:
-#         pass
-#     db.command(
-#         "createUser", user_doc["user"],
-#         pwd=user_doc["pwd"],
-#         roles=user_doc["roles"],
-#     )
-#     print(f"User created: {user_doc['user']}")
 
 # Create the Envoy proxy X.509 user in $external database
 db_external = client["$external"]
@@ -596,7 +569,7 @@ try:
 except OperationFailure:
     pass
 
-envoy_roles = [{"role": role_config["mongo_role"], "db": "zta_db"} for role_config in ZTA_ROLES.values()]
+envoy_roles = [{"role": role_config["mongo_role"], "db": MONGO_DB} for role_config in ZTA_ROLES.values()]
 envoy_roles.append({"role": "impersonatorRole", "db": "admin"})
 
 db_external.command(
@@ -604,10 +577,10 @@ db_external.command(
     roles=envoy_roles
 )
 print("X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
-
-print("\n╔══════════════════════════════════════════════════════════════╗")
-print("║  RLS complete: views + roles + users ready.                 ║")
-print("║  Run: python3 scripts/seed-db.py                           ║")
-print("╚══════════════════════════════════════════════════════════════╝")
+print()
+print("╔════════════════════════════════════════════════════════════════╗")
+print("║  RLS complete: views + roles + users ready.                    ║")
+print("║  Run: python3 scripts/seed-db.py                               ║")
+print("╚════════════════════════════════════════════════════════════════╝")
 
 client.close()

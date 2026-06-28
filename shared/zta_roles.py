@@ -1,5 +1,4 @@
 # ZTA Roles - Single Source of Truth
-# Importable by scripts/enroll.py, identity_pki/app.py, and mongo/init-healthcare.py
 
 ZTA_ROLES = {
     "doctor": {

@@ -12,12 +12,15 @@ services:
     environment:
       IDENTITY_APP_HOST: 0.0.0.0
       IDENTITY_APP_PORT: 8080
+      IDENTITY_APP_DEBUG: false
       ZTA_PKI_DATA_DIR: /data/certs
       ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_PORT: 27017
+      ENVOY_PROXY_PORT: 10000
     volumes:
       - ./volumes/certs/ca:/data/certs
       - ./volumes/certs/server:/data/server
@@ -40,13 +43,15 @@ services:
     ports:
       - "127.0.0.1:${MONGO_PORT}:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_PORT: 27017
     volumes:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - ./mongo:/app/mongo:ro
       - mongo-logs:/var/log/mongodb
     networks:
       - backend-net
@@ -64,7 +69,9 @@ services:
     ports:
       - "127.0.0.1:${MONGO_PROXY_PORT}:5001"
     environment:
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_PORT: 27017
+      MONGO_PROXY_PORT: 5001
     volumes:
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro

@@ -26,10 +26,16 @@ except ImportError:
 COLLECTIONS = ["patients", "providers", "admissions", "clinical_records", "billing"]
 
 def main():
+    MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
+    MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
+    MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
+    MONGO_PORT = os.getenv("MONGO_PORT", "27017")
+    MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:{MONGO_PORT}/{MONGO_DB}?authSource=admin"
+
     parser = argparse.ArgumentParser(description="Clean all data in ZTA MongoDB collections.")
     parser.add_argument(
         "--uri",
-        default=os.getenv("MONGODB_URI", "mongodb://zta_user:zta_password@localhost:27017/zta_db?authSource=admin"),
+        default=MONGO_URI,
         help="MongoDB connection URI"
     )
     parser.add_argument(
@@ -80,8 +86,7 @@ def main():
     try:
         db = client.get_database()
     except ConfigurationError:
-        default_db = os.getenv("MONGO_INITDB_DATABASE", "zta_db")
-        db = client.get_database(default_db)
+        db = client.get_database(MONGO_DB)
     db_name = db.name
     print(f"Connected to database: {db_name}\n")
 
@@ -121,7 +126,7 @@ def main():
     print("\nCleaning collections data...")
     for col_name in COLLECTIONS:
         if counts.get(col_name) is None:
-            print(f"   ⚠️  Skipping {col_name} due to read error.")
+            print(f"Skipping {col_name} due to read error.")
             continue
         try:
             result = db[col_name].delete_many({})
