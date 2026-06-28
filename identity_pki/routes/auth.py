@@ -1,7 +1,11 @@
 """Authentication semantic endpoints for AD logins, OTP verification and step-up auth."""
 
+import os
 import random
 import uuid
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 
@@ -14,6 +18,50 @@ from ..auth import (
 from .utils import error_response
 
 auth_bp = Blueprint("auth", __name__)
+
+SMTP_EMAIL = os.getenv("SMTP_EMAIL")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+
+
+def send_otp_email(recipient_email: str, otp: str, user_cn: str) -> bool:
+    """Send OTP code via Gmail SMTP."""
+    if not SMTP_EMAIL or not SMTP_PASSWORD:
+        current_app.logger.warning("SMTP credentials not configured, skipping email send")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"ZTA Healthcare - Codice OTP: {otp}"
+    msg["From"] = f"ZTA Identity <{SMTP_EMAIL}>"
+    msg["To"] = recipient_email
+
+    html = f"""\
+    <html>
+    <body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px;">
+        <div style="max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 16px; padding: 40px; border: 1px solid #334155;">
+            <h2 style="color: #38bdf8; margin-top: 0;">🔐 Verifica Identità</h2>
+            <p>Ciao <strong>{user_cn}</strong>,</p>
+            <p>Il tuo codice OTP per l'autenticazione a due fattori è:</p>
+            <div style="text-align: center; margin: 30px 0;">
+                <span style="font-size: 2.5em; letter-spacing: 0.2em; color: #38bdf8; font-weight: 900; background: #0f172a; padding: 15px 30px; border-radius: 12px; border: 2px solid #38bdf8;">{otp}</span>
+            </div>
+            <p style="color: #94a3b8;">Il codice scade tra <strong>5 minuti</strong>.</p>
+            <hr style="border: none; border-top: 1px solid #334155; margin: 20px 0;">
+            <p style="font-size: 0.8em; color: #64748b;">ZTA Healthcare Identity PKI — Zero Trust Architecture</p>
+        </div>
+    </body>
+    </html>"""
+
+    msg.attach(MIMEText(html, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.sendmail(SMTP_EMAIL, recipient_email, msg.as_string())
+        current_app.logger.info(f"OTP email sent to {recipient_email}")
+        return True
+    except Exception as e:
+        current_app.logger.error(f"Failed to send OTP email to {recipient_email}: {e}")
+        return False
 
 
 @auth_bp.get("/api/auth/users")
@@ -32,7 +80,7 @@ def api_auth_users():
 
 @auth_bp.post("/api/auth/login")
 def api_auth_login():
-    """Simulate Active Directory login and send OTP."""
+    """Active Directory login and send OTP via email."""
     payload = request.get_json(silent=True) or {}
     email = payload.get("email", "").strip()
     password = payload.get("password", "")
@@ -53,12 +101,15 @@ def api_auth_login():
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5)
     }
 
-    current_app.logger.info(f"Simulated AD Login Success for {email}. OTP Code Generated: {otp}")
+    # Send OTP via email
+    email_sent = send_otp_email(email, otp, user_info["cn"])
+
+    current_app.logger.info(f"AD Login Success for {email}. OTP Generated (email_sent={email_sent})")
     return jsonify({
         "status": "otp_required",
-        "message": f"Simulated MFA OTP generated for {email}",
+        "message": f"Codice OTP inviato a {email}",
         "email": email,
-        "simulated_otp": otp 
+        "email_sent": email_sent
     })
 
 

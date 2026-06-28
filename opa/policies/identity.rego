@@ -128,7 +128,6 @@ user_role_map := {
 	"test.doctor":    "doctor",
 	"test.auditor":   "auditor",
 	"test.billing":   "billing_staff",
-	"test.reception": "receptionist",
 	"test.receptionist": "receptionist",
 	"admin":          "admin"
 }
@@ -137,7 +136,6 @@ known_users := {
 	"test.doctor",
 	"test.auditor",
 	"test.billing",
-	"test.reception",
 	"test.receptionist",
 	"admin"
 }

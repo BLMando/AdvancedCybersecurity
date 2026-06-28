@@ -8,25 +8,25 @@ from .pki import PKIService
 
 # Simulated Active Directory / HR database for ZTA Identity Verification
 AD_USERS = {
-    "test.doctor@ospedale.it": {
+    "zta.healthcare+doctor@outlook.com": {
         "cn": "test.doctor",
         "role": "doctor",
         "department": "Cardiologia",
         "password": "password123"
     },
-    "test.auditor@ospedale.it": {
+    "zta.healthcare+auditor@outlook.com": {
         "cn": "test.auditor",
         "role": "auditor",
         "department": "Audit",
         "password": "password123"
     },
-    "test.receptionist@ospedale.it": {
+    "zta.healthcare+receptionist@outlook.com": {
         "cn": "test.receptionist",
         "role": "receptionist",
         "department": "Accettazione",
         "password": "password123"
     },
-     "test.billing@ospedale.it": {
+     "zta.healthcare+billing@outlook.com": {
         "cn": "test.billing",
         "role": "billing_staff",
         "department": "Cardiologia",

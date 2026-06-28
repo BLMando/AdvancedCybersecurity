@@ -21,6 +21,8 @@ services:
       MONGO_DATABASE: ${MONGO_DATABASE}
       MONGO_PORT: 27017
       ENVOY_PROXY_PORT: 10000
+      SMTP_EMAIL: ${SMTP_EMAIL}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
     volumes:
       - ./volumes/certs/ca:/data/certs
       - ./volumes/certs/server:/data/server

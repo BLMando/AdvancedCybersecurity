@@ -1675,7 +1675,7 @@
 
             currentAuthEmail = email;
             document.getElementById("otp-simulation-banner").innerHTML =
-              `✉️ <strong>Codice di verifica inviato!</strong><br>Inserisci il seguente codice OTP simulato per completare il secondo fattore:<br><span style="font-size: 1.5em; letter-spacing: 0.1em; color: var(--accent); font-weight: 900;">${data.simulated_otp}</span>`;
+              `✉️ <strong>Codice OTP inviato!</strong><br>Controlla la tua casella email <strong>${email}</strong> e inserisci il codice ricevuto.`;
             document.getElementById("enroll-step-login").style.display = "none";
             document.getElementById("enroll-step-otp").style.display = "block";
           } catch (error) {
@@ -1874,7 +1874,7 @@
             }
 
             document.getElementById("modal-otp-simulation-banner").innerHTML =
-              `✉️ <strong>Codice OTP simulato:</strong><br><span style="font-size: 1.5em; letter-spacing: 0.1em; color: var(--accent); font-weight: 900;">${data.simulated_otp}</span>`;
+              `✉️ <strong>Codice OTP inviato!</strong><br>Controlla la tua casella email <strong>${email}</strong> e inserisci il codice ricevuto.`;
             document.getElementById("modal-step-login").style.display = "none";
             document.getElementById("modal-step-otp").style.display = "block";
           } catch (error) {
