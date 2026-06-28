@@ -11,7 +11,7 @@ SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
 SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
 SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
-SPLUNK_SEARCH_VERIFY_TLS = os.environ.get("SPLUNK_SEARCH_VERIFY_TLS", "false").lower() == "true"
+SPLUNK_VERIFY_TLS = os.environ.get("SPLUNK_VERIFY_TLS", "false").lower() == "true"
 
 
 def run_splunk_search(query: str) -> list:
@@ -34,7 +34,7 @@ def run_splunk_search(query: str) -> list:
     )
     
     ctx = _ssl.create_default_context()
-    if not SPLUNK_SEARCH_VERIFY_TLS:
+    if not SPLUNK_VERIFY_TLS:
         ctx.check_hostname = False
         ctx.verify_mode = _ssl.CERT_NONE
 

@@ -8,7 +8,7 @@ services:
     container_name: identity-pki
     restart: on-failure
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${IDENTITY_APP_PORT}:8080"
     environment:
       IDENTITY_APP_HOST: 0.0.0.0
       IDENTITY_APP_PORT: 8080
@@ -38,7 +38,7 @@ services:
     container_name: mongo
     restart: unless-stopped
     ports:
-      - "127.0.0.1:27017:27017"
+      - "127.0.0.1:${MONGO_PORT}:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
@@ -62,7 +62,7 @@ services:
       mongo:
         condition: service_started
     ports:
-      - "127.0.0.1:5001:5001"
+      - "127.0.0.1:${MONGO_PROXY_PORT}:5001"
     environment:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
     volumes:
@@ -75,7 +75,7 @@ services:
   envoy-log-init:
     image: alpine:latest
     container_name: envoy-log-init
-    user: "root"
+    user: root
     volumes:
       - envoy-logs:/var/log/envoy
     command: chown -R 101:101 /var/log/envoy
@@ -97,8 +97,8 @@ services:
       opa:
         condition: service_started
     ports:
-      - "10000:10000"
-      - "127.0.0.1:9901:9901"
+      - "${ENVOY_PROXY_PORT}:10000"
+      - "127.0.0.1:${ENVOY_ADMIN_PORT}:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ./envoy/lua:/etc/envoy/lua:ro
@@ -122,14 +122,15 @@ services:
     container_name: zta-log-forwarder
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:${LOG_FORWARDER_PORT}:5000"
     environment:
-      SPLUNK_HOST: splunk
-      SPLUNK_HEC_PORT: "8088"
-      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
-      SPLUNK_MGMT_PORT: "8089"
-      SPLUNK_USERNAME: admin
+      SPLUNK_HOST: ${SPLUNK_HOST}
+      SPLUNK_USERNAME: ${SPLUNK_USERNAME}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
+      SPLUNK_HEC_PORT: ${SPLUNK_HEC_PORT}
+      SPLUNK_MGMT_PORT: ${SPLUNK_MGMT_PORT}
+      SPLUNK_VERIFY_TLS: ${SPLUNK_VERIFY_TLS}
+      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
@@ -154,8 +155,8 @@ services:
       - zta-log-forwarder
       - identity-pki
     ports:
-      - "127.0.0.1:8181:8181"
-      - "127.0.0.1:9002:9002"
+      - "127.0.0.1:${OPA_API_PORT}:8181"
+      - "127.0.0.1:${OPA_GRPC_PORT}:9002"
     volumes:
       - ./opa/policies:/policies:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
@@ -175,9 +176,7 @@ services:
     networks:
       - backend-net
 
-  # ── Snort 3 — Sonda PEP (sidecar di Envoy) ──────────
-  # Condivide il namespace di rete con Envoy.
-  # Ispeziona il traffico post-firewall, pre-autorizzazione.
+  # ── Snort 3 — Sonda PEP (post-firewall, pre-autorizzazione) ──────────
   snort-pep:
     image: ciscotalos/snort3:latest
     container_name: snort-pep
@@ -206,9 +205,7 @@ services:
         fi
         tail -f /dev/null
 
-  # ── Snort 3 — Sonda Risorsa (sidecar di MongoDB) ────
-  # Condivide il namespace di rete con MongoDB.
-  # Ispeziona il traffico autenticato e autorizzato.
+  # ── Snort 3 — Sonda Risorsa (ispeziona il traffico autenticato e autorizzato) ────
   snort-resource:
     image: ciscotalos/snort3:latest
     container_name: snort-resource
@@ -237,9 +234,7 @@ services:
         fi
         tail -f /dev/null
 
-  # ── NFTables (L3/L4 Firewall — sidecar di Envoy) ────
-  # Condivide il namespace di rete con Envoy.
-  # Applica regole netfilter al traffic in ingresso verso il PEP.
+  # ── NFTables (L3/L4 Firewall — applica regole netfilter al traffico in ingresso verso il PEP) ────
   nftables:
     image: alpine:latest
     container_name: nftables
@@ -302,16 +297,24 @@ services:
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
     ports:
-      - "8000:8000"
-      - "8088:8088"
-      - "8089:8089"
-      - "9997:9997"
+      - "${SPLUNK_WEB_PORT}:8000"
+      - "${SPLUNK_HEC_PORT}:8088"
+      - "${SPLUNK_MGMT_PORT}:8089"
+      - "${SPLUNK_RECEIVER_PORT}:9997"
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
+      - ./splunk/splunk_setup.py:/app/splunk_setup.py:ro
+      - ./splunk/dashboards:/app/dashboards:ro
     networks:
       - backend-net
     restart: always
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        (SPLUNK_HOST=localhost python3 /app/splunk_setup.py || true) &
+        exec /sbin/entrypoint.sh start-service
 
 volumes:
   splunk-var:
@@ -328,5 +331,3 @@ networks:
     driver: bridge
   backend-net:
     driver: bridge
-
-# Networks defined above
