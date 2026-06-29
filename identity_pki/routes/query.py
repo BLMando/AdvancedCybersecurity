@@ -13,8 +13,6 @@ from ..auth import (
     resolve_user_metadata as _resolve_user_metadata,
 )
 from ..database import (
-    build_mongo_client as _build_mongo_client,
-    execute_mongo_operation as _execute_mongo_operation,
     prepare_combined_pem as _prepare_combined_pem,
 )
 from ..audit import send_audit_event_impl as _send_audit_event_impl
@@ -234,7 +232,7 @@ def api_query():
             url = f"http://host.docker.internal:{local_proxy_port}/query"
             response = requests.post(url, data=payload_data, headers=headers, timeout=10)
         else:
-            url = "https://envoy:{ENVOY_PROXY_PORT}/query"
+            url = f"https://envoy:{ENVOY_PROXY_PORT}/query"
             response = requests.post(
                 url,
                 data=payload_data,
