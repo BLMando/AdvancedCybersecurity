@@ -135,8 +135,12 @@ def import_dashboard(session_key: str, host: str, port: int,
     if status == 409:
         log(f"Dashboard '{dashboard_name}' already exists, updating...")
         update_url = _url(host, port, f"/servicesNS/admin/search/data/ui/views/{dashboard_name}")
+        
+        # When updating an existing view, we only pass eai:data, not the name
+        update_data = urllib.parse.urlencode({"eai:data": dashboard_xml}).encode()
+        
         # Splunk REST API updates views via POST, not PUT.
-        status2, _ = splunk_request(session_key, "POST", update_url, data)
+        status2, _ = splunk_request(session_key, "POST", update_url, update_data)
         if status2 in (200, 201):
             log(f"Dashboard '{dashboard_name}' updated successfully.")
             return
