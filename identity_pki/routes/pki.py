@@ -188,8 +188,7 @@ def api_enroll_delegated():
     role = session["role"]
     department = session["department"]
         
-    ZTA_AGENT_PORT = os.getenv("ZTA_AGENT_PORT", "9090")
-    agent_url = f"http://host.docker.internal:{ZTA_AGENT_PORT}/enroll"
+    agent_url = f"http://host.docker.internal:9090/enroll"
     agent_payload = {
         "common_name": user,
         "role": role,
@@ -202,7 +201,7 @@ def api_enroll_delegated():
         data=json.dumps(agent_payload).encode('utf-8'),
         headers={
             'Content-Type': 'application/json',
-            'Host': f'localhost:{ZTA_AGENT_PORT}'
+            'Host': f'localhost:9090'
         },
         method='POST'
     )
@@ -225,7 +224,7 @@ def api_enroll_delegated():
     except urllib.error.URLError as e:
         return jsonify({
             "status": "error",
-            "message": f"ZTA Local Agent is not running or unreachable on port {ZTA_AGENT_PORT} on the host: {e.reason}"
+            "message": f"ZTA Local Agent is not running or unreachable on port 9090 on the host: {e.reason}"
         }), 502
     except Exception as e:
         current_app.logger.exception("Delegation failed with unexpected error")

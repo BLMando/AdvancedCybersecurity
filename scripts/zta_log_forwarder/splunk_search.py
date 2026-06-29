@@ -7,8 +7,6 @@ import ssl as _ssl
 
 logger = logging.getLogger("splunk_search")
 
-SPLUNK_HOST = os.environ.get("SPLUNK_HOST", "splunk")
-SPLUNK_MGMT_PORT = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
 SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
 SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
 SPLUNK_VERIFY_TLS = os.environ.get("SPLUNK_VERIFY_TLS", "false").lower() == "true"
@@ -20,7 +18,7 @@ def run_splunk_search(query: str) -> list:
         logger.error("SPLUNK_PASSWORD is not configured; cannot query Splunk stats")
         raise RuntimeError("splunk credentials not configured")
 
-    base_url = f"https://{SPLUNK_HOST}:{SPLUNK_MGMT_PORT}/services/search/jobs/export"
+    base_url = f"https://splunk:8089/services/search/jobs/export"
     form = urllib.parse.urlencode({
         "search": query,
         "output_mode": "json",

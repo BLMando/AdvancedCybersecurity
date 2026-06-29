@@ -187,7 +187,6 @@ def api_query():
 
         view_name = _get_rls_view_name(role, collection_name)
 
-    ENVOY_PROXY_PORT = os.environ.get("ENVOY_PROXY_PORT", "10000")
     ca_path = os.path.join(service.cert_dir, "ca.crt")
 
     try:
@@ -232,7 +231,7 @@ def api_query():
             url = f"http://host.docker.internal:{local_proxy_port}/query"
             response = requests.post(url, data=payload_data, headers=headers, timeout=10)
         else:
-            url = "https://envoy:{ENVOY_PROXY_PORT}/query"
+            url = "https://envoy:10000/query"
             response = requests.post(
                 url,
                 data=payload_data,

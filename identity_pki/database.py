@@ -23,12 +23,10 @@ def provision_mongo_user(service: PKIService, logger: logging.Logger, username: 
         MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
         MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
         MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
-        MONGO_PORT = os.getenv("MONGO_PORT", "27017")
-        ENVOY_PROXY_PORT = os.getenv("ENVOY_PROXY_PORT", "10000")
         ca_path = os.path.join(service.cert_dir, "ca.crt")
         
         client = MongoClient(
-            f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo:{MONGO_PORT}/admin",
+            f"mongodb://{MONGO_USER}:{MONGO_PASS}@mongo:27017/admin",
             serverSelectionTimeoutMS=2000,
             tls=True,
             tlsCertificateKeyFile="/data/server/mongo.pem",

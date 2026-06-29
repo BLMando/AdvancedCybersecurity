@@ -156,24 +156,24 @@ def import_dashboard(session_key: str, host: str, port: int,
 # ─── Main ──────────────────────────────────────────────────────────
 
 def main():
-    host = os.environ.get("SPLUNK_HOST", "localhost")
-    port = int(os.environ.get("SPLUNK_MGMT_PORT", "8089"))
-    username = os.environ.get("SPLUNK_USERNAME", "admin")
-    password = os.environ.get("SPLUNK_PASSWORD", "SplunkPassword123!")
+    SPLUNK_HOST = "splunk"
+    SPLUNK_PORT = 8089
+    SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
+    SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
 
     if SPLUNK_VERIFY_TLS:
         log("TLS certificate verification enabled (SPLUNK_VERIFY_TLS=true).")
     else:
         log("TLS certificate verification disabled (lab/Docker Splunk). Set SPLUNK_VERIFY_TLS=true in production.")
 
-    wait_for_splunk(host, port)
-    session_key = splunk_login(host, port, username, password)
+    wait_for_splunk(SPLUNK_HOST, SPLUNK_PORT)
+    session_key = splunk_login(SPLUNK_HOST, SPLUNK_PORT, SPLUNK_USERNAME, SPLUNK_PASSWORD)
 
-    create_index(session_key, host, port, "zta_envoy")
-    create_index(session_key, host, port, "zta_snort")
-    create_index(session_key, host, port, "zta_nftables")
-    create_index(session_key, host, port, "zta_mongodb")
-    create_index(session_key, host, port, "zta_mongodb_audit")
+    create_index(session_key, SPLUNK_HOST, SPLUNK_PORT, "zta_envoy")
+    create_index(session_key, SPLUNK_HOST, SPLUNK_PORT, "zta_snort")
+    create_index(session_key, SPLUNK_HOST, SPLUNK_PORT, "zta_nftables")
+    create_index(session_key, SPLUNK_HOST, SPLUNK_PORT, "zta_mongodb")
+    create_index(session_key, SPLUNK_HOST, SPLUNK_PORT, "zta_mongodb_audit")
 
     # Support both container mount (/app/dashboards) and local execution
     dashboard_dir = Path("/app/dashboards")
@@ -181,7 +181,7 @@ def main():
         dashboard_dir = Path(__file__).resolve().parent.parent / "splunk" / "dashboards"
     dashboard_file = dashboard_dir / "zta_overview.xml"
     if dashboard_file.exists():
-        import_dashboard(session_key, host, port, str(dashboard_file))
+        import_dashboard(session_key, SPLUNK_HOST, SPLUNK_PORT, str(dashboard_file))
     else:
         log(f"Dashboard file not found at {dashboard_file}, skipping import.")
 

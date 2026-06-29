@@ -14,7 +14,6 @@ logger = logging.getLogger("mongo_proxy")
 app = Flask(__name__)
 
 MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
-MONGO_PORT = os.getenv("MONGO_PORT", "27017")
 CA_PATH = "/etc/certs/ca/ca.crt"
 CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
 
@@ -28,7 +27,7 @@ def build_client(jwt_token, user_cn):
     # Connect to MongoDB via OIDC
     callback_instance = StaticTokenCallback(jwt_token)
     return MongoClient(
-        f"mongodb://mongo:{MONGO_PORT}/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+        f"mongodb://mongo:27017/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
         authMechanismProperties={
             "OIDC_CALLBACK": callback_instance,
             "authzId": f"oidc/{user_cn}"
@@ -147,7 +146,6 @@ def handle_query():
         }), 500
 
 if __name__ == "__main__":
-    MONGO_PROXY_PORT = int(os.getenv("MONGO_PROXY_PORT", "5001"))
     
     # Configure mTLS for the Flask HTTPS server
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -155,5 +153,5 @@ if __name__ == "__main__":
     context.load_verify_locations(cafile=CA_PATH)
     context.verify_mode = ssl.CERT_REQUIRED
     
-    logger.info("Starting Custom MongoDB HTTP Proxy under mTLS on port %d", MONGO_PROXY_PORT)
-    app.run(host="0.0.0.0", port=MONGO_PROXY_PORT, ssl_context=context)
+    logger.info("Starting Custom MongoDB HTTP Proxy under mTLS on port %d", 5001)
+    app.run(host="0.0.0.0", port=5001, ssl_context=context)

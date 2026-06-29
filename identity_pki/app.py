@@ -59,11 +59,9 @@ def create_app(data_dir=None) -> Flask:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     app = create_app()
-    host = os.environ.get("IDENTITY_APP_HOST", "0.0.0.0")
-    port = int(os.environ.get("IDENTITY_APP_PORT", "8080"))
     debug = os.environ.get("IDENTITY_APP_DEBUG", "false").lower() == "true"
     ssl_context = ("/data/server/envoy.crt", "/data/server/envoy.key")
-    app.run(host=host, port=port, debug=debug, ssl_context=ssl_context)
+    app.run(host="0.0.0.0", port=8080, debug=debug, ssl_context=ssl_context)
     
 
 if __name__ == "__main__":

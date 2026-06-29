@@ -13,8 +13,7 @@ except ImportError:
 MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
 MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
 MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
-MONGO_PORT = os.getenv("MONGO_PORT", "27017")
-MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:{MONGO_PORT}/{MONGO_DB}?authSource=admin"
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:27017/{MONGO_DB}?authSource=admin"
 
 # CLI args  
 parser = argparse.ArgumentParser(description="Init ZTA Healthcare DB")
