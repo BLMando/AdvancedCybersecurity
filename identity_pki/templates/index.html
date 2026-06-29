@@ -1,169 +1,132 @@
 <!doctype html>
-<html lang="it">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Identity PKI Console - CSR Enrollment & Query Console</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='style.css') }}"
-    />
-  </head>
-  <body>
-    <main class="shell">
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">ZTA · PKI & Identity</p>
-          <h1>Zero Trust Certificate Enrollment & Query Console</h1>
-          <p class="lede">
-            Gestisci le identità crittografiche hardware-bound e interroga in
-            modo sicuro le collezioni di MongoDB passando per il gateway mTLS di
-            Envoy e il motore decisionale di OPA.
-          </p>
-        </div>
+<html lang="en">
 
-        <aside class="status-card">
-          <span class="status-badge">CA ready</span>
-          <h2>Root CA</h2>
-          <dl>
-            <div>
-              <dt>Subject</dt>
-              <dd>{{ ca.subject }}</dd>
-            </div>
-            <div>
-              <dt>Fingerprint</dt>
-              <dd class="mono">{{ ca.fingerprint_sha256[:32] }}…</dd>
-            </div>
-            <div>
-              <dt>Data dir</dt>
-              <dd class="mono">{{ ca.data_dir }}</dd>
-            </div>
-          </dl>
-          <a
-            class="ghost-link"
-            href="{{ url_for('admin.download_ca_file', filename='ca.crt') }}"
-            >Scarica CA CRT</a
-          >
-        </aside>
-      </section>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Identity PKI Console - CSR Enrollment & Query Console</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
 
-      <!-- Tab Controls -->
-      <div class="tabs-container">
-        <button
-          id="btn-enroll"
-          class="tab-btn active"
-          onclick="switchTab('enroll')"
-        >
-          Hardware CSR Enrollment
-        </button>
-        <button id="btn-query" class="tab-btn" onclick="switchTab('query')">
-          MongoDB Console
-        </button>
-        <button id="btn-certs" class="tab-btn" onclick="switchTab('certs')">
-          Gestione Certificati
-        </button>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">ZTA · PKI & Identity</p>
+        <h1>Zero Trust Certificate Enrollment & Query Console</h1>
+        <p class="lede">
+          Manage hardware-bound cryptographic identities and securely query
+          MongoDB collections through Envoy's mTLS gateway and OPA's
+          decision engine.
+        </p>
       </div>
 
-      <!-- Enrollment Tab Content -->
-      <div id="tab-enroll" class="tab-content active">
-        <section class="panel-grid single">
-          <section class="panel">
-            <h2>Enrollment</h2>
-            <div id="error-box" class="error-box" style="display: none"></div>
-            <div
-              id="success-box"
-              class="success-box"
-              style="display: none"
-            ></div>
+      <aside class="status-card">
+        <span class="status-badge">CA ready</span>
+        <h2>Root CA</h2>
+        <dl>
+          <div>
+            <dt>Subject</dt>
+            <dd>{{ ca.subject }}</dd>
+          </div>
+          <div>
+            <dt>Fingerprint</dt>
+            <dd class="mono">{{ ca.fingerprint_sha256[:32] }}…</dd>
+          </div>
+          <div>
+            <dt>Data dir</dt>
+            <dd class="mono">{{ ca.data_dir }}</dd>
+          </div>
+        </dl>
+        <a class="ghost-link" href="{{ url_for('admin.download_ca_file', filename='ca.crt') }}">Download CA CRT</a>
+      </aside>
+    </section>
 
-            <!-- STEP 1: AD Login Form -->
-            <div id="enroll-step-login">
-              <h3 style="margin-bottom: 1rem; color: var(--accent)">
-                Fase 1: Autenticazione Active Directory Aziendale (SSO)
-              </h3>
-              <form id="login-form" class="form-grid">
-                <label for="login-email" style="grid-column: span 2">
-                  <span>Email Aziendale</span>
-                  <select id="login-email" required>
-                    <option value="" disabled selected>Caricamento utenti AD...</option>
-                  </select>
-                </label>
+    <!-- Tab Controls -->
+    <div class="tabs-container">
+      <button id="btn-enroll" class="tab-btn active" onclick="switchTab('enroll')">
+        Hardware CSR Enrollment
+      </button>
+      <button id="btn-query" class="tab-btn" onclick="switchTab('query')">
+        MongoDB Console
+      </button>
+      <button id="btn-certs" class="tab-btn" onclick="switchTab('certs')">
+        Certificate Management
+      </button>
+    </div>
 
-                <label for="login-password" style="grid-column: span 2">
-                  <span>Password Directory</span>
-                  <input
-                    type="password"
-                    id="login-password"
-                    value="password123"
-                    required
-                  />
-                </label>
+    <!-- Enrollment Tab Content -->
+    <div id="tab-enroll" class="tab-content active">
+      <section class="panel-grid single">
+        <section class="panel">
+          <h2>Enrollment</h2>
+          <div id="error-box" class="error-box" style="display: none"></div>
+          <div id="success-box" class="success-box" style="display: none"></div>
 
-                <div
-                  class="actions"
-                  style="grid-column: span 2; margin-top: 1rem"
-                >
-                  <button type="submit" id="login-btn" style="width: 100%">
-                    Accedi con Single Sign-On
-                  </button>
-                </div>
-              </form>
-            </div>
+          <!-- STEP 1: AD Login Form -->
+          <div id="enroll-step-login">
+            <h3 style="margin-bottom: 1rem; color: var(--accent)">
+              Step 1: Corporate Active Directory Authentication (SSO)
+            </h3>
+            <form id="login-form" class="form-grid">
+              <label for="login-email" style="grid-column: span 2">
+                <span>Corporate Email</span>
+                <select id="login-email" required>
+                  <option value="" disabled selected>Loading AD users...</option>
+                </select>
+              </label>
 
-            <!-- STEP 2: MFA OTP Verification Form -->
-            <div id="enroll-step-otp" style="display: none">
-              <h3 style="margin-bottom: 1rem; color: var(--accent)">
-                Fase 2: Multi-Factor Authentication (OTP)
-              </h3>
-              <div
-                id="otp-simulation-banner"
-                class="success-box"
-                style="
+              <label for="login-password" style="grid-column: span 2">
+                <span>Directory Password</span>
+                <input type="password" id="login-password" value="password123" required />
+              </label>
+
+              <div class="actions" style="grid-column: span 2; margin-top: 1rem">
+                <button type="submit" id="login-btn" style="width: 100%">
+                  Sign In with Single Sign-On
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- STEP 2: MFA OTP Verification Form -->
+          <div id="enroll-step-otp" style="display: none">
+            <h3 style="margin-bottom: 1rem; color: var(--accent)">
+              Step 2: Multi-Factor Authentication (OTP)
+            </h3>
+            <div id="otp-simulation-banner" class="success-box" style="
                   background: rgba(30, 41, 59, 0.7);
                   border-color: var(--accent);
                   margin-bottom: 1.5rem;
                   display: block;
-                "
-              >
-                <!-- Will show the simulated OTP code -->
-              </div>
-              <form id="otp-form" class="form-grid">
-                <label for="otp-code" style="grid-column: span 2">
-                  <span>Codice di Verifica OTP (MFA)</span>
-                  <input
-                    type="text"
-                    id="otp-code"
-                    placeholder="------"
-                    required
-                    maxlength="6"
-                    style="
+                ">
+              <!-- Will show the simulated OTP code -->
+            </div>
+            <form id="otp-form" class="form-grid">
+              <label for="otp-code" style="grid-column: span 2">
+                <span>OTP Verification Code (MFA)</span>
+                <input type="text" id="otp-code" placeholder="------" required maxlength="6" style="
                       text-align: center;
                       font-size: 1.5em;
                       letter-spacing: 0.2em;
                       font-family: monospace;
-                    "
-                  />
-                </label>
+                    " />
+              </label>
 
-                <div
-                  class="actions"
-                  style="grid-column: span 2; margin-top: 1rem"
-                >
-                  <button type="submit" id="otp-btn" style="width: 100%">
-                    Verifica OTP e Associa Dispositivo
-                  </button>
-                </div>
-              </form>
-            </div>
+              <div class="actions" style="grid-column: span 2; margin-top: 1rem">
+                <button type="submit" id="otp-btn" style="width: 100%">
+                  Verify OTP and Bind Device
+                </button>
+              </div>
+            </form>
+          </div>
 
-            <!-- STEP 3: Auto-Enroll Trigger Form -->
-            <div id="enroll-step-trigger" style="display: none">
-              <h3 style="margin-bottom: 1rem; color: var(--accent)">
-                Fase 3: Attestazione Hardware & Emissione Certificato
-              </h3>
-              <div
-                class="query-meta"
-                style="
+          <!-- STEP 3: Auto-Enroll Trigger Form -->
+          <div id="enroll-step-trigger" style="display: none">
+            <h3 style="margin-bottom: 1rem; color: var(--accent)">
+              Step 3: Hardware Attestation & Certificate Issuance
+            </h3>
+            <div class="query-meta" style="
                   margin-bottom: 1.5rem;
                   background: rgba(14, 25, 44, 0.6);
                   padding: 16px;
@@ -172,1379 +135,1077 @@
                   display: flex;
                   flex-direction: column;
                   gap: 8px;
-                "
-              >
-                <div>
-                  Utente (CN) Verificato:
-                  <strong
-                    id="verified-cn"
-                    style="color: var(--accent)"
-                  ></strong>
-                </div>
-                <div>
-                  Ruolo Autorizzato:
-                  <strong
-                    id="verified-role"
-                    style="color: var(--accent)"
-                  ></strong>
-                </div>
-                <div>
-                  Reparto / OU:
-                  <strong
-                    id="verified-dept"
-                    style="color: var(--accent)"
-                  ></strong>
-                </div>
+                ">
+              <div>
+                Verified User (CN):
+                <strong id="verified-cn" style="color: var(--accent)"></strong>
               </div>
+              <div>
+                Authorized Role:
+                <strong id="verified-role" style="color: var(--accent)"></strong>
+              </div>
+              <div>
+                Department / OU:
+                <strong id="verified-dept" style="color: var(--accent)"></strong>
+              </div>
+            </div>
 
-              <form id="csr-form" class="form-grid">
-                <div
-                  class="actions"
-                  style="
+            <form id="csr-form" class="form-grid">
+              <div class="actions" style="
                     grid-column: span 2;
                     display: flex;
                     flex-direction: column;
                     gap: 10px;
-                  "
-                >
-                  <button
-                    type="submit"
-                    id="auto-enroll-btn"
-                    style="flex: 1; min-width: 200px"
-                  >
-                    Avvia Auto-Enroll (Local Agent)
-                  </button>
-                  <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.85">
-                    <strong>Nota:</strong> Questa operazione contatterà l'Agente
-                    ZTA locale (porta 9090) in esecuzione sul tuo dispositivo
-                    per generare la chiave hardware nel Secure Enclave/TPM,
-                    associare l'identità autenticata ed emettere il certificato
-                    X.509 firmato dalla PKI.
-                  </p>
-                </div>
-              </form>
-            </div>
-          </section>
-
-          <!-- <section class="panel info-panel">
-          <h2>Automated Enrollment</h2>
-          <ul>
-            <li><strong>Sicurezza Hardware:</strong> La coppia di chiavi viene generata e custodita all'interno del Secure Enclave (macOS) o del TPM 2.0 (Windows) locale.</li>
-            <li><strong>Zero Knowledge:</strong> La chiave privata rimane al sicuro nel dispositivo e non viene mai trasmessa al server né salvata su disco.</li>
-            <li><strong>Automazione Completa:</strong> L'agente locale dialoga con il server PKI per firmare il certificato e registrarlo nel portachiavi di sistema.</li>
-            <li><strong>Auto-Provisioning:</strong> L'utente viene registrato ed autorizzato all'istante all'interno di MongoDB.</li>
-          </ul>
-        </section> -->
+                  ">
+                <button type="submit" id="auto-enroll-btn" style="flex: 1; min-width: 200px">
+                  Start Auto-Enroll (Local Agent)
+                </button>
+                <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.85">
+                  <strong>Note:</strong> This operation will contact the local
+                  ZTA Agent (port 9090) running on your device to generate the
+                  hardware key in the Secure Enclave/TPM, bind the authenticated
+                  identity, and issue the X.509 certificate signed by the PKI.
+                </p>
+              </div>
+            </form>
+          </div>
         </section>
-      </div>
+      </section>
+    </div>
 
-      <!-- Query Tab Content -->
-      <div id="tab-query" class="tab-content">
-        <section class="panel" style="margin-bottom: 0">
-          <!-- ── Top control bar ───────────────────────────────────────────────── -->
-          <div class="query-control-bar">
-            <!-- Identity -->
-            <div class="qcb-group qcb-identity">
-              <label for="query-user">
-                <span>Identità (CN)</span>
-                <div style="display: flex; align-items: center; gap: 8px">
-                  <select id="query-user" required>
-                    <option value="" disabled selected>Caricamento...</option>
-                  </select>
-                  <span
-                    id="hardware-badge"
-                    style="
+    <!-- Query Tab Content -->
+    <div id="tab-query" class="tab-content">
+      <section class="panel" style="margin-bottom: 0">
+        <!-- ── Top control bar ───────────────────────────────────────────────── -->
+        <div class="query-control-bar">
+          <!-- Identity -->
+          <div class="qcb-group qcb-identity">
+            <label for="query-user">
+              <span>Identity (CN)</span>
+              <div style="display: flex; align-items: center; gap: 8px">
+                <select id="query-user" required>
+                  <option value="" disabled selected>Loading...</option>
+                </select>
+                <span id="hardware-badge" style="
                       display: none;
                       padding: 5px 10px;
                       border-radius: 6px;
                       font-size: 0.8em;
                       font-weight: bold;
                       white-space: nowrap;
-                    "
-                  ></span>
-                </div>
-              </label>
-            </div>
-
-            <!-- Collection + Limit -->
-            <div class="qcb-group">
-              <label for="query-collection">
-                <span>Collezione</span>
-                <select id="query-collection" required>
-                  <option value="patients">patients</option>
-                  <option value="clinical_records" selected>
-                    clinical_records
-                  </option>
-                  <option value="billing">billing</option>
-                  <option value="providers">providers</option>
-                  <option value="admissions">admissions</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="qcb-group qcb-narrow">
-              <label for="query-limit">
-                <span>Limite</span>
-                <input
-                  type="number"
-                  id="query-limit"
-                  value="10"
-                  min="1"
-                  max="100"
-                />
-              </label>
-            </div>
-
-            <!-- Hidden action — always find; edit/delete done inline per-row -->
-            <input type="hidden" id="query-action" value="find" />
-
-            <div class="qcb-group qcb-submit">
-              <span style="visibility: hidden; font-size: 0.85rem"
-                >&#8203;</span
-              >
-              <button
-                type="submit"
-                form="query-form"
-                id="query-submit-btn"
-                style="white-space: nowrap"
-              >
-                🔍 Cerca
-              </button>
-            </div>
+                    "></span>
+              </div>
+            </label>
           </div>
 
-          <!-- ── Dynamic filters ───────────────────────────────────────────────── -->
-          <form id="query-form">
-            <div id="simple-filter-container" class="filter-chips-row">
-              <!-- populated by updateSimpleQueryFields() -->
-            </div>
-          </form>
+          <!-- Collection + Limit -->
+          <div class="qcb-group">
+            <label for="query-collection">
+              <span>Collection</span>
+              <select id="query-collection" required>
+                <option value="patients">patients</option>
+                <option value="clinical_records" selected>
+                  clinical_records
+                </option>
+                <option value="billing">billing</option>
+                <option value="providers">providers</option>
+                <option value="admissions">admissions</option>
+              </select>
+            </label>
+          </div>
 
-          <!-- ── Feedback boxes ────────────────────────────────────────────────── -->
-          <div
-            id="query-error-box"
-            class="error-box"
-            style="display: none; margin-top: 12px"
-          ></div>
-          <div
-            id="query-success-box"
-            class="success-box"
-            style="display: none; margin-top: 12px"
-          ></div>
+          <div class="qcb-group qcb-narrow">
+            <label for="query-limit">
+              <span>Limit</span>
+              <input type="number" id="query-limit" value="10" min="1" max="100" />
+            </label>
+          </div>
 
-          <!-- ── Results section ───────────────────────────────────────────────── -->
-          <div
-            id="query-result-section"
-            style="display: none; margin-top: 1.5rem"
-          >
-            <!-- Meta + view toggle -->
-            <div class="results-header">
-              <div
-                class="query-meta"
-                style="border: none; padding: 0; background: none; margin: 0"
-              >
-                <div>
-                  Ruolo:
-                  <strong id="query-resp-role" style="color: var(--accent)"
-                    >—</strong
-                  >
-                </div>
-                <div>
-                  Vista RLS:
-                  <strong id="query-resp-view" style="color: var(--accent)"
-                    >—</strong
-                  >
-                </div>
-                <div>Documenti: <strong id="query-resp-count">0</strong></div>
+          <!-- Hidden action — always find; edit/delete done inline per-row -->
+          <input type="hidden" id="query-action" value="find" />
+
+          <div class="qcb-group qcb-submit">
+            <span style="visibility: hidden; font-size: 0.85rem">&#8203;</span>
+            <button type="submit" form="query-form" id="query-submit-btn" style="white-space: nowrap">
+              Search
+            </button>
+          </div>
+        </div>
+
+        <!-- ── Dynamic filters ───────────────────────────────────────────────── -->
+        <form id="query-form">
+          <div id="simple-filter-container" class="filter-chips-row">
+            <!-- populated by updateSimpleQueryFields() -->
+          </div>
+        </form>
+
+        <!-- ── Feedback boxes ────────────────────────────────────────────────── -->
+        <div id="query-error-box" class="error-box" style="display: none; margin-top: 12px"></div>
+        <div id="query-success-box" class="success-box" style="display: none; margin-top: 12px"></div>
+
+        <!-- ── Results section ───────────────────────────────────────────────── -->
+        <div id="query-result-section" style="display: none; margin-top: 1.5rem">
+          <!-- Meta + view toggle -->
+          <div class="results-header">
+            <div class="query-meta" style="border: none; padding: 0; background: none; margin: 0">
+              <div>
+                Role:
+                <strong id="query-resp-role" style="color: var(--accent)">—</strong>
               </div>
-              <div style="display: flex; gap: 8px; align-items: center">
-                <!-- Live search bar -->
-                <div style="position: relative">
-                  <input
-                    type="text"
-                    id="table-live-search"
-                    placeholder="🔎 Filtra tabella..."
-                    style="
+              <div>
+                RLS View:
+                <strong id="query-resp-view" style="color: var(--accent)">—</strong>
+              </div>
+              <div>Documents: <strong id="query-resp-count">0</strong></div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <!-- Live search bar -->
+              <div style="position: relative">
+                <input type="text" id="table-live-search" placeholder="Filter table..." style="
                       padding: 6px 12px;
                       border-radius: 10px;
                       font-size: 0.82rem;
                       width: 200px;
                       min-height: 0;
-                    "
-                    oninput="liveFilterTable(this.value)"
-                  />
-                </div>
-                <button
-                  type="button"
-                  id="result-view-table"
-                  class="tab-btn active"
-                  style="
-                    padding: 4px 12px;
-                    font-size: 0.8rem;
-                    min-height: 30px;
-                    border-radius: 8px;
-                  "
-                >
-                  📋 Tabella
-                </button>
-                <button
-                  type="button"
-                  id="result-view-json"
-                  class="tab-btn"
-                  style="
-                    padding: 4px 12px;
-                    font-size: 0.8rem;
-                    min-height: 30px;
-                    border-radius: 8px;
-                  "
-                >
-                  { } JSON
-                </button>
+                    " oninput="liveFilterTable(this.value)" />
               </div>
+              <button type="button" id="result-view-table" class="tab-btn active" style="
+                    padding: 4px 12px;
+                    font-size: 0.8rem;
+                    min-height: 30px;
+                    border-radius: 8px;
+                  ">
+                Table
+              </button>
+              <button type="button" id="result-view-json" class="tab-btn" style="
+                    padding: 4px 12px;
+                    font-size: 0.8rem;
+                    min-height: 30px;
+                    border-radius: 8px;
+                  ">
+                { } JSON
+              </button>
             </div>
+          </div>
 
-            <!-- Table -->
-            <div
-              id="query-output-table-container"
-              style="
+          <!-- Table -->
+          <div id="query-output-table-container" style="
                 overflow-x: auto;
                 width: 100%;
                 border-radius: 14px;
                 border: 1px solid rgba(148, 163, 184, 0.18);
                 background: rgba(8, 15, 27, 0.4);
                 margin-top: 14px;
-              "
-            >
-              <table
-                id="query-output-table"
-                style="
+              ">
+            <table id="query-output-table" style="
                   width: 100%;
                   border-collapse: collapse;
                   text-align: left;
                   font-size: 0.88em;
                   color: var(--text);
-                "
-              ></table>
-            </div>
+                "></table>
+          </div>
 
-            <!-- JSON view -->
-            <div
-              id="query-output-json"
-              class="query-result-box"
-              style="display: none"
-            ></div>
+          <!-- JSON view -->
+          <div id="query-output-json" class="query-result-box" style="display: none"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Certs Tab Content -->
+    <div id="tab-certs" class="tab-content">
+      <section class="panel-grid single">
+        <section class="panel">
+          <h2>Identity Registry &amp; Revocations</h2>
+          <p class="lede" style="margin-bottom: 1.5rem;">
+            View the status of issued cryptographic certificates. Hardware and software certificates can be revoked
+            instantly, updating the CRL for Envoy and blocking access.
+          </p>
+          <div class="table-container">
+            <table id="certs-table">
+              <thead>
+                <tr>
+                  <th>User (Common Name)</th>
+                  <th>Role</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
+      </section>
+    </div>
+  </main>
+
+  <!-- Modal for Primary AD Auth + OTP -->
+  <div id="primary-auth-modal" class="modal-overlay" style="display: none">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 style="margin: 0; font-size: 1.25rem">
+          Primary Authentication Required
+        </h2>
+        <button type="button" class="modal-close" onclick="closePrimaryAuthModal()">
+          &times;
+        </button>
       </div>
+      <div class="modal-body">
+        <div id="modal-error-box" class="error-box" style="display: none"></div>
 
-      <!-- Certs Tab Content -->
-      <div id="tab-certs" class="tab-content">
-        <section class="panel-grid single">
-          <section class="panel">
-            <h2>Registro Identità &amp; Revoche</h2>
-            <p class="lede" style="margin-bottom: 1.5rem;">
-              Visualizza lo stato dei certificati crittografici emessi. I certificati hardware e software possono essere revocati istantaneamente, aggiornando la CRL per Envoy e bloccando l'accesso.
-            </p>
-            <div class="table-container">
-              <table id="certs-table">
-                <thead>
-                  <tr>
-                    <th>Utente (Common Name)</th>
-                    <th>Ruolo</th>
-                    <th>Tipo</th>
-                    <th>Stato</th>
-                    <th>Azioni</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Caricamento...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </section>
-      </div>
-    </main>
-
-    <!-- Modal for Primary AD Auth + OTP -->
-    <div id="primary-auth-modal" class="modal-overlay" style="display: none">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h2 style="margin: 0; font-size: 1.25rem">
-            🔒 Autenticazione Primaria Richiesta
-          </h2>
-          <button
-            type="button"
-            class="modal-close"
-            onclick="closePrimaryAuthModal()"
-          >
-            &times;
-          </button>
-        </div>
-        <div class="modal-body">
-          <div
-            id="modal-error-box"
-            class="error-box"
-            style="display: none"
-          ></div>
-
-          <!-- STEP 1: Login -->
-          <div id="modal-step-login">
-            <p
-              style="
+        <!-- STEP 1: Login -->
+        <div id="modal-step-login">
+          <p style="
                 margin-bottom: 1.5rem;
                 opacity: 0.85;
                 font-size: 0.9em;
                 line-height: 1.5;
-              "
-            >
-              La sessione primaria è scaduta o è richiesta una Step-Up
-              Authentication per eseguire l'operazione sensibile. Effettua
-              l'accesso alla Directory Aziendale.
-            </p>
-            <form id="modal-login-form" class="form-grid">
-              <label for="modal-login-email" style="grid-column: span 2">
-                <span>Email Aziendale</span>
-                <input
-                  type="email"
-                  id="modal-login-email"
-                  readonly
-                  style="opacity: 0.7; background: rgba(8, 15, 27, 0.4)"
-                />
-              </label>
-              <label for="modal-login-password" style="grid-column: span 2">
-                <span>Password Directory</span>
-                <input
-                  type="password"
-                  id="modal-login-password"
-                  value="password123"
-                  required
-                />
-              </label>
-              <div
-                class="actions"
-                style="grid-column: span 2; margin-top: 1rem"
-              >
-                <button type="submit" id="modal-login-btn" style="width: 100%">
-                  Accedi con Single Sign-On
-                </button>
-              </div>
-            </form>
-          </div>
+              ">
+            The primary session has expired or Step-Up Authentication is
+            required to perform the sensitive operation. Please log in to
+            the Corporate Directory.
+          </p>
+          <form id="modal-login-form" class="form-grid">
+            <label for="modal-login-email" style="grid-column: span 2">
+              <span>Corporate Email</span>
+              <input type="email" id="modal-login-email" readonly
+                style="opacity: 0.7; background: rgba(8, 15, 27, 0.4)" />
+            </label>
+            <label for="modal-login-password" style="grid-column: span 2">
+              <span>Directory Password</span>
+              <input type="password" id="modal-login-password" value="password123" required />
+            </label>
+            <div class="actions" style="grid-column: span 2; margin-top: 1rem">
+              <button type="submit" id="modal-login-btn" style="width: 100%">
+                Sign In with Single Sign-On
+              </button>
+            </div>
+          </form>
+        </div>
 
-          <!-- STEP 2: OTP -->
-          <div id="modal-step-otp" style="display: none">
-            <div
-              id="modal-otp-simulation-banner"
-              class="success-box"
-              style="
+        <!-- STEP 2: OTP -->
+        <div id="modal-step-otp" style="display: none">
+          <div id="modal-otp-simulation-banner" class="success-box" style="
                 background: rgba(30, 41, 59, 0.7);
                 border-color: var(--accent);
                 margin-bottom: 1.5rem;
                 display: block;
-              "
-            ></div>
-            <form id="modal-otp-form" class="form-grid">
-              <label for="modal-otp-code" style="grid-column: span 2">
-                <span>Codice di Verifica OTP (MFA)</span>
-                <input
-                  type="text"
-                  id="modal-otp-code"
-                  placeholder="------"
-                  required
-                  maxlength="6"
-                  style="
+              "></div>
+          <form id="modal-otp-form" class="form-grid">
+            <label for="modal-otp-code" style="grid-column: span 2">
+              <span>OTP Verification Code (MFA)</span>
+              <input type="text" id="modal-otp-code" placeholder="------" required maxlength="6" style="
                     text-align: center;
                     font-size: 1.5em;
                     letter-spacing: 0.2em;
                     font-family: monospace;
-                  "
-                />
-              </label>
-              <div
-                class="actions"
-                style="grid-column: span 2; margin-top: 1rem"
-              >
-                <button type="submit" id="modal-otp-btn" style="width: 100%">
-                  Verifica OTP
-                </button>
-              </div>
-            </form>
-          </div>
+                  " />
+            </label>
+            <div class="actions" style="grid-column: span 2; margin-top: 1rem">
+              <button type="submit" id="modal-otp-btn" style="width: 100%">
+                Verify OTP
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Confirm Delete Dialog -->
-    <div id="confirm-delete-modal" class="modal-overlay" style="display: none">
-      <div class="confirm-dialog">
-        <h3>🗑️ Conferma Eliminazione</h3>
-        <p id="confirm-delete-msg">
-          Sei sicuro di voler eliminare questo record? L'operazione è
-          irreversibile e richiede Step-Up Authentication.
-        </p>
-        <div class="confirm-actions">
-          <button
-            type="button"
-            class="btn-cancel-edit"
-            onclick="closeConfirmDelete()"
-          >
-            Annulla
-          </button>
-          <button
-            type="button"
-            class="btn-confirm-delete"
-            id="confirm-delete-btn"
-          >
-            🗑️ Elimina
-          </button>
-        </div>
+  <!-- Confirm Delete Dialog -->
+  <div id="confirm-delete-modal" class="modal-overlay" style="display: none">
+    <div class="confirm-dialog">
+      <h3>Confirm Deletion</h3>
+      <p id="confirm-delete-msg">
+        Are you sure you want to delete this record? This operation is
+        irreversible and requires Step-Up Authentication.
+      </p>
+      <div class="confirm-actions">
+        <button type="button" class="btn-cancel-edit" onclick="closeConfirmDelete()">
+          Cancel
+        </button>
+        <button type="button" class="btn-confirm-delete" id="confirm-delete-btn">
+          Delete
+        </button>
       </div>
     </div>
+  </div>
 
-    <script>
-      // Tab switching function
-      function switchTab(tabName) {
-        document
-          .querySelectorAll(".tab-btn")
-          .forEach((btn) => btn.classList.remove("active"));
-        document
-          .querySelectorAll(".tab-content")
-          .forEach((content) => content.classList.remove("active"));
+  <script>
+    // Tab switching function
+    function switchTab(tabName) {
+      document
+        .querySelectorAll(".tab-btn")
+        .forEach((btn) => btn.classList.remove("active"));
+      document
+        .querySelectorAll(".tab-content")
+        .forEach((content) => content.classList.remove("active"));
 
-        if (tabName === "enroll") {
-          document.getElementById("btn-enroll").classList.add("active");
-          document.getElementById("tab-enroll").classList.add("active");
-        } else if (tabName === "query") {
-          document.getElementById("btn-query").classList.add("active");
-          document.getElementById("tab-query").classList.add("active");
-          loadActiveCertificates(); // Load users when switching to query tab
-        } else if (tabName === "certs") {
-          document.getElementById("btn-certs").classList.add("active");
-          document.getElementById("tab-certs").classList.add("active");
-          loadCertsTable(); // Load list of all certs for management
-        }
+      if (tabName === "enroll") {
+        document.getElementById("btn-enroll").classList.add("active");
+        document.getElementById("tab-enroll").classList.add("active");
+      } else if (tabName === "query") {
+        document.getElementById("btn-query").classList.add("active");
+        document.getElementById("tab-query").classList.add("active");
+        loadActiveCertificates(); // Load users when switching to query tab
+      } else if (tabName === "certs") {
+        document.getElementById("btn-certs").classList.add("active");
+        document.getElementById("tab-certs").classList.add("active");
+        loadCertsTable(); // Load list of all certs for management
       }
+    }
 
-      // Load active certificates dynamically to fill CN dropdown
-      async function loadActiveCertificates() {
-        const select = document.getElementById("query-user");
-        try {
-          const response = await fetch("/api/admin/certificates");
-          const data = await response.json();
+    // Load active certificates dynamically to fill CN dropdown
+    async function loadActiveCertificates() {
+      const select = document.getElementById("query-user");
+      try {
+        const response = await fetch("/api/admin/certificates");
+        const data = await response.json();
 
-          // Store certs in global variable
-          window.activeCertificates = data;
+        // Store certs in global variable
+        window.activeCertificates = data;
 
-          // Clear previous options
+        // Clear previous options
+        select.innerHTML =
+          '<option value="" disabled selected>Select a user...</option>';
+
+        const activeCerts = data ? data.filter(c => c.status === "active") : [];
+
+        if (activeCerts.length === 0) {
           select.innerHTML =
-            '<option value="" disabled selected>Seleziona un utente...</option>';
-
-          const activeCerts = data ? data.filter(c => c.status === "active") : [];
-
-          if (activeCerts.length === 0) {
-            select.innerHTML =
-              '<option value="" disabled>Nessun certificato attivo trovato</option>';
-            document.getElementById("hardware-badge").style.display = "none";
-            return;
-          }
-
-          // Add active users
-          activeCerts.forEach((cert) => {
-            const opt = document.createElement("option");
-            opt.value = cert.user;
-            opt.textContent = `${cert.user} (${cert.role} - ${cert.is_hardware ? "Hardware 🛡️" : "Software 🧪"})`;
-            select.appendChild(opt);
-          });
-
-          // Reset badge
+            '<option value="" disabled>No active certificate found</option>';
           document.getElementById("hardware-badge").style.display = "none";
-        } catch (err) {
-          select.innerHTML =
-            '<option value="" disabled>Errore caricamento certificati</option>';
-          document.getElementById("hardware-badge").style.display = "none";
-          console.error("Failed to load certificates:", err);
+          return;
         }
+
+        // Add active users
+        activeCerts.forEach((cert) => {
+          const opt = document.createElement("option");
+          opt.value = cert.user;
+          opt.textContent = `${cert.user} (${cert.role} - ${cert.is_hardware ? "Hardware " : "Software "})`;
+          select.appendChild(opt);
+        });
+
+        // Reset badge
+        document.getElementById("hardware-badge").style.display = "none";
+      } catch (err) {
+        select.innerHTML =
+          '<option value="" disabled>Error loading certificates</option>';
+        document.getElementById("hardware-badge").style.display = "none";
+        console.error("Failed to load certificates:", err);
       }
+    }
 
-      // Load all certificates (active and revoked) for the management tab table
-      async function loadCertsTable() {
-        const tbody = document.querySelector("#certs-table tbody");
-        try {
-          const resp = await fetch("/api/admin/certificates");
-          const certs = await resp.json();
+    // Load all certificates (active and revoked) for the management tab table
+    async function loadCertsTable() {
+      const tbody = document.querySelector("#certs-table tbody");
+      try {
+        const resp = await fetch("/api/admin/certificates");
+        const certs = await resp.json();
 
-          if (!certs || certs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Nessun certificato attivo o revocato nel database.</td></tr>`;
-            return;
-          }
+        if (!certs || certs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">No active or revoked certificates in the database.</td></tr>`;
+          return;
+        }
 
-          tbody.innerHTML = certs
-            .map(
-              (c) => `
+        tbody.innerHTML = certs
+          .map(
+            (c) => `
             <tr>
               <td style="font-weight: 600;">${c.user}</td>
               <td>${c.role}</td>
-              <td>${c.is_hardware ? "Hardware 🛡️" : "Software 🧪"}</td>
+              <td>${c.is_hardware ? "Hardware " : "Software "}</td>
               <td><span class="status-${c.status}">${c.status.toUpperCase()}</span></td>
               <td>
-                ${
-                  c.status === "active"
-                    ? `<button class="btn-action btn-delete" style="padding: 6px 12px; font-size: 0.8em;" onclick="revokeCertificateFromUI('${c.user}')">🚫 Revoca</button>`
-                    : `<button disabled style="padding: 6px 12px; font-size: 0.8em; opacity: 0.5;">Revocato</button>`
-                }
+                ${c.status === "active"
+                ? `<button class="btn-action btn-delete" style="padding: 6px 12px; font-size: 0.8em;" onclick="revokeCertificateFromUI('${c.user}')">Revoke</button>`
+                : `<button disabled style="padding: 6px 12px; font-size: 0.8em; opacity: 0.5;">Revoked</button>`
+              }
               </td>
             </tr>
           `,
-            )
-            .join("");
-        } catch (err) {
-          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--error); padding: 24px;">Errore caricamento: ${err.message}</td></tr>`;
-        }
+          )
+          .join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--error); padding: 24px;">Loading error: ${err.message}</td></tr>`;
       }
+    }
 
-      // Action to revoke a certificate from UI
-      async function revokeCertificateFromUI(user) {
-        if (!confirm(`Sei sicuro di voler REVOCARE il certificato dell'utente ${user}? L'operazione è irreversibile.`)) {
+    // Action to revoke a certificate from UI
+    async function revokeCertificateFromUI(user) {
+      if (!confirm(`Are you sure you want to REVOKE the certificate for user ${user}? This operation is irreversible.`)) {
+        return;
+      }
+      try {
+        const resp = await fetch("/api/admin/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          alert(`Certificate for ${user} successfully revoked!`);
+          loadCertsTable();
+          loadActiveCertificates(); // Update query dropdown too
+        } else {
+          alert(`Revocation error: ${data.message || data.error}`);
+        }
+      } catch (err) {
+        alert(`Connection error: ${err.message}`);
+      }
+    }
+
+    // Update badge on CN select change
+    document.getElementById("query-user").addEventListener("change", (e) => {
+      const selectedCN = e.target.value;
+      const badge = document.getElementById("hardware-badge");
+      if (window.activeCertificates) {
+        const cert = window.activeCertificates.find(
+          (c) => c.user === selectedCN,
+        );
+        if (cert) {
+          badge.style.display = "inline-block";
+          if (cert.is_hardware) {
+            badge.textContent = "Hardware Bound (Secure Enclave/TPM)";
+            badge.style.background = "rgba(0, 200, 100, 0.2)";
+            badge.style.color = "#5affb0";
+            badge.style.border = "1px solid rgba(0, 200, 100, 0.3)";
+          } else {
+            badge.textContent = "Software Cert (Lab Mode)";
+            badge.style.background = "rgba(0, 150, 255, 0.2)";
+            badge.style.color = "#5ad0ff";
+            badge.style.border = "1px solid rgba(0, 150, 255, 0.3)";
+          }
           return;
         }
-        try {
-          const resp = await fetch("/api/admin/revoke", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ user }),
-          });
-          const data = await resp.json();
-          if (resp.ok) {
-            alert(`Certificato per ${user} revocato con successo!`);
-            loadCertsTable();
-            loadActiveCertificates(); // Update query dropdown too
-          } else {
-            alert(`Errore revoca: ${data.message || data.error}`);
-          }
-        } catch (err) {
-          alert(`Errore di connessione: ${err.message}`);
-        }
       }
+      badge.style.display = "none";
+    });
 
-      // Update badge on CN select change
-      document.getElementById("query-user").addEventListener("change", (e) => {
-        const selectedCN = e.target.value;
-        const badge = document.getElementById("hardware-badge");
-        if (window.activeCertificates) {
-          const cert = window.activeCertificates.find(
-            (c) => c.user === selectedCN,
-          );
-          if (cert) {
-            badge.style.display = "inline-block";
-            if (cert.is_hardware) {
-              badge.textContent = "🛡️ Hardware Bound (Secure Enclave/TPM)";
-              badge.style.background = "rgba(0, 200, 100, 0.2)";
-              badge.style.color = "#5affb0";
-              badge.style.border = "1px solid rgba(0, 200, 100, 0.3)";
-            } else {
-              badge.textContent = "🧪 Software Cert (Lab Mode)";
-              badge.style.background = "rgba(0, 150, 255, 0.2)";
-              badge.style.color = "#5ad0ff";
-              badge.style.border = "1px solid rgba(0, 150, 255, 0.3)";
-            }
-            return;
-          }
-        }
-        badge.style.display = "none";
-      });
+    // ─── Build filter chips per collection (chip-style) ──────────────────────
+    function updateSimpleQueryFields() {
+      const collection = document.getElementById("query-collection").value;
+      const container = document.getElementById("simple-filter-container");
 
-      // ─── Build filter chips per collection (chip-style) ──────────────────────
-      function updateSimpleQueryFields() {
-        const collection = document.getElementById("query-collection").value;
-        const container = document.getElementById("simple-filter-container");
+      const chip = (label, inner) =>
+        `<div class="filter-chip"><span>${label}</span>${inner}</div>`;
+      const text = (id, ph) =>
+        `<input type="text"   id="${id}" placeholder="${ph}">`;
+      const sel = (id, opts) =>
+        `<select id="${id}"><option value="">All</option>${opts}</select>`;
+      const num = (id, ph) =>
+        `<input type="number" id="${id}" placeholder="${ph}" min="0">`;
 
-        const chip = (label, inner) =>
-          `<div class="filter-chip"><span>${label}</span>${inner}</div>`;
-        const text = (id, ph) =>
-          `<input type="text"   id="${id}" placeholder="${ph}">`;
-        const sel = (id, opts) =>
-          `<select id="${id}"><option value="">Tutti</option>${opts}</select>`;
-        const num = (id, ph) =>
-          `<input type="number" id="${id}" placeholder="${ph}" min="0">`;
+      const OPTS = {
+        gender:
+          '<option value="Male">Male</option><option value="Female">Female</option>',
+        blood: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+          .map((v) => `<option value="${v}">${v}</option>`)
+          .join(""),
+        condition: [
+          "Cancer",
+          "Asthma",
+          "Obesity",
+          "Diabetes",
+          "Arthritis",
+          "Hypertension",
+        ]
+          .map((v) => `<option value="${v}">${v}</option>`)
+          .join(""),
+        result:
+          '<option value="Normal">Normal</option><option value="Abnormal">Abnormal</option><option value="Inconclusive">Inconclusive</option>',
+        admType:
+          '<option value="Emergency">Emergency</option><option value="Urgent">Urgent</option><option value="Elective">Elective</option>',
+        admStatus:
+          '<option value="active">Admitted (Active)</option><option value="discharged">Discharged</option><option value="transferred">Transferred</option>',
+        payStatus:
+          '<option value="paid">Paid</option><option value="pending">Pending</option><option value="disputed">Disputed</option><option value="written_off">Written Off</option>',
+        provType:
+          '<option value="doctor">Doctor</option><option value="hospital">Hospital</option>',
+      };
 
-        const OPTS = {
-          gender:
-            '<option value="Male">Maschio</option><option value="Female">Femmina</option>',
-          blood: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
-            .map((v) => `<option value="${v}">${v}</option>`)
-            .join(""),
-          condition: [
-            "Cancer",
-            "Asthma",
-            "Obesity",
-            "Diabetes",
-            "Arthritis",
-            "Hypertension",
-          ]
-            .map((v) => `<option value="${v}">${v}</option>`)
-            .join(""),
-          result:
-            '<option value="Normal">Normal</option><option value="Abnormal">Abnormal</option><option value="Inconclusive">Inconclusive</option>',
-          admType:
-            '<option value="Emergency">Emergenza</option><option value="Urgent">Urgente</option><option value="Elective">Elettivo</option>',
-          admStatus:
-            '<option value="active">Ricoverato (Attivo)</option><option value="discharged">Dimesso</option><option value="transferred">Trasferito</option>',
-          payStatus:
-            '<option value="paid">Pagato</option><option value="pending">In Sospeso</option><option value="disputed">Contestato</option><option value="written_off">Annullato</option>',
-          provType:
-            '<option value="doctor">Medico</option><option value="hospital">Ospedale</option>',
-        };
-
-        const MAP = {
-          patients: [
-            chip(
-              "Nome (parziale)",
-              text("simple-patient-name", "Es. Jane, Robert…"),
-            ),
-            chip("Genere", sel("simple-patient-gender", OPTS.gender)),
-            chip("Gruppo Sanguigno", sel("simple-patient-blood", OPTS.blood)),
-            chip("Età min", num("simple-patient-age-min", "0")),
-            chip("Età max", num("simple-patient-age-max", "120")),
-          ],
-          clinical_records: [
-            chip(
-              "ID Paziente",
-              text("simple-clinical-patient-id", "Es. 4f781fb9…"),
-            ),
-            chip(
-              "Condizione",
-              sel("simple-clinical-condition", OPTS.condition),
-            ),
-            chip("Risultato", sel("simple-clinical-result", OPTS.result)),
-            chip(
-              "Farmaco (parziale)",
-              text("simple-clinical-medication", "Es. Aspirin…"),
-            ),
-          ],
-          admissions: [
-            chip(
-              "ID Paziente",
-              text("simple-admission-patient-id", "Es. 4f781fb9…"),
-            ),
-            chip("Tipo Ricovero", sel("simple-admission-type", OPTS.admType)),
-            chip("Stato", sel("simple-admission-status", OPTS.admStatus)),
-          ],
-          billing: [
-            chip(
-              "ID Paziente",
-              text("simple-billing-patient-id", "Es. 4f781fb9…"),
-            ),
-            chip(
-              "Stato Pagamento",
-              sel("simple-billing-status", OPTS.payStatus),
-            ),
-            chip(
-              "Assicurazione",
-              text("simple-billing-insurance", "Es. Cigna…"),
-            ),
-            chip("Importo min (€)", num("simple-billing-amount-min", "0")),
-            chip("Importo max (€)", num("simple-billing-amount-max", "")),
-          ],
-          providers: [
-            chip(
-              "Nome (parziale)",
-              text("simple-provider-name", "Es. Dr. Smith…"),
-            ),
-            chip("Tipo Fornitore", sel("simple-provider-type", OPTS.provType)),
-          ],
-        };
-
-        container.innerHTML = (MAP[collection] || []).join("");
-      }
-
-      // ─── Live search across visible table rows ────────────────────────────────
-      function liveFilterTable(val) {
-        const filter = val.toLowerCase();
-        const tbody = document.querySelector("#query-output-table tbody");
-        if (!tbody) return;
-        Array.from(tbody.querySelectorAll('tr[id^="data-row-"]')).forEach(
-          (tr) => {
-            const text = tr.innerText.toLowerCase();
-            const editRow = document.getElementById(
-              tr.id.replace("data-row-", "edit-row-"),
-            );
-            const show = !filter || text.includes(filter);
-            tr.style.display = show ? "" : "none";
-            if (editRow) editRow.style.display = "none"; // always collapse edit on filter
-          },
-        );
-      }
-
-      function parseItalianFloat(str) {
-        if (typeof str !== "string") return parseFloat(str);
-        let valStr = str.trim();
-        if (valStr.includes('.') && valStr.includes(',')) {
-          valStr = valStr.replace(/\./g, "").replace(/,/g, ".");
-        } else if (valStr.includes(',')) {
-          valStr = valStr.replace(/,/g, ".");
-        } else if (valStr.includes('.') && valStr.split('.').pop().length === 3) {
-          valStr = valStr.replace(/\./g, "");
-        }
-        return parseFloat(valStr);
-      }
-
-      // ─── Build filter payload (JSON) ─────────────────────────────────────────
-      function getFilterPayload() {
-        const collection = document.getElementById("query-collection").value;
-        const f = {};
-
-        const v = (id) => {
-          const el = document.getElementById(id);
-          return el ? el.value.trim() : "";
-        };
-        const vnum = (id) => {
-          const el = document.getElementById(id);
-          return el && el.value !== "" ? parseItalianFloat(el.value) : null;
-        };
-
-        if (collection === "patients") {
-          const name = v("simple-patient-name");
-          const gender = v("simple-patient-gender");
-          const blood = v("simple-patient-blood");
-          const ageMin = vnum("simple-patient-age-min");
-          const ageMax = vnum("simple-patient-age-max");
-          if (name) f.full_name = { $regex: name, $options: "i" };
-          if (gender) f.gender = gender;
-          if (blood) f.blood_type = blood;
-          if (ageMin !== null || ageMax !== null) {
-            f.age = {};
-            if (ageMin !== null) f.age.$gte = ageMin;
-            if (ageMax !== null) f.age.$lte = ageMax;
-          }
-        } else if (collection === "clinical_records") {
-          const pid = v("simple-clinical-patient-id");
-          const cond = v("simple-clinical-condition");
-          const result = v("simple-clinical-result");
-          const med = v("simple-clinical-medication");
-          if (pid) f.patient_id = pid;
-          if (cond) f.medical_condition = cond;
-          if (result) f.test_results = result;
-          if (med) f.medication = { $regex: med, $options: "i" };
-        } else if (collection === "admissions") {
-          const pid = v("simple-admission-patient-id");
-          const type = v("simple-admission-type");
-          const status = v("simple-admission-status");
-          if (pid) f.patient_id = pid;
-          if (type) f.admission_type = type;
-          if (status) f.status = status;
-        } else if (collection === "billing") {
-          const pid = v("simple-billing-patient-id");
-          const status = v("simple-billing-status");
-          const insurance = v("simple-billing-insurance");
-          const amtMin = vnum("simple-billing-amount-min");
-          const amtMax = vnum("simple-billing-amount-max");
-          if (pid) f.patient_id = pid;
-          if (status) f.payment_status = status;
-          if (insurance)
-            f.insurance_provider = { $regex: insurance, $options: "i" };
-          if (amtMin !== null || amtMax !== null) {
-            f.billing_amount = {};
-            if (amtMin !== null) f.billing_amount.$gte = amtMin;
-            if (amtMax !== null) f.billing_amount.$lte = amtMax;
-          }
-        } else if (collection === "providers") {
-          const name = v("simple-provider-name");
-          const type = v("simple-provider-type");
-          if (name) f.name = { $regex: name, $options: "i" };
-          if (type) f.type = type;
-        }
-
-        return JSON.stringify(f);
-      }
-
-      // ─── Edit field schema per collection ──────────────────────────────────
-      const EDIT_FIELDS = {
+      const MAP = {
         patients: [
-          { key: "full_name", label: "Nome Completo", type: "text" },
-          { key: "age", label: "Età", type: "number" },
-          {
-            key: "gender",
-            label: "Genere",
-            type: "select",
-            options: ["Male", "Female"],
-          },
-          {
-            key: "blood_type",
-            label: "Gruppo Sanguigno",
-            type: "select",
-            options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
-          },
+          chip(
+            "Name (partial)",
+            text("simple-patient-name", "E.g. Jane, Robert…"),
+          ),
+          chip("Gender", sel("simple-patient-gender", OPTS.gender)),
+          chip("Blood Type", sel("simple-patient-blood", OPTS.blood)),
+          chip("Min Age", num("simple-patient-age-min", "0")),
+          chip("Max Age", num("simple-patient-age-max", "120")),
         ],
         clinical_records: [
-          {
-            key: "medical_condition",
-            label: "Condizione",
-            type: "select",
-            options: [
-              "Arthritis",
-              "Asthma",
-              "Cancer",
-              "Diabetes",
-              "Hypertension",
-              "Obesity",
-            ],
-          },
-          {
-            key: "medication",
-            label: "Farmaco",
-            type: "select",
-            options: [
-              "Aspirin",
-              "Ibuprofen",
-              "Lipitor",
-              "Paracetamol",
-              "Penicillin",
-            ],
-          },
-          {
-            key: "test_results",
-            label: "Risultato",
-            type: "select",
-            options: ["Normal", "Abnormal", "Inconclusive"],
-          },
-          { key: "notes", label: "Note", type: "text" },
+          chip(
+            "Patient ID",
+            text("simple-clinical-patient-id", "E.g. 4f781fb9…"),
+          ),
+          chip(
+            "Condition",
+            sel("simple-clinical-condition", OPTS.condition),
+          ),
+          chip("Result", sel("simple-clinical-result", OPTS.result)),
+          chip(
+            "Medication (partial)",
+            text("simple-clinical-medication", "E.g. Aspirin…"),
+          ),
         ],
         admissions: [
-          {
-            key: "status",
-            label: "Stato",
-            type: "select",
-            options: [
-              { value: "active", label: "Ricoverato (Attivo)" },
-              { value: "discharged", label: "Dimesso" },
-              { value: "transferred", label: "Trasferito" }
-            ],
-          },
-          {
-            key: "admission_type",
-            label: "Tipo Ricovero",
-            type: "select",
-            options: ["Emergency", "Urgent", "Elective"],
-          },
-          { key: "room_number", label: "Camera", type: "number" },
+          chip(
+            "Patient ID",
+            text("simple-admission-patient-id", "E.g. 4f781fb9…"),
+          ),
+          chip("Admission Type", sel("simple-admission-type", OPTS.admType)),
+          chip("Status", sel("simple-admission-status", OPTS.admStatus)),
         ],
         billing: [
-          {
-            key: "payment_status",
-            label: "Stato Pagamento",
-            type: "select",
-            options: [
-              { value: "paid", label: "Pagato" },
-              { value: "pending", label: "In Sospeso" },
-              { value: "disputed", label: "Contestato" },
-              { value: "written_off", label: "Annullato" }
-            ],
-          },
-          { key: "billing_amount", label: "Importo (€)", type: "number" },
-          { key: "insurance_provider", label: "Assicurazione", type: "text" },
+          chip(
+            "Patient ID",
+            text("simple-billing-patient-id", "E.g. 4f781fb9…"),
+          ),
+          chip(
+            "Payment Status",
+            sel("simple-billing-status", OPTS.payStatus),
+          ),
+          chip(
+            "Insurance",
+            text("simple-billing-insurance", "E.g. Cigna…"),
+          ),
+          chip("Min Amount ($)", num("simple-billing-amount-min", "0")),
+          chip("Max Amount ($)", num("simple-billing-amount-max", "")),
         ],
         providers: [
-          { key: "name", label: "Nome / Struttura", type: "text" },
-          {
-            key: "type",
-            label: "Tipo",
-            type: "select",
-            options: ["doctor", "hospital"],
-          },
+          chip(
+            "Name (partial)",
+            text("simple-provider-name", "E.g. Dr. Smith…"),
+          ),
+          chip("Provider Type", sel("simple-provider-type", OPTS.provType)),
         ],
       };
 
+      container.innerHTML = (MAP[collection] || []).join("");
+    }
 
-      // ─── Render results table with Edit/Delete action buttons ──────────────
-      function renderQueryResults(results, collection) {
-        const table = document.getElementById("query-output-table");
-        if (!results || results.length === 0) {
-          table.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: var(--muted);">Nessun record trovato per i filtri specificati.</td></tr>`;
-          return;
+    // ─── Live search across visible table rows ────────────────────────────────
+    function liveFilterTable(val) {
+      const filter = val.toLowerCase();
+      const tbody = document.querySelector("#query-output-table tbody");
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll('tr[id^="data-row-"]')).forEach(
+        (tr) => {
+          const text = tr.innerText.toLowerCase();
+          const editRow = document.getElementById(
+            tr.id.replace("data-row-", "edit-row-"),
+          );
+          const show = !filter || text.includes(filter);
+          tr.style.display = show ? "" : "none";
+          if (editRow) editRow.style.display = "none"; // always collapse edit on filter
+        },
+      );
+    }
+
+    function parseItalianFloat(str) {
+      if (typeof str !== "string") return parseFloat(str);
+      let valStr = str.trim();
+      if (valStr.includes('.') && valStr.includes(',')) {
+        valStr = valStr.replace(/\./g, "").replace(/,/g, ".");
+      } else if (valStr.includes(',')) {
+        valStr = valStr.replace(/,/g, ".");
+      } else if (valStr.includes('.') && valStr.split('.').pop().length === 3) {
+        valStr = valStr.replace(/\./g, "");
+      }
+      return parseFloat(valStr);
+    }
+
+    // ─── Build filter payload (JSON) ─────────────────────────────────────────
+    function getFilterPayload() {
+      const collection = document.getElementById("query-collection").value;
+      const f = {};
+
+      const v = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.value.trim() : "";
+      };
+      const vnum = (id) => {
+        const el = document.getElementById(id);
+        return el && el.value !== "" ? parseItalianFloat(el.value) : null;
+      };
+
+      if (collection === "patients") {
+        const name = v("simple-patient-name");
+        const gender = v("simple-patient-gender");
+        const blood = v("simple-patient-blood");
+        const ageMin = vnum("simple-patient-age-min");
+        const ageMax = vnum("simple-patient-age-max");
+        if (name) f.full_name = { $regex: name, $options: "i" };
+        if (gender) f.gender = gender;
+        if (blood) f.blood_type = blood;
+        if (ageMin !== null || ageMax !== null) {
+          f.age = {};
+          if (ageMin !== null) f.age.$gte = ageMin;
+          if (ageMax !== null) f.age.$lte = ageMax;
         }
-
-        // Store results globally for edit access
-        window.lastQueryResults = results;
-        window.lastQueryCollection = collection;
-
-        let headers = [];
-        let rowRenderer = null;
-
-        if (collection === "patients") {
-          headers = [
-            "ID Paziente",
-            "Nome Completo",
-            "Età",
-            "Genere",
-            "Gruppo Sanguigno",
-          ];
-          rowRenderer = (row) => [
-            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-            row.full_name || "N/A",
-            row.age !== undefined ? row.age : "N/A",
-            row.gender || "N/A",
-            row.blood_type || "N/A",
-          ];
-        } else if (collection === "clinical_records") {
-          headers = [
-            "ID Record",
-            "ID Paziente",
-            "Condizione",
-            "Farmaco",
-            "Risultato",
-            "Data",
-          ];
-          rowRenderer = (row) => {
-            let dateStr = "N/A";
-            if (row.recorded_at) {
-              dateStr = row.recorded_at.$date
-                ? new Date(row.recorded_at.$date).toLocaleDateString("it-IT")
-                : new Date(row.recorded_at).toLocaleDateString("it-IT");
-            }
-            return [
-              `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-              row.patient_id || "N/A",
-              row.medical_condition || "N/A",
-              row.medication || "N/A",
-              row.test_results || "N/A",
-              dateStr,
-            ];
-          };
-        } else if (collection === "admissions") {
-          headers = [
-            "ID Ricovero",
-            "ID Paziente",
-            "Stato",
-            "Tipo",
-            "Entrata",
-            "Uscita",
-            "Camera",
-          ];
-          rowRenderer = (row) => {
-            let inDate = row.date_of_admission
-              ? row.date_of_admission.$date
-                ? new Date(row.date_of_admission.$date).toLocaleDateString(
-                    "it-IT",
-                  )
-                : new Date(row.date_of_admission).toLocaleDateString("it-IT")
-              : "N/A";
-            let outDate = row.discharge_date
-              ? row.discharge_date.$date
-                ? new Date(row.discharge_date.$date).toLocaleDateString("it-IT")
-                : new Date(row.discharge_date).toLocaleDateString("it-IT")
-              : "N/A";
-            let sc = "badge-muted";
-            let statusLabel = row.status || "N/A";
-            const statLower = (row.status || "").toLowerCase();
-            if (statLower === "active") { sc = "badge-success"; statusLabel = "Ricoverato"; }
-            else if (statLower === "discharged") { sc = "badge-muted"; statusLabel = "Dimesso"; }
-            else if (statLower === "transferred") { sc = "badge-warning"; statusLabel = "Trasferito"; }
-
-            return [
-              `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-              row.patient_id || "N/A",
-              `<span class="badge ${sc}">${statusLabel}</span>`,
-              row.admission_type || "N/A",
-              inDate,
-              outDate,
-              row.room_number !== undefined
-                ? row.room_number
-                : row.room !== undefined
-                  ? row.room
-                  : "N/A",
-            ];
-          };
-        } else if (collection === "billing") {
-          headers = [
-            "ID Fattura",
-            "ID Paziente",
-            "Importo",
-            "Stato Pagamento",
-            "Assicurazione",
-          ];
-          rowRenderer = (row) => {
-            let amountStr =
-              row.billing_amount !== undefined
-                ? `€ ${parseFloat(row.billing_amount).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : "N/A";
-            let sc = "badge-muted";
-            let label = row.payment_status || "N/A";
-            const statusLower = (row.payment_status || "").toLowerCase();
-            if (statusLower === "paid") { sc = "badge-success"; label = "Pagato"; }
-            else if (statusLower === "pending") { sc = "badge-warning"; label = "In Sospeso"; }
-            else if (statusLower === "disputed") { sc = "badge-danger"; label = "Contestato"; }
-            else if (statusLower === "written_off") { sc = "badge-danger"; label = "Annullato"; }
-
-            return [
-              `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-              row.patient_id || "N/A",
-              amountStr,
-              `<span class="badge ${sc}">${label}</span>`,
-              row.insurance_provider || "N/A",
-            ];
-          };
-        } else if (collection === "providers") {
-          headers = ["ID Fornitore", "Nome / Struttura", "Tipo"];
-          rowRenderer = (row) => [
-            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-            row.name || "N/A",
-            row.type || "N/A",
-          ];
-        } else {
-          headers = Object.keys(results[0]).filter((k) => k !== "_id");
-          headers.unshift("ID");
-          rowRenderer = (row) =>
-            headers.map((h) => {
-              if (typeof row[h] === "object") return JSON.stringify(row[h]);
-              return row[h] !== undefined ? row[h] : "N/A";
-            });
+      } else if (collection === "clinical_records") {
+        const pid = v("simple-clinical-patient-id");
+        const cond = v("simple-clinical-condition");
+        const result = v("simple-clinical-result");
+        const med = v("simple-clinical-medication");
+        if (pid) f.patient_id = pid;
+        if (cond) f.medical_condition = cond;
+        if (result) f.test_results = result;
+        if (med) f.medication = { $regex: med, $options: "i" };
+      } else if (collection === "admissions") {
+        const pid = v("simple-admission-patient-id");
+        const type = v("simple-admission-type");
+        const status = v("simple-admission-status");
+        if (pid) f.patient_id = pid;
+        if (type) f.admission_type = type;
+        if (status) f.status = status;
+      } else if (collection === "billing") {
+        const pid = v("simple-billing-patient-id");
+        const status = v("simple-billing-status");
+        const insurance = v("simple-billing-insurance");
+        const amtMin = vnum("simple-billing-amount-min");
+        const amtMax = vnum("simple-billing-amount-max");
+        if (pid) f.patient_id = pid;
+        if (status) f.payment_status = status;
+        if (insurance)
+          f.insurance_provider = { $regex: insurance, $options: "i" };
+        if (amtMin !== null || amtMax !== null) {
+          f.billing_amount = {};
+          if (amtMin !== null) f.billing_amount.$gte = amtMin;
+          if (amtMax !== null) f.billing_amount.$lte = amtMax;
         }
+      } else if (collection === "providers") {
+        const name = v("simple-provider-name");
+        const type = v("simple-provider-type");
+        if (name) f.name = { $regex: name, $options: "i" };
+        if (type) f.type = type;
+      }
+
+      return JSON.stringify(f);
+    }
+
+    // ─── Edit field schema per collection ──────────────────────────────────
+    const EDIT_FIELDS = {
+      patients: [
+        { key: "full_name", label: "Full Name", type: "text" },
+        { key: "age", label: "Age", type: "number" },
+        {
+          key: "gender",
+          label: "Gender",
+          type: "select",
+          options: ["Male", "Female"],
+        },
+        {
+          key: "blood_type",
+          label: "Blood Type",
+          type: "select",
+          options: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+        },
+      ],
+      clinical_records: [
+        {
+          key: "medical_condition",
+          label: "Condition",
+          type: "select",
+          options: [
+            "Arthritis",
+            "Asthma",
+            "Cancer",
+            "Diabetes",
+            "Hypertension",
+            "Obesity",
+          ],
+        },
+        {
+          key: "medication",
+          label: "Medication",
+          type: "select",
+          options: [
+            "Aspirin",
+            "Ibuprofen",
+            "Lipitor",
+            "Paracetamol",
+            "Penicillin",
+          ],
+        },
+        {
+          key: "test_results",
+          label: "Result",
+          type: "select",
+          options: ["Normal", "Abnormal", "Inconclusive"],
+        },
+        { key: "notes", label: "Notes", type: "text" },
+      ],
+      admissions: [
+        {
+          key: "status",
+          label: "Status",
+          type: "select",
+          options: [
+            { value: "active", label: "Admitted (Active)" },
+            { value: "discharged", label: "Discharged" },
+            { value: "transferred", label: "Transferred" }
+          ],
+        },
+        {
+          key: "admission_type",
+          label: "Admission Type",
+          type: "select",
+          options: ["Emergency", "Urgent", "Elective"],
+        },
+        { key: "room_number", label: "Room", type: "number" },
+      ],
+      billing: [
+        {
+          key: "payment_status",
+          label: "Payment Status",
+          type: "select",
+          options: [
+            { value: "paid", label: "Paid" },
+            { value: "pending", label: "Pending" },
+            { value: "disputed", label: "Disputed" },
+            { value: "written_off", label: "Written Off" }
+          ],
+        },
+        { key: "billing_amount", label: "Amount ($)", type: "number" },
+        { key: "insurance_provider", label: "Insurance", type: "text" },
+      ],
+      providers: [
+        { key: "name", label: "Name / Facility", type: "text" },
+        {
+          key: "type",
+          label: "Type",
+          type: "select",
+          options: ["doctor", "hospital"],
+        },
+      ],
+    };
 
 
-        // Header
-        let headerHtml =
-          '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
-        headers.forEach((h) => {
-          headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
+    // ─── Render results table with Edit/Delete action buttons ──────────────
+    function renderQueryResults(results, collection) {
+      const table = document.getElementById("query-output-table");
+      if (!results || results.length === 0) {
+        table.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: var(--muted);">No records found for the specified filters.</td></tr>`;
+        return;
+      }
+
+      // Store results globally for edit access
+      window.lastQueryResults = results;
+      window.lastQueryCollection = collection;
+
+      let headers = [];
+      let rowRenderer = null;
+
+      if (collection === "patients") {
+        headers = [
+          "Patient ID",
+          "Full Name",
+          "Age",
+          "Gender",
+          "Blood Type",
+        ];
+        rowRenderer = (row) => [
+          `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+          row.full_name || "N/A",
+          row.age !== undefined ? row.age : "N/A",
+          row.gender || "N/A",
+          row.blood_type || "N/A",
+        ];
+      } else if (collection === "clinical_records") {
+        headers = [
+          "Record ID",
+          "Patient ID",
+          "Condition",
+          "Medication",
+          "Result",
+          "Date",
+        ];
+        rowRenderer = (row) => {
+          let dateStr = "N/A";
+          if (row.recorded_at) {
+            dateStr = row.recorded_at.$date
+              ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+              : new Date(row.recorded_at).toLocaleDateString("en-US");
+          }
+          return [
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+            row.patient_id || "N/A",
+            row.medical_condition || "N/A",
+            row.medication || "N/A",
+            row.test_results || "N/A",
+            dateStr,
+          ];
+        };
+      } else if (collection === "admissions") {
+        headers = [
+          "Admission ID",
+          "Patient ID",
+          "Status",
+          "Type",
+          "Admission",
+          "Discharge",
+          "Room",
+        ];
+        rowRenderer = (row) => {
+          let inDate = row.date_of_admission
+            ? row.date_of_admission.$date
+              ? new Date(row.date_of_admission.$date).toLocaleDateString(
+                "en-US",
+              )
+              : new Date(row.date_of_admission).toLocaleDateString("en-US")
+            : "N/A";
+          let outDate = row.discharge_date
+            ? row.discharge_date.$date
+              ? new Date(row.discharge_date.$date).toLocaleDateString("en-US")
+              : new Date(row.discharge_date).toLocaleDateString("en-US")
+            : "N/A";
+          let sc = "badge-muted";
+          let statusLabel = row.status || "N/A";
+          const statLower = (row.status || "").toLowerCase();
+          if (statLower === "active") { sc = "badge-success"; statusLabel = "Admitted"; }
+          else if (statLower === "discharged") { sc = "badge-muted"; statusLabel = "Discharged"; }
+          else if (statLower === "transferred") { sc = "badge-warning"; statusLabel = "Transferred"; }
+
+          return [
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+            row.patient_id || "N/A",
+            `<span class="badge ${sc}">${statusLabel}</span>`,
+            row.admission_type || "N/A",
+            inDate,
+            outDate,
+            row.room_number !== undefined
+              ? row.room_number
+              : row.room !== undefined
+                ? row.room
+                : "N/A",
+          ];
+        };
+      } else if (collection === "billing") {
+        headers = [
+          "Invoice ID",
+          "Patient ID",
+          "Amount",
+          "Payment Status",
+          "Insurance",
+        ];
+        rowRenderer = (row) => {
+          let amountStr =
+            row.billing_amount !== undefined
+              ? `$ ${parseFloat(row.billing_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "N/A";
+          let sc = "badge-muted";
+          let label = row.payment_status || "N/A";
+          const statusLower = (row.payment_status || "").toLowerCase();
+          if (statusLower === "paid") { sc = "badge-success"; label = "Paid"; }
+          else if (statusLower === "pending") { sc = "badge-warning"; label = "Pending"; }
+          else if (statusLower === "disputed") { sc = "badge-danger"; label = "Disputed"; }
+          else if (statusLower === "written_off") { sc = "badge-danger"; label = "Written Off"; }
+
+          return [
+            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+            row.patient_id || "N/A",
+            amountStr,
+            `<span class="badge ${sc}">${label}</span>`,
+            row.insurance_provider || "N/A",
+          ];
+        };
+      } else if (collection === "providers") {
+        headers = ["Provider ID", "Name / Facility", "Type"];
+        rowRenderer = (row) => [
+          `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+          row.name || "N/A",
+          row.type || "N/A",
+        ];
+      } else {
+        headers = Object.keys(results[0]).filter((k) => k !== "_id");
+        headers.unshift("ID");
+        rowRenderer = (row) =>
+          headers.map((h) => {
+            if (typeof row[h] === "object") return JSON.stringify(row[h]);
+            return row[h] !== undefined ? row[h] : "N/A";
+          });
+      }
+
+
+      // Header
+      let headerHtml =
+        '<thead><tr style="border-bottom: 2px solid rgba(148, 163, 184, 0.28); background: rgba(8, 15, 27, 0.6);">';
+      headers.forEach((h) => {
+        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); white-space: nowrap;">${h}</th>`;
+      });
+
+      headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Actions</th>`;
+      headerHtml += "</tr></thead>";
+
+      // Rows
+      let rowsHtml = "<tbody>";
+      results.forEach((row, idx) => {
+        const rawId = extractId(row._id);
+        rowsHtml += `<tr id="data-row-${idx}" style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">`;
+        const cells = rowRenderer(row);
+        cells.forEach((c) => {
+          rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
         });
 
-        headerHtml += `<th style="padding: 12px 16px; font-weight: 700; color: var(--accent); text-align: center;">Azioni</th>`;       
-        headerHtml += "</tr></thead>";
-
-        // Rows
-        let rowsHtml = "<tbody>";
-        results.forEach((row, idx) => {
-          const rawId = extractId(row._id);
-          rowsHtml += `<tr id="data-row-${idx}" style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">`;
-          const cells = rowRenderer(row);
-          cells.forEach((c) => {
-            rowsHtml += `<td style="padding: 12px 16px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;">${c}</td>`;
-          });
-
-          rowsHtml += `
+        rowsHtml += `
           <td style="padding: 8px 12px; white-space: nowrap;">
             <div class="action-cell">
-              <button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">✏️ Modifica</button>
-              <button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">🗑️ Elimina</button>
+              <button class="btn-action btn-edit"   onclick="openEditRow(${idx}, '${rawId}', '${collection}')">Edit</button>
+              <button class="btn-action btn-delete" onclick="confirmDeleteRecord('${rawId}', '${collection}', ${idx})">Delete</button>
             </div>
           </td>`;
-       
-          rowsHtml += "</tr>";
-          // Placeholder for inline edit panel
-          rowsHtml += `<tr id="edit-row-${idx}" style="display:none;"><td colspan="${headers.length + 1}" style="padding:0;"><div class="edit-row-panel" id="edit-panel-${idx}"></div></td></tr>`;
-        });
-        rowsHtml += "</tbody>";
 
-        table.innerHTML = headerHtml + rowsHtml;
+        rowsHtml += "</tr>";
+        // Placeholder for inline edit panel
+        rowsHtml += `<tr id="edit-row-${idx}" style="display:none;"><td colspan="${headers.length + 1}" style="padding:0;"><div class="edit-row-panel" id="edit-panel-${idx}"></div></td></tr>`;
+      });
+      rowsHtml += "</tbody>";
+
+      table.innerHTML = headerHtml + rowsHtml;
+    }
+
+    // ─── Extract plain string _id from BSON or plain object ────────────────
+    function extractId(idVal) {
+      if (!idVal) return "";
+      if (typeof idVal === "string") return idVal;
+      if (idVal.$oid) return idVal.$oid;
+      return JSON.stringify(idVal);
+    }
+
+    // ─── Open inline Edit form ──────────────────────────────────────────────
+    function openEditRow(idx, rawId, collection) {
+      // Close any other open edit panel
+      document.querySelectorAll('[id^="edit-row-"]').forEach((r) => {
+        if (r.id !== `edit-row-${idx}`) r.style.display = "none";
+      });
+
+      const editRow = document.getElementById(`edit-row-${idx}`);
+      const panel = document.getElementById(`edit-panel-${idx}`);
+      const row = (window.lastQueryResults || [])[idx] || {};
+      const fields = EDIT_FIELDS[collection] || [];
+
+      if (editRow.style.display !== "none") {
+        editRow.style.display = "none";
+        return;
       }
 
-      // ─── Extract plain string _id from BSON or plain object ────────────────
-      function extractId(idVal) {
-        if (!idVal) return "";
-        if (typeof idVal === "string") return idVal;
-        if (idVal.$oid) return idVal.$oid;
-        return JSON.stringify(idVal);
-      }
-
-      // ─── Open inline Edit form ──────────────────────────────────────────────
-      function openEditRow(idx, rawId, collection) {
-        // Close any other open edit panel
-        document.querySelectorAll('[id^="edit-row-"]').forEach((r) => {
-          if (r.id !== `edit-row-${idx}`) r.style.display = "none";
-        });
-
-        const editRow = document.getElementById(`edit-row-${idx}`);
-        const panel = document.getElementById(`edit-panel-${idx}`);
-        const row = (window.lastQueryResults || [])[idx] || {};
-        const fields = EDIT_FIELDS[collection] || [];
-
-        if (editRow.style.display !== "none") {
-          editRow.style.display = "none";
-          return;
+      // Build form fields pre-populated with current values
+      let fieldsHtml = '<div class="edit-row-grid">';
+      fields.forEach((f) => {
+        const val = row[f.key] !== undefined ? row[f.key] : "";
+        if (f.type === "select") {
+          const opts = f.options
+            .map((o) => {
+              const optVal = typeof o === "object" ? o.value : o;
+              const optLabel = typeof o === "object" ? o.label : o;
+              return `<option value="${optVal}" ${optVal == val ? "selected" : ""}>${optLabel}</option>`;
+            })
+            .join("");
+          fieldsHtml += `<label><span>${f.label}</span><select id="ef-${idx}-${f.key}">${opts}</select></label>`;
+        } else {
+          fieldsHtml += `<label><span>${f.label}</span><input type="${f.type}" id="ef-${idx}-${f.key}" value="${val}"></label>`;
         }
+      });
+      fieldsHtml += "</div>";
 
-        // Build form fields pre-populated with current values
-        let fieldsHtml = '<div class="edit-row-grid">';
-        fields.forEach((f) => {
-          const val = row[f.key] !== undefined ? row[f.key] : "";
-          if (f.type === "select") {
-            const opts = f.options
-              .map((o) => {
-                const optVal = typeof o === "object" ? o.value : o;
-                const optLabel = typeof o === "object" ? o.label : o;
-                return `<option value="${optVal}" ${optVal == val ? "selected" : ""}>${optLabel}</option>`;
-              })
-              .join("");
-            fieldsHtml += `<label><span>${f.label}</span><select id="ef-${idx}-${f.key}">${opts}</select></label>`;
-          } else {
-            fieldsHtml += `<label><span>${f.label}</span><input type="${f.type}" id="ef-${idx}-${f.key}" value="${val}"></label>`;
-          }
-        });
-        fieldsHtml += "</div>";
-
-        panel.innerHTML = `
+      panel.innerHTML = `
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-          <span style="color:var(--accent); font-size:0.85rem; font-weight:700;">✏️ Modifica record <code style="font-size:0.75em; opacity:0.7">${rawId.slice(0, 16)}…</code></span>
+          <span style="color:var(--accent); font-size:0.85rem; font-weight:700;">Edit record <code style="font-size:0.75em; opacity:0.7">${rawId.slice(0, 16)}…</code></span>
           <span class="edit-status-msg" id="edit-msg-${idx}"></span>
         </div>
         ${fieldsHtml}
         <div class="edit-row-actions">
-          <button class="btn-save" onclick="saveRecord(${idx}, '${rawId}', '${collection}')">💾 Salva modifiche</button>
-          <button class="btn-cancel-edit" onclick="document.getElementById('edit-row-${idx}').style.display='none'">Annulla</button>
-          <span style="font-size:0.78rem; color:var(--muted); margin-left:4px;">⚠️ Richiede Step-Up Authentication</span>
+          <button class="btn-save" onclick="saveRecord(${idx}, '${rawId}', '${collection}')">Save changes</button>
+          <button class="btn-cancel-edit" onclick="document.getElementById('edit-row-${idx}').style.display='none'">Cancel</button>
+          <span style="font-size:0.78rem; color:var(--muted); margin-left:4px;">Requires Step-Up Authentication</span>
         </div>`;
 
-        editRow.style.display = "table-row";
-      }
+      editRow.style.display = "table-row";
+    }
 
-      // ─── Save record (Update) ───────────────────────────────────────────────
-      async function saveRecord(idx, rawId, collection) {
-        const row = (window.lastQueryResults || [])[idx] || {};
-        const fields = EDIT_FIELDS[collection] || [];
-        const updateFields = {};
-        fields.forEach((f) => {
-          const el = document.getElementById(`ef-${idx}-${f.key}`);
-          if (el) {
-            updateFields[f.key] =
-              f.type === "number" ? parseItalianFloat(el.value) : el.value;
-          }
-        });
-
-        const msgEl = document.getElementById(`edit-msg-${idx}`);
-        msgEl.className = "edit-status-msg";
-        msgEl.textContent = "⏳ Salvataggio in corso…";
-        msgEl.style.display = "inline";
-
-        const user = document.getElementById("query-user").value;
-        const cert = window.activeCertificates
-          ? window.activeCertificates.find((c) => c.user === user)
-          : null;
-        const isHardware = cert ? cert.is_hardware : false;
-
-        try {
-          let queryPayload = {
-            user,
-            collection,
-            action: "update",
-            filter: "{}",
-            record_id: rawId,
-            update_fields: updateFields,
-          };
-
-          if (row.patient_id) {
-            queryPayload.patient_id = row.patient_id;
-          }
-
-          if (isHardware) {
-            // Start proxy
-            const proxyResp = await fetch("http://localhost:9090/proxy/start", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
-            });
-            const proxyData = await proxyResp.json();
-            if (!proxyResp.ok)
-              throw new Error(proxyData.error || "Proxy start fallito");
-            queryPayload.local_proxy_port = proxyData.port;
-            try {
-              // Step-up OIDC token (always required for update)
-              const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-              let tokenResult = null,
-                retryCount = 0;
-              while (!tokenResult && retryCount < 2) {
-                const oidcResp = await fetch("http://localhost:9090/oidc/token", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ common_name: user, step_up: true }),
-                });
-                const oidcData = await oidcResp.json();
-                if (
-                  oidcResp.status === 401 &&
-                  oidcData.error === "primary_auth_required"
-                ) {
-                  await promptPrimaryAuth(email, true);
-                  retryCount++;
-                  continue;
-                }
-                if (!oidcResp.ok)
-                  throw new Error(oidcData.message || "Token OIDC fallito");
-                tokenResult = oidcData.token;
-              }
-              queryPayload.jwt_token = tokenResult;
-
-              const resp = await fetch("/api/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(queryPayload),
-              });
-              const data = await resp.json();
-              if (!resp.ok)
-                throw new Error(data.message || data.error || "Errore update");
-              msgEl.className = "edit-status-msg success";
-              msgEl.textContent = `✓ ${data.message || "Salvato"}`;
-              // Close edit panel after success
-              setTimeout(() => {
-                document.getElementById(`edit-row-${idx}`).style.display =
-                  "none";
-              }, 1200);
-            } finally {
-              fetch("http://localhost:9090/proxy/stop", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  session_token: proxyData.session_token,
-                }),
-              }).catch(() => {});
-            }
-          } else {
-            const resp = await fetch("/api/query", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(queryPayload),
-            });
-            const data = await resp.json();
-            if (!resp.ok)
-              throw new Error(data.message || data.error || "Errore update");
-            msgEl.className = "edit-status-msg success";
-            msgEl.textContent = `✓ ${data.message || "Salvato"}`;
-            setTimeout(() => {
-              document.getElementById(`edit-row-${idx}`).style.display = "none";
-            }, 1200);
-          }
-        } catch (err) {
-          msgEl.className = "edit-status-msg error";
-          msgEl.textContent = `{err.message}`;
+    // ─── Save record (Update) ───────────────────────────────────────────────
+    async function saveRecord(idx, rawId, collection) {
+      const row = (window.lastQueryResults || [])[idx] || {};
+      const fields = EDIT_FIELDS[collection] || [];
+      const updateFields = {};
+      fields.forEach((f) => {
+        const el = document.getElementById(`ef-${idx}-${f.key}`);
+        if (el) {
+          updateFields[f.key] =
+            f.type === "number" ? parseItalianFloat(el.value) : el.value;
         }
-      }
+      });
 
-      // ─── Delete confirmation dialog ─────────────────────────────────────────
-      let _pendingDeleteId = null,
-        _pendingDeleteCollection = null,
-        _pendingDeleteIdx = null;
+      const msgEl = document.getElementById(`edit-msg-${idx}`);
+      msgEl.className = "edit-status-msg";
+      msgEl.textContent = "Saving…";
+      msgEl.style.display = "inline";
 
-      function confirmDeleteRecord(rawId, collection, idx) {
-        _pendingDeleteId = rawId;
-        _pendingDeleteCollection = collection;
-        _pendingDeleteIdx = idx;
-        document.getElementById("confirm-delete-msg").innerHTML =
-          `Sei sicuro di voler eliminare il documento con ID:<br><code style="font-size:0.82em; opacity:0.75">${rawId}</code><br><br>L'operazione è irreversibile e richiede Step-Up Authentication (OTP).`;
-        document.getElementById("confirm-delete-modal").style.display = "flex";
-        document.getElementById("confirm-delete-btn").onclick = () =>
-          deleteRecord(
-            _pendingDeleteId,
-            _pendingDeleteCollection,
-            _pendingDeleteIdx,
-          );
-      }
+      const user = document.getElementById("query-user").value;
+      const cert = window.activeCertificates
+        ? window.activeCertificates.find((c) => c.user === user)
+        : null;
+      const isHardware = cert ? cert.is_hardware : false;
 
-      function closeConfirmDelete() {
-        document.getElementById("confirm-delete-modal").style.display = "none";
-        _pendingDeleteId = null;
-        _pendingDeleteCollection = null;
-        _pendingDeleteIdx = null;
-      }
-
-      // ─── Execute Delete ─────────────────────────────────────────────────────
-      async function deleteRecord(rawId, collection, idx) {
-        closeConfirmDelete();
-        const user = document.getElementById("query-user").value;
-        const cert = window.activeCertificates
-          ? window.activeCertificates.find((c) => c.user === user)
-          : null;
-        const isHardware = cert ? cert.is_hardware : false;
-
-        const dataRow = document.getElementById(`data-row-${idx}`);
-        const editRow = document.getElementById(`edit-row-${idx}`);
-        if (dataRow) {
-          dataRow.style.opacity = "0.4";
-        }
-
-        const row = (window.lastQueryResults || [])[idx] || {};
-
+      try {
         let queryPayload = {
           user,
           collection,
-          action: "delete",
+          action: "update",
           filter: "{}",
           record_id: rawId,
+          update_fields: updateFields,
         };
 
         if (row.patient_id) {
           queryPayload.patient_id = row.patient_id;
         }
 
-        try {
-          if (isHardware) {
-            const proxyResp = await fetch("http://localhost:9090/proxy/start", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
-            });
-            const proxyData = await proxyResp.json();
-            if (!proxyResp.ok)
-              throw new Error(proxyData.error || "Proxy start fallito");
-            queryPayload.local_proxy_port = proxyData.port;
-            try {
-              const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-              let tokenResult = null,
-                retryCount = 0;
-              while (!tokenResult && retryCount < 2) {
-                const oidcResp = await fetch("http://localhost:9090/oidc/token", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ common_name: user, step_up: true }),
-                });
-                const oidcData = await oidcResp.json();
-                if (
-                  oidcResp.status === 401 &&
-                  oidcData.error === "primary_auth_required"
-                ) {
-                  await promptPrimaryAuth(email, true);
-                  retryCount++;
-                  continue;
-                }
-                if (!oidcResp.ok)
-                  throw new Error(oidcData.message || "Token OIDC fallito");
-                tokenResult = oidcData.token;
-              }
-              queryPayload.jwt_token = tokenResult;
-
-              const resp = await fetch("/api/query", {
+        if (isHardware) {
+          // Start proxy
+          const proxyResp = await fetch("http://localhost:9090/proxy/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
+          });
+          const proxyData = await proxyResp.json();
+          if (!proxyResp.ok)
+            throw new Error(proxyData.error || "Proxy start failed");
+          queryPayload.local_proxy_port = proxyData.port;
+          try {
+            // Step-up OIDC token (always required for update)
+            const email = cnToEmailMap[user];
+            let tokenResult = null,
+              retryCount = 0;
+            while (!tokenResult && retryCount < 2) {
+              const oidcResp = await fetch("http://localhost:9090/oidc/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(queryPayload),
+                body: JSON.stringify({ common_name: user, step_up: true }),
               });
-              const data = await resp.json();
-              if (!resp.ok)
-                throw new Error(data.message || data.error || "Errore delete");
-              // Animate row removal
-              if (dataRow) {
-                dataRow.style.transition = "opacity 0.3s";
-                dataRow.style.opacity = "0";
-                setTimeout(() => {
-                  dataRow.remove();
-                  if (editRow) editRow.remove();
-                }, 320);
+              const oidcData = await oidcResp.json();
+              if (
+                oidcResp.status === 401 &&
+                oidcData.error === "primary_auth_required"
+              ) {
+                await promptPrimaryAuth(email, true);
+                retryCount++;
+                continue;
               }
-              document.getElementById("query-resp-count").textContent =
-                Math.max(
-                  0,
-                  parseInt(
-                    document.getElementById("query-resp-count").textContent ||
-                      "0",
-                  ) - 1,
-                );
-            } finally {
-              fetch("http://localhost:9090/proxy/stop", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  session_token: proxyData.session_token,
-                }),
-              }).catch(() => {});
+              if (!oidcResp.ok)
+                throw new Error(oidcData.message || "OIDC token failed");
+              tokenResult = oidcData.token;
             }
-          } else {
+            queryPayload.jwt_token = tokenResult;
+
             const resp = await fetch("/api/query", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1552,7 +1213,145 @@
             });
             const data = await resp.json();
             if (!resp.ok)
-              throw new Error(data.message || data.error || "Errore delete");
+              throw new Error(data.message || data.error || "Update error");
+            msgEl.className = "edit-status-msg success";
+            msgEl.textContent = `${data.message || "Saved"}`;
+            // Close edit panel after success
+            setTimeout(() => {
+              document.getElementById(`edit-row-${idx}`).style.display =
+                "none";
+            }, 1200);
+          } finally {
+            fetch("http://localhost:9090/proxy/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_token: proxyData.session_token,
+              }),
+            }).catch(() => { });
+          }
+        } else {
+          const resp = await fetch("/api/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(queryPayload),
+          });
+          const data = await resp.json();
+          if (!resp.ok)
+            throw new Error(data.message || data.error || "Update error");
+          msgEl.className = "edit-status-msg success";
+          msgEl.textContent = `${data.message || "Saved"}`;
+          setTimeout(() => {
+            document.getElementById(`edit-row-${idx}`).style.display = "none";
+          }, 1200);
+        }
+      } catch (err) {
+        msgEl.className = "edit-status-msg error";
+        msgEl.textContent = `{err.message}`;
+      }
+    }
+
+    // ─── Delete confirmation dialog ─────────────────────────────────────────
+    let _pendingDeleteId = null,
+      _pendingDeleteCollection = null,
+      _pendingDeleteIdx = null;
+
+    function confirmDeleteRecord(rawId, collection, idx) {
+      _pendingDeleteId = rawId;
+      _pendingDeleteCollection = collection;
+      _pendingDeleteIdx = idx;
+      document.getElementById("confirm-delete-msg").innerHTML =
+        `Are you sure you want to delete the document with ID:<br><code style="font-size:0.82em; opacity:0.75">${rawId}</code><br><br>This operation is irreversible and requires Step-Up Authentication (OTP).`;
+      document.getElementById("confirm-delete-modal").style.display = "flex";
+      document.getElementById("confirm-delete-btn").onclick = () =>
+        deleteRecord(
+          _pendingDeleteId,
+          _pendingDeleteCollection,
+          _pendingDeleteIdx,
+        );
+    }
+
+    function closeConfirmDelete() {
+      document.getElementById("confirm-delete-modal").style.display = "none";
+      _pendingDeleteId = null;
+      _pendingDeleteCollection = null;
+      _pendingDeleteIdx = null;
+    }
+
+    // ─── Execute Delete ─────────────────────────────────────────────────────
+    async function deleteRecord(rawId, collection, idx) {
+      closeConfirmDelete();
+      const user = document.getElementById("query-user").value;
+      const cert = window.activeCertificates
+        ? window.activeCertificates.find((c) => c.user === user)
+        : null;
+      const isHardware = cert ? cert.is_hardware : false;
+
+      const dataRow = document.getElementById(`data-row-${idx}`);
+      const editRow = document.getElementById(`edit-row-${idx}`);
+      if (dataRow) {
+        dataRow.style.opacity = "0.4";
+      }
+
+      const row = (window.lastQueryResults || [])[idx] || {};
+
+      let queryPayload = {
+        user,
+        collection,
+        action: "delete",
+        filter: "{}",
+        record_id: rawId,
+      };
+
+      if (row.patient_id) {
+        queryPayload.patient_id = row.patient_id;
+      }
+
+      try {
+        if (isHardware) {
+          const proxyResp = await fetch("http://localhost:9090/proxy/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
+          });
+          const proxyData = await proxyResp.json();
+          if (!proxyResp.ok)
+            throw new Error(proxyData.error || "Proxy start failed");
+          queryPayload.local_proxy_port = proxyData.port;
+          try {
+            const email = cnToEmailMap[user];
+            let tokenResult = null,
+              retryCount = 0;
+            while (!tokenResult && retryCount < 2) {
+              const oidcResp = await fetch("http://localhost:9090/oidc/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ common_name: user, step_up: true }),
+              });
+              const oidcData = await oidcResp.json();
+              if (
+                oidcResp.status === 401 &&
+                oidcData.error === "primary_auth_required"
+              ) {
+                await promptPrimaryAuth(email, true);
+                retryCount++;
+                continue;
+              }
+              if (!oidcResp.ok)
+                throw new Error(oidcData.message || "OIDC token failed");
+              tokenResult = oidcData.token;
+            }
+            queryPayload.jwt_token = tokenResult;
+
+            const resp = await fetch("/api/query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(queryPayload),
+            });
+            const data = await resp.json();
+            if (!resp.ok)
+              throw new Error(data.message || data.error || "Delete error");
+            // Animate row removal
             if (dataRow) {
               dataRow.style.transition = "opacity 0.3s";
               dataRow.style.opacity = "0";
@@ -1561,623 +1360,652 @@
                 if (editRow) editRow.remove();
               }, 320);
             }
-            document.getElementById("query-resp-count").textContent = Math.max(
-              0,
-              parseInt(
-                document.getElementById("query-resp-count").textContent || "0",
-              ) - 1,
+            document.getElementById("query-resp-count").textContent =
+              Math.max(
+                0,
+                parseInt(
+                  document.getElementById("query-resp-count").textContent ||
+                  "0",
+                ) - 1,
+              );
+          } finally {
+            fetch("http://localhost:9090/proxy/stop", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_token: proxyData.session_token,
+              }),
+            }).catch(() => { });
+          }
+        } else {
+          const resp = await fetch("/api/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(queryPayload),
+          });
+          const data = await resp.json();
+          if (!resp.ok)
+            throw new Error(data.message || data.error || "Delete error");
+          if (dataRow) {
+            dataRow.style.transition = "opacity 0.3s";
+            dataRow.style.opacity = "0";
+            setTimeout(() => {
+              dataRow.remove();
+              if (editRow) editRow.remove();
+            }, 320);
+          }
+          document.getElementById("query-resp-count").textContent = Math.max(
+            0,
+            parseInt(
+              document.getElementById("query-resp-count").textContent || "0",
+            ) - 1,
+          );
+        }
+      } catch (err) {
+        if (dataRow) dataRow.style.opacity = "1";
+        alert(`Deletion error: ${err.message}`);
+      }
+    }
+
+    // Toggle Result View event handlers
+    document
+      .getElementById("result-view-table")
+      .addEventListener("click", () => {
+        document.getElementById("result-view-table").classList.add("active");
+        document
+          .getElementById("result-view-json")
+          .classList.remove("active");
+        document.getElementById(
+          "query-output-table-container",
+        ).style.display = "block";
+        document.getElementById("query-output-json").style.display = "none";
+      });
+
+    document
+      .getElementById("result-view-json")
+      .addEventListener("click", () => {
+        document.getElementById("result-view-json").classList.add("active");
+        document
+          .getElementById("result-view-table")
+          .classList.remove("active");
+        document.getElementById(
+          "query-output-table-container",
+        ).style.display = "none";
+        document.getElementById("query-output-json").style.display = "block";
+      });
+
+    document
+      .getElementById("query-collection")
+      .addEventListener("change", (e) => {
+        // Update simple fields
+        updateSimpleQueryFields();
+      });
+
+    // Initialize simple query fields on load
+    updateSimpleQueryFields();
+
+    // Parse CSR to extract hardware identifiers from SAN
+    function parseCSRForHardware(csrPem) {
+      try {
+        const base64 = csrPem
+          .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, "")
+          .replace(/-----END CERTIFICATE REQUEST-----/g, "")
+          .replace(/\s/g, "");
+
+        const binary = atob(base64);
+        let mac = null,
+          cpu = null;
+
+        const macRegex =
+          /MAC-([0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2})/gi;
+        const macMatch = macRegex.exec(binary);
+        if (macMatch) {
+          mac = macMatch[1];
+        }
+
+        const cpuRegex = /CPU-([A-Za-z0-9()\-\s.®™]+)/;
+        const cpuMatch = cpuRegex.exec(binary);
+        if (cpuMatch) {
+          cpu = cpuMatch[1].trim();
+        }
+
+        return { mac, cpu };
+      } catch (e) {
+        console.error("CSR parsing error:", e);
+        return { mac: null, cpu: null };
+      }
+    }
+
+    let currentAuthEmail = "";
+    let enrollmentSessionToken = "";
+
+    // Handle AD Login Form submission
+    document
+      .getElementById("login-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("login-email").value;
+        const password = document.getElementById("login-password").value;
+        const errorBox = document.getElementById("error-box");
+        const loginBtn = document.getElementById("login-btn");
+
+        errorBox.style.display = "none";
+
+        try {
+          loginBtn.disabled = true;
+          loginBtn.textContent = "Authenticating...";
+
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "Invalid credentials");
+          }
+
+          currentAuthEmail = email;
+          document.getElementById("otp-simulation-banner").innerHTML =
+            `<strong>OTP code sent!</strong><br>Check your email inbox <strong>${email}</strong> and enter the received code.`;
+          document.getElementById("enroll-step-login").style.display = "none";
+          document.getElementById("enroll-step-otp").style.display = "block";
+        } catch (error) {
+          errorBox.textContent = `AD login failed: ${error.message}`;
+          errorBox.style.display = "block";
+        } finally {
+          loginBtn.disabled = false;
+          loginBtn.textContent = "Sign In with Single Sign-On";
+        }
+      });
+
+    // Handle OTP Form submission
+    document
+      .getElementById("otp-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const otp = document.getElementById("otp-code").value.trim();
+        const errorBox = document.getElementById("error-box");
+        const otpBtn = document.getElementById("otp-btn");
+
+        errorBox.style.display = "none";
+
+        try {
+          otpBtn.disabled = true;
+          otpBtn.textContent = "Verifying OTP code...";
+
+          const response = await fetch("/api/auth/verify-otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: currentAuthEmail, otp: otp }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "Invalid or expired OTP");
+          }
+
+          enrollmentSessionToken = data.enrollment_session_token;
+
+          document.getElementById("verified-cn").textContent =
+            data.user_info.cn;
+          document.getElementById("verified-role").textContent =
+            data.user_info.role;
+          document.getElementById("verified-dept").textContent =
+            data.user_info.department || "N/A";
+
+          document.getElementById("enroll-step-otp").style.display = "none";
+          document.getElementById("enroll-step-trigger").style.display =
+            "block";
+        } catch (error) {
+          errorBox.textContent = `OTP verification failed: ${error.message}`;
+          errorBox.style.display = "block";
+        } finally {
+          otpBtn.disabled = false;
+          otpBtn.textContent = "Verify OTP and Bind Device";
+        }
+      });
+
+    // Handle Auto-Enroll form submission
+    document
+      .getElementById("csr-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const cn = document.getElementById("verified-cn").textContent;
+        const errorBox = document.getElementById("error-box");
+        const successBox = document.getElementById("success-box");
+        const autoBtn = document.getElementById("auto-enroll-btn");
+
+        errorBox.style.display = "none";
+        successBox.style.display = "none";
+
+        try {
+          autoBtn.disabled = true;
+          autoBtn.textContent = "Enrollment in progress...";
+
+          const response = await fetch("/api/enroll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enrollment_session_token: enrollmentSessionToken,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(
+              data.message || "The local agent returned an error",
             );
           }
-        } catch (err) {
-          if (dataRow) dataRow.style.opacity = "1";
-          alert(`Errore eliminazione: ${err.message}`);
+
+          successBox.textContent = `Hardware Enrollment Complete! The certificate for ${cn} has been generated and saved in the system Keychain/Certificate Store.`;
+          successBox.style.display = "block";
+
+          // Disabilita form
+          document.getElementById("csr-form").style.opacity = "0.5";
+          document.getElementById("csr-form").style.pointerEvents = "none";
+
+          // Ricarica la lista degli utenti attivi nella scheda query
+          if (typeof loadActiveCertificates === "function") {
+            await loadActiveCertificates();
+          }
+        } catch (error) {
+          errorBox.textContent = `Enrollment error: ${error.message}`;
+          errorBox.style.display = "block";
+        } finally {
+          autoBtn.disabled = false;
+          autoBtn.textContent = "Start Auto-Enroll (Local Agent)";
         }
+      });
+
+    // CN to Corporate Email Map for Query Auth Modal
+    let cnToEmailMap = {};
+
+    async function loadADUsers() {
+      const select = document.getElementById("login-email");
+      if (!select) return;
+      try {
+        const response = await fetch("/api/auth/users");
+        const users = await response.json();
+        select.innerHTML = "";
+        cnToEmailMap = {};
+        for (const [email, info] of Object.entries(users)) {
+          cnToEmailMap[info.cn] = email;
+          const opt = document.createElement("option");
+          opt.value = email;
+          opt.textContent = `${email} (${info.cn} - ${info.role}/${info.department})`;
+          select.appendChild(opt);
+        }
+      } catch (err) {
+        console.error("Failed to load AD users:", err);
       }
+    }
 
-      // Toggle Result View event handlers
-      document
-        .getElementById("result-view-table")
-        .addEventListener("click", () => {
-          document.getElementById("result-view-table").classList.add("active");
-          document
-            .getElementById("result-view-json")
-            .classList.remove("active");
-          document.getElementById(
-            "query-output-table-container",
-          ).style.display = "block";
-          document.getElementById("query-output-json").style.display = "none";
-        });
+    let primaryAuthCallbacks = null;
 
-      document
-        .getElementById("result-view-json")
-        .addEventListener("click", () => {
-          document.getElementById("result-view-json").classList.add("active");
-          document
-            .getElementById("result-view-table")
-            .classList.remove("active");
-          document.getElementById(
-            "query-output-table-container",
-          ).style.display = "none";
-          document.getElementById("query-output-json").style.display = "block";
-        });
+    // isStepUp=true  → calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
+    // isStepUp=false → calls /api/auth/verify-otp (full enrollment session token)
+    function promptPrimaryAuth(email, isStepUp = false) {
+      return new Promise((resolve, reject) => {
+        document.getElementById("modal-login-email").value = email;
+        document.getElementById("modal-login-password").value = "password123";
+        document.getElementById("modal-otp-code").value = "";
+        document.getElementById("modal-error-box").style.display = "none";
+        document.getElementById("modal-step-login").style.display = "block";
+        document.getElementById("modal-step-otp").style.display = "none";
+        document.getElementById("primary-auth-modal").style.display = "flex";
 
-      document
-        .getElementById("query-collection")
-        .addEventListener("change", (e) => {
-          // Update simple fields
-          updateSimpleQueryFields();
-        });
+        primaryAuthCallbacks = { resolve, reject, isStepUp };
+      });
+    }
 
-      // Initialize simple query fields on load
-      updateSimpleQueryFields();
+    function closePrimaryAuthModal() {
+      document.getElementById("primary-auth-modal").style.display = "none";
+      if (primaryAuthCallbacks) {
+        primaryAuthCallbacks.reject(
+          new Error("Primary authentication cancelled."),
+        );
+        primaryAuthCallbacks = null;
+      }
+    }
 
-      // Parse CSR to extract hardware identifiers from SAN
-      function parseCSRForHardware(csrPem) {
+    // Modal AD Login submission
+    document
+      .getElementById("modal-login-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("modal-login-email").value;
+        const password = document.getElementById(
+          "modal-login-password",
+        ).value;
+        const errorBox = document.getElementById("modal-error-box");
+        const btn = document.getElementById("modal-login-btn");
+
+        errorBox.style.display = "none";
         try {
-          const base64 = csrPem
-            .replace(/-----BEGIN CERTIFICATE REQUEST-----/g, "")
-            .replace(/-----END CERTIFICATE REQUEST-----/g, "")
-            .replace(/\s/g, "");
+          btn.disabled = true;
+          btn.textContent = "Sending credentials...";
 
-          const binary = atob(base64);
-          let mac = null,
-            cpu = null;
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
 
-          const macRegex =
-            /MAC-([0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2})/gi;
-          const macMatch = macRegex.exec(binary);
-          if (macMatch) {
-            mac = macMatch[1];
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || "Invalid credentials");
           }
 
-          const cpuRegex = /CPU-([A-Za-z0-9()\-\s.®™]+)/;
-          const cpuMatch = cpuRegex.exec(binary);
-          if (cpuMatch) {
-            cpu = cpuMatch[1].trim();
-          }
-
-          return { mac, cpu };
-        } catch (e) {
-          console.error("CSR parsing error:", e);
-          return { mac: null, cpu: null };
+          document.getElementById("modal-otp-simulation-banner").innerHTML =
+            `<strong>OTP code sent!</strong><br>Check your email inbox <strong>${email}</strong> and enter the received code.`;
+          document.getElementById("modal-step-login").style.display = "none";
+          document.getElementById("modal-step-otp").style.display = "block";
+        } catch (error) {
+          errorBox.textContent = `Login error: ${error.message}`;
+          errorBox.style.display = "block";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Sign In with Single Sign-On";
         }
-      }
+      });
 
-      let currentAuthEmail = "";
-      let enrollmentSessionToken = "";
+    // Modal OTP Verification
+    document
+      .getElementById("modal-otp-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("modal-login-email").value;
+        const otp = document.getElementById("modal-otp-code").value.trim();
+        const errorBox = document.getElementById("modal-error-box");
+        const btn = document.getElementById("modal-otp-btn");
+        // Detect whether this modal was opened for a step-up or a full enrollment
+        const isStepUp = primaryAuthCallbacks
+          ? primaryAuthCallbacks.isStepUp
+          : false;
 
-      // Handle AD Login Form submission
-      document
-        .getElementById("login-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const email = document.getElementById("login-email").value;
-          const password = document.getElementById("login-password").value;
-          const errorBox = document.getElementById("error-box");
-          const loginBtn = document.getElementById("login-btn");
-
-          errorBox.style.display = "none";
-
-          try {
-            loginBtn.disabled = true;
-            loginBtn.textContent = "⏳ Autenticazione in corso...";
-
-            const response = await fetch("/api/auth/login", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, password }),
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-              throw new Error(data.error || "Credenziali non valide");
-            }
-
-            currentAuthEmail = email;
-            document.getElementById("otp-simulation-banner").innerHTML =
-              `✉️ <strong>Codice OTP inviato!</strong><br>Controlla la tua casella email <strong>${email}</strong> e inserisci il codice ricevuto.`;
-            document.getElementById("enroll-step-login").style.display = "none";
-            document.getElementById("enroll-step-otp").style.display = "block";
-          } catch (error) {
-            errorBox.textContent = `Accesso AD fallito: ${error.message}`;
-            errorBox.style.display = "block";
-          } finally {
-            loginBtn.disabled = false;
-            loginBtn.textContent = "Accedi con Single Sign-On";
-          }
-        });
-
-      // Handle OTP Form submission
-      document
-        .getElementById("otp-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const otp = document.getElementById("otp-code").value.trim();
-          const errorBox = document.getElementById("error-box");
-          const otpBtn = document.getElementById("otp-btn");
-
-          errorBox.style.display = "none";
-
-          try {
-            otpBtn.disabled = true;
-            otpBtn.textContent = "⏳ Verifica codice OTP...";
-
-            const response = await fetch("/api/auth/verify-otp", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: currentAuthEmail, otp: otp }),
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-              throw new Error(data.error || "OTP non valido o scaduto");
-            }
-
-            enrollmentSessionToken = data.enrollment_session_token;
-
-            document.getElementById("verified-cn").textContent =
-              data.user_info.cn;
-            document.getElementById("verified-role").textContent =
-              data.user_info.role;
-            document.getElementById("verified-dept").textContent =
-              data.user_info.department || "N/A";
-
-            document.getElementById("enroll-step-otp").style.display = "none";
-            document.getElementById("enroll-step-trigger").style.display =
-              "block";
-          } catch (error) {
-            errorBox.textContent = `Verifica OTP fallita: ${error.message}`;
-            errorBox.style.display = "block";
-          } finally {
-            otpBtn.disabled = false;
-            otpBtn.textContent = "Verifica OTP e Associa Dispositivo";
-          }
-        });
-
-      // Handle Auto-Enroll form submission
-      document
-        .getElementById("csr-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-
-          const cn = document.getElementById("verified-cn").textContent;
-          const errorBox = document.getElementById("error-box");
-          const successBox = document.getElementById("success-box");
-          const autoBtn = document.getElementById("auto-enroll-btn");
-
-          errorBox.style.display = "none";
-          successBox.style.display = "none";
-
-          try {
-            autoBtn.disabled = true;
-            autoBtn.textContent = "⏳ Enrollment in corso...";
-
-            const response = await fetch("/api/enroll", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                enrollment_session_token: enrollmentSessionToken,
-              }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-              throw new Error(
-                data.message || "L'agente locale ha restituito un errore",
-              );
-            }
-
-            successBox.textContent = `✓ Enrollment Hardware Completato! Il certificato per ${cn} è stato generato e salvato nel Keychain/Certificate Store di sistema.`;
-            successBox.style.display = "block";
-
-            // Disabilita form
-            document.getElementById("csr-form").style.opacity = "0.5";
-            document.getElementById("csr-form").style.pointerEvents = "none";
-
-            // Ricarica la lista degli utenti attivi nella scheda query
-            if (typeof loadActiveCertificates === "function") {
-              await loadActiveCertificates();
-            }
-          } catch (error) {
-            errorBox.textContent = `Errore durante l'enrollment: ${error.message}`;
-            errorBox.style.display = "block";
-          } finally {
-            autoBtn.disabled = false;
-            autoBtn.textContent = "⚡ Avvia Auto-Enroll (Local Agent)";
-          }
-        });
-
-      // CN to Corporate Email Map for Query Auth Modal
-      let cnToEmailMap = {
-        "mario.rossi": "dr.mario.rossi@ospedale.it",
-        "anna.verdi": "anna.verdi@ospedale.it",
-        "giulia.bianchi": "giulia.bianchi@ospedale.it",
-        "luca.ferrari": "luca.ferrari@ospedale.it",
-        "paolo.roselli": "paolo.roselli@ospedale.it",
-      };
-
-      async function loadADUsers() {
-        const select = document.getElementById("login-email");
-        if (!select) return;
+        errorBox.style.display = "none";
         try {
-          const response = await fetch("/api/auth/users");
-          const users = await response.json();
-          select.innerHTML = "";
-          cnToEmailMap = {};
-          for (const [email, info] of Object.entries(users)) {
-            cnToEmailMap[info.cn] = email;
-            const opt = document.createElement("option");
-            opt.value = email;
-            opt.textContent = `${email} (${info.cn} - ${info.role}/${info.department})`;
-            select.appendChild(opt);
-          }
-        } catch (err) {
-          console.error("Failed to load AD users:", err);
-        }
-      }
+          btn.disabled = true;
+          btn.textContent = "Verifying OTP...";
 
-      let primaryAuthCallbacks = null;
-
-      // isStepUp=true  → calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
-      // isStepUp=false → calls /api/auth/verify-otp (full enrollment session token)
-      function promptPrimaryAuth(email, isStepUp = false) {
-        return new Promise((resolve, reject) => {
-          document.getElementById("modal-login-email").value = email;
-          document.getElementById("modal-login-password").value = "password123";
-          document.getElementById("modal-otp-code").value = "";
-          document.getElementById("modal-error-box").style.display = "none";
-          document.getElementById("modal-step-login").style.display = "block";
-          document.getElementById("modal-step-otp").style.display = "none";
-          document.getElementById("primary-auth-modal").style.display = "flex";
-
-          primaryAuthCallbacks = { resolve, reject, isStepUp };
-        });
-      }
-
-      function closePrimaryAuthModal() {
-        document.getElementById("primary-auth-modal").style.display = "none";
-        if (primaryAuthCallbacks) {
-          primaryAuthCallbacks.reject(
-            new Error("Autenticazione primaria annullata."),
-          );
-          primaryAuthCallbacks = null;
-        }
-      }
-
-      // Modal AD Login submission
-      document
-        .getElementById("modal-login-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const email = document.getElementById("modal-login-email").value;
-          const password = document.getElementById(
-            "modal-login-password",
-          ).value;
-          const errorBox = document.getElementById("modal-error-box");
-          const btn = document.getElementById("modal-login-btn");
-
-          errorBox.style.display = "none";
-          try {
-            btn.disabled = true;
-            btn.textContent = "⏳ Invio credenziali...";
-
-            const response = await fetch("/api/auth/login", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, password }),
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-              throw new Error(data.error || "Credenziali non valide");
-            }
-
-            document.getElementById("modal-otp-simulation-banner").innerHTML =
-              `✉️ <strong>Codice OTP inviato!</strong><br>Controlla la tua casella email <strong>${email}</strong> e inserisci il codice ricevuto.`;
-            document.getElementById("modal-step-login").style.display = "none";
-            document.getElementById("modal-step-otp").style.display = "block";
-          } catch (error) {
-            errorBox.textContent = `Errore login: ${error.message}`;
-            errorBox.style.display = "block";
-          } finally {
-            btn.disabled = false;
-            btn.textContent = "Accedi con Single Sign-On";
-          }
-        });
-
-      // Modal OTP Verification
-      document
-        .getElementById("modal-otp-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-          const email = document.getElementById("modal-login-email").value;
-          const otp = document.getElementById("modal-otp-code").value.trim();
-          const errorBox = document.getElementById("modal-error-box");
-          const btn = document.getElementById("modal-otp-btn");
-          // Detect whether this modal was opened for a step-up or a full enrollment
-          const isStepUp = primaryAuthCallbacks
-            ? primaryAuthCallbacks.isStepUp
-            : false;
-
-          errorBox.style.display = "none";
-          try {
-            btn.disabled = true;
-            btn.textContent = "⏳ Verifica OTP...";
-
-            // Step-up: only refreshes last_mfa_time, does NOT create a new enrollment token.
-            // Full login: creates an enrollment session token (existing behaviour).
-            const endpoint = isStepUp
-              ? "/api/auth/step-up"
-              : "/api/auth/verify-otp";
-            const response = await fetch(endpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                email,
-                otp,
-                // /api/auth/step-up also needs the password to re-validate the user
-                ...(isStepUp && {
-                  password: document.getElementById("modal-login-password")
-                    .value,
-                }),
+          // Step-up: only refreshes last_mfa_time, does NOT create a new enrollment token.
+          // Full login: creates an enrollment session token (existing behaviour).
+          const endpoint = isStepUp
+            ? "/api/auth/step-up"
+            : "/api/auth/verify-otp";
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email,
+              otp,
+              // /api/auth/step-up also needs the password to re-validate the user
+              ...(isStepUp && {
+                password: document.getElementById("modal-login-password")
+                  .value,
               }),
-            });
+            }),
+          });
 
-            const data = await response.json();
-            if (!response.ok) {
-              throw new Error(
-                data.error || data.message || "Codice OTP errato",
-              );
-            }
-
-            document.getElementById("primary-auth-modal").style.display =
-              "none";
-            if (primaryAuthCallbacks) {
-              // For step-up we resolve with null (caller only needs to know it succeeded)
-              primaryAuthCallbacks.resolve(
-                isStepUp ? null : data.enrollment_session_token,
-              );
-              primaryAuthCallbacks = null;
-            }
-          } catch (error) {
-            errorBox.textContent = `Errore OTP: ${error.message}`;
-            errorBox.style.display = "block";
-          } finally {
-            btn.disabled = false;
-            btn.textContent = "Verifica OTP";
-          }
-        });
-
-      // Handle Query Form Submission
-      document
-        .getElementById("query-form")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
-
-          const user = document.getElementById("query-user").value;
-          const collection = document.getElementById("query-collection").value;
-          const action = document.getElementById("query-action").value;
-          const limit = document.getElementById("query-limit").value;
-          const filter = getFilterPayload();
-
-          const errBox = document.getElementById("query-error-box");
-          const successBox = document.getElementById("query-success-box");
-          const resSection = document.getElementById("query-result-section");
-          const submitBtn = document.getElementById("query-submit-btn");
-          const outputBox = document.getElementById("query-output-json");
-          const mainPanel = document.querySelector("#tab-query .panel");
-
-          errBox.style.display = "none";
-          successBox.style.display = "none";
-          resSection.style.display = "none";
-          mainPanel.classList.remove("forbidden-card");
-
-          if (!user) {
-            errBox.textContent =
-              "Seleziona un utente con certificato attivo.";
-            errBox.style.display = "block";
-            return;
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(
+              data.error || data.message || "Wrong OTP code",
+            );
           }
 
-          let proxyToken = null;
-          try {
-            submitBtn.disabled = true;
+          document.getElementById("primary-auth-modal").style.display =
+            "none";
+          if (primaryAuthCallbacks) {
+            // For step-up we resolve with null (caller only needs to know it succeeded)
+            primaryAuthCallbacks.resolve(
+              isStepUp ? null : data.enrollment_session_token,
+            );
+            primaryAuthCallbacks = null;
+          }
+        } catch (error) {
+          errorBox.textContent = `OTP error: ${error.message}`;
+          errorBox.style.display = "block";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Verify OTP";
+        }
+      });
 
-            // Check if selected CN is hardware bound
-            const cert = window.activeCertificates
-              ? window.activeCertificates.find((c) => c.user === user)
-              : null;
-            const isHardware = cert ? cert.is_hardware : false;
+    // Handle Query Form Submission
+    document
+      .getElementById("query-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
 
-            let queryPayload = { user, collection, action, filter, limit };
+        const user = document.getElementById("query-user").value;
+        const collection = document.getElementById("query-collection").value;
+        const action = document.getElementById("query-action").value;
+        const limit = document.getElementById("query-limit").value;
+        const filter = getFilterPayload();
 
-            // Determine if Step-up is required
-            let needsStepUp = action === "update" || action === "delete";
-            if (!needsStepUp && collection === "billing") {
-              try {
-                const parsedFilter = JSON.parse(filter);
-                for (let k in parsedFilter) {
-                  if (k === "billing_amount" || k === "billing_amount_approx") {
-                    const val = parsedFilter[k];
-                    if (typeof val === "number" && val > 5000) {
-                      needsStepUp = true;
-                    } else if (typeof val === "object" && val !== null) {
-                      for (let op in val) {
-                        if (typeof val[op] === "number" && val[op] > 5000) {
-                          needsStepUp = true;
-                        }
+        const errBox = document.getElementById("query-error-box");
+        const successBox = document.getElementById("query-success-box");
+        const resSection = document.getElementById("query-result-section");
+        const submitBtn = document.getElementById("query-submit-btn");
+        const outputBox = document.getElementById("query-output-json");
+        const mainPanel = document.querySelector("#tab-query .panel");
+
+        errBox.style.display = "none";
+        successBox.style.display = "none";
+        resSection.style.display = "none";
+        mainPanel.classList.remove("forbidden-card");
+
+        if (!user) {
+          errBox.textContent =
+            "Select a user with an active certificate.";
+          errBox.style.display = "block";
+          return;
+        }
+
+        let proxyToken = null;
+        try {
+          submitBtn.disabled = true;
+
+          // Check if selected CN is hardware bound
+          const cert = window.activeCertificates
+            ? window.activeCertificates.find((c) => c.user === user)
+            : null;
+          const isHardware = cert ? cert.is_hardware : false;
+
+          let queryPayload = { user, collection, action, filter, limit };
+
+          // Determine if Step-up is required
+          let needsStepUp = action === "update" || action === "delete";
+          if (!needsStepUp && collection === "billing") {
+            try {
+              const parsedFilter = JSON.parse(filter);
+              for (let k in parsedFilter) {
+                if (k === "billing_amount" || k === "billing_amount_approx") {
+                  const val = parsedFilter[k];
+                  if (typeof val === "number" && val > 5000) {
+                    needsStepUp = true;
+                  } else if (typeof val === "object" && val !== null) {
+                    for (let op in val) {
+                      if (typeof val[op] === "number" && val[op] > 5000) {
+                        needsStepUp = true;
                       }
                     }
                   }
                 }
-              } catch (e) {}
-            }
-
-            if (isHardware) {
-              submitBtn.textContent = "⏳ Avvio proxy locale...";
-              const agentResponse = await fetch(
-                "http://localhost:9090/proxy/start",
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
-                },
-              );
-
-              const agentData = await agentResponse.json();
-              if (!agentResponse.ok) {
-                throw new Error(
-                  agentData.error || "Autenticazione hardware fallita.",
-                );
               }
+            } catch (e) { }
+          }
 
-              proxyToken = agentData.session_token;
-              queryPayload.local_proxy_port = agentData.port;
-
-              submitBtn.textContent = needsStepUp
-                ? "⏳ Richiesta Touch ID (Step-Up Richiesto)..."
-                : "⏳ Richiesta Touch ID / Windows Hello...";
-
-              let tokenResult = null;
-              let retryCount = 0;
-
-              while (!tokenResult && retryCount < 2) {
-                try {
-                  const oidcResponse = await fetch(
-                    "http://localhost:9090/oidc/token",
-                    {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        common_name: user,
-                        step_up: needsStepUp,
-                      }),
-                    },
-                  );
-
-                  const oidcData = await oidcResponse.json();
-
-                  if (
-                    oidcResponse.status === 401 &&
-                    oidcData.error === "primary_auth_required"
-                  ) {
-                    submitBtn.textContent =
-                      "⏳ Autenticazione primaria in corso...";
-                    const email = cnToEmailMap[user] || `${user}@ospedale.it`;
-                    await promptPrimaryAuth(email, needsStepUp);
-
-                    retryCount++;
-                    submitBtn.textContent = needsStepUp
-                      ? "⏳ Richiesta Touch ID (Step-Up Richiesto)..."
-                      : "⏳ Richiesta Touch ID / Windows Hello...";
-                    continue;
-                  }
-
-                  if (!oidcResponse.ok) {
-                    throw new Error(
-                      oidcData.message ||
-                        oidcData.error ||
-                        "Generazione OIDC fallita.",
-                    );
-                  }
-
-                  tokenResult = oidcData.token;
-                } catch (oidcErr) {
-                  if (
-                    oidcErr.message === "Autenticazione primaria annullata."
-                  ) {
-                    throw oidcErr;
-                  }
-                  if (retryCount >= 1) {
-                    throw oidcErr;
-                  }
-                  throw oidcErr;
-                }
-              }
-
-              queryPayload.jwt_token = tokenResult;
-
-              submitBtn.textContent =
-                "⏳ Esecuzione operazione via hardware OIDC mTLS...";
-            } else {
-              submitBtn.textContent = "⏳ Esecuzione operazione in corso...";
-            }
-
-            const response = await fetch("/api/query", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(queryPayload),
-            });
-
-            const data = await response.json();
-
-            if (response.status === 403) {
-              mainPanel.classList.add("forbidden-card");
-              errBox.textContent = `${data.message || "Accesso negato da OPA/RBAC."}`;
-              errBox.style.display = "block";
-
-              document.getElementById("query-resp-role").textContent =
-                data.role || "unknown";
-              document.getElementById("query-resp-view").textContent =
-                data.translated_collection || "None";
-              document.getElementById("query-resp-count").textContent =
-                "BLOCKED";
-              outputBox.textContent = JSON.stringify(data, null, 2);
-              resSection.style.display = "block";
-              return;
-            }
-
-            if (!response.ok) {
-              throw new Error(data.message || data.error || "Server error");
-            }
-
-            // Success
-            document.getElementById("query-resp-role").textContent = data.role;
-            document.getElementById("query-resp-view").textContent =
-              data.translated_collection;
-            document.getElementById("query-resp-count").textContent =
-              data.count;
-
-            if (data.message && data.message !== "Success") {
-              successBox.textContent = `✓ ${data.message}`;
-              successBox.style.display = "block";
-            }
-
-            // Render JSON
-            outputBox.textContent = JSON.stringify(
-              data.results || data,
-              null,
-              2,
+          if (isHardware) {
+            submitBtn.textContent = "Starting local proxy...";
+            const agentResponse = await fetch(
+              "http://localhost:9090/proxy/start",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ common_name: user, ttl_seconds: 60 }),
+              },
             );
 
-            // Render Table
-            renderQueryResults(data.results, collection);
+            const agentData = await agentResponse.json();
+            if (!agentResponse.ok) {
+              throw new Error(
+                agentData.error || "Hardware authentication failed.",
+              );
+            }
 
-            resSection.style.display = "block";
-          } catch (err) {
-            errBox.textContent = `Errore: ${err.message}`;
-            errBox.style.display = "block";
-          } finally {
-            if (proxyToken) {
-              // Stop proxy session immediately
+            proxyToken = agentData.session_token;
+            queryPayload.local_proxy_port = agentData.port;
+
+            submitBtn.textContent = needsStepUp
+              ? "Requesting Touch ID (Step-Up Required)..."
+              : "Requesting Touch ID / Windows Hello...";
+
+            let tokenResult = null;
+            let retryCount = 0;
+
+            while (!tokenResult && retryCount < 2) {
               try {
-                await fetch("http://localhost:9090/proxy/stop", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ session_token: proxyToken }),
-                });
-              } catch (stopErr) {
-                console.error("Failed to stop proxy session:", stopErr);
+                const oidcResponse = await fetch(
+                  "http://localhost:9090/oidc/token",
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      common_name: user,
+                      step_up: needsStepUp,
+                    }),
+                  },
+                );
+
+                const oidcData = await oidcResponse.json();
+
+                if (
+                  oidcResponse.status === 401 &&
+                  oidcData.error === "primary_auth_required"
+                ) {
+                  submitBtn.textContent =
+                    "Primary authentication in progress...";
+                  const email = cnToEmailMap[user];
+                  await promptPrimaryAuth(email, needsStepUp);
+
+                  retryCount++;
+                  submitBtn.textContent = needsStepUp
+                    ? "Requesting Touch ID (Step-Up Required)..."
+                    : "Requesting Touch ID / Windows Hello...";
+                  continue;
+                }
+
+                if (!oidcResponse.ok) {
+                  throw new Error(
+                    oidcData.message ||
+                    oidcData.error ||
+                    "OIDC generation failed.",
+                  );
+                }
+
+                tokenResult = oidcData.token;
+              } catch (oidcErr) {
+                if (
+                  oidcErr.message === "Primary authentication cancelled."
+                ) {
+                  throw oidcErr;
+                }
+                if (retryCount >= 1) {
+                  throw oidcErr;
+                }
+                throw oidcErr;
               }
             }
-            submitBtn.disabled = false;
-            submitBtn.textContent = "Invia Query mTLS";
-          }
-        });
 
-      // Fetch AD users dynamically on page load
-      loadADUsers();
-    </script>
-  </body>
+            queryPayload.jwt_token = tokenResult;
+
+            submitBtn.textContent =
+              "Executing operation via hardware OIDC mTLS...";
+          } else {
+            submitBtn.textContent = "Executing operation...";
+          }
+
+          const response = await fetch("/api/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(queryPayload),
+          });
+
+          const data = await response.json();
+
+          if (response.status === 403) {
+            mainPanel.classList.add("forbidden-card");
+            errBox.textContent = `${data.message || "Access denied by OPA/RBAC."}`;
+            errBox.style.display = "block";
+
+            document.getElementById("query-resp-role").textContent =
+              data.role || "unknown";
+            document.getElementById("query-resp-view").textContent =
+              data.translated_collection || "None";
+            document.getElementById("query-resp-count").textContent =
+              "BLOCKED";
+            outputBox.textContent = JSON.stringify(data, null, 2);
+            resSection.style.display = "block";
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error(data.message || data.error || "Server error");
+          }
+
+          // Success
+          document.getElementById("query-resp-role").textContent = data.role;
+          document.getElementById("query-resp-view").textContent =
+            data.translated_collection;
+          document.getElementById("query-resp-count").textContent =
+            data.count;
+
+          if (data.message && data.message !== "Success") {
+            successBox.textContent = `${data.message}`;
+            successBox.style.display = "block";
+          }
+
+          // Render JSON
+          outputBox.textContent = JSON.stringify(
+            data.results || data,
+            null,
+            2,
+          );
+
+          // Render Table
+          renderQueryResults(data.results, collection);
+
+          resSection.style.display = "block";
+        } catch (err) {
+          errBox.textContent = `Error: ${err.message}`;
+          errBox.style.display = "block";
+        } finally {
+          if (proxyToken) {
+            // Stop proxy session immediately
+            try {
+              await fetch("http://localhost:9090/proxy/stop", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_token: proxyToken }),
+              });
+            } catch (stopErr) {
+              console.error("Failed to stop proxy session:", stopErr);
+            }
+          }
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Submit mTLS Query";
+        }
+      });
+
+    // Fetch AD users dynamically on page load
+    loadADUsers();
+  </script>
+</body>
+
 </html>

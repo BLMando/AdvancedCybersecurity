@@ -188,7 +188,7 @@ def api_enroll_delegated():
     role = session["role"]
     department = session["department"]
         
-    agent_url = "http://host.docker.internal:9090/enroll"
+    agent_url = f"http://host.docker.internal:9090/enroll"
     agent_payload = {
         "common_name": user,
         "role": role,
@@ -196,15 +196,12 @@ def api_enroll_delegated():
         "enrollment_session_token": session_token
     }
     
-    parsed_url = urlparse(agent_url)
-    host_port = parsed_url.port or 9090
-    
     req = urllib.request.Request(
         agent_url,
         data=json.dumps(agent_payload).encode('utf-8'),
         headers={
             'Content-Type': 'application/json',
-            'Host': f'localhost:{host_port}'
+            'Host': f'localhost:9090'
         },
         method='POST'
     )

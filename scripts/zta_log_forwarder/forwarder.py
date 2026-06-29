@@ -25,8 +25,8 @@ logger = logging.getLogger("forwarder")
 app = Flask(__name__)
 
 hec_envoy = HEClient(
-    host=os.environ.get("SPLUNK_HOST", "splunk"),
-    port=int(os.environ.get("SPLUNK_HEC_PORT", "8088")),
+    host="splunk",
+    port=8088,
     token=os.environ.get("SPLUNK_HEC_TOKEN_ENVOY", ""),
     batch_size=int(os.environ.get("HEC_BATCH_SIZE", "100")),
 )
@@ -445,10 +445,9 @@ _ensure_tailer()
 
 
 def main():
-    port = int(os.environ.get("FORWARDER_PORT", "5000"))
     logger.info("Starting OPA Splunk Forwarder on port %d", port)
     try:
-        app.run(host="0.0.0.0", port=port, debug=False)
+        app.run(host="0.0.0.0", port=5000, debug=False)
     finally:
         _stop_event.set()
 

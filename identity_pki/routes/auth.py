@@ -30,7 +30,7 @@ def send_otp_email(recipient_email: str, otp: str, user_cn: str) -> bool:
         return False
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"ZTA Healthcare - Codice OTP: {otp}"
+    msg["Subject"] = f"ZTA Healthcare - OTP Code: {otp}"
     msg["From"] = f"ZTA Identity <{SMTP_EMAIL}>"
     msg["To"] = recipient_email
 
@@ -38,13 +38,13 @@ def send_otp_email(recipient_email: str, otp: str, user_cn: str) -> bool:
     <html>
     <body style="font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px;">
         <div style="max-width: 480px; margin: 0 auto; background: #1e293b; border-radius: 16px; padding: 40px; border: 1px solid #334155;">
-            <h2 style="color: #38bdf8; margin-top: 0;">🔐 Verifica Identità</h2>
-            <p>Ciao <strong>{user_cn}</strong>,</p>
-            <p>Il tuo codice OTP per l'autenticazione a due fattori è:</p>
+            <h2 style="color: #38bdf8; margin-top: 0;">Identity Verification</h2>
+            <p>Hello <strong>{user_cn}</strong>,</p>
+            <p>Your OTP code for two-factor authentication is:</p>
             <div style="text-align: center; margin: 30px 0;">
                 <span style="font-size: 2.5em; letter-spacing: 0.2em; color: #38bdf8; font-weight: 900; background: #0f172a; padding: 15px 30px; border-radius: 12px; border: 2px solid #38bdf8;">{otp}</span>
             </div>
-            <p style="color: #94a3b8;">Il codice scade tra <strong>5 minuti</strong>.</p>
+            <p style="color: #94a3b8;">The code expires in <strong>5 minutes</strong>.</p>
             <hr style="border: none; border-top: 1px solid #334155; margin: 20px 0;">
             <p style="font-size: 0.8em; color: #64748b;">ZTA Healthcare Identity PKI — Zero Trust Architecture</p>
         </div>
