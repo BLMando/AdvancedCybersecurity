@@ -8,17 +8,21 @@ certificato è fisicamente firmato con quel MAC specifico e non può essere camb
 l'enrollment).                                                                                                                                  
                                                                                                                                                 
 Quindi, fa sempre riferimento al tuo PC, ma identifica l'interfaccia di rete virtuale (WSL/Hyper-V) o fisica che l'agente ha selezionato durante
-l'enrollment.     
+l'enrollment.  
+
+ I log di Snort ti mostrano  source_ip  come  0.0.0.0  perché gli alert che stai vedendo sono    
+relativi a violazioni di Layer 2 (Data Link Layer), nello specifico allarmi di tipo ARP Spoofing
+( proto: ARP ). 
 
 
- Più nello specifico:                                                                                                                            
+Più nello specifico:                                                                                                                            
                                                                                                                                                   
-  1. Rete  frontend-net : In Docker Compose hai configurato la rete  frontend-net  che gestisce l'ingresso (traffico verso il proxy Envoy). Questa
+1. Rete  frontend-net : In Docker Compose hai configurato la rete  frontend-net  che gestisce l'ingresso (traffico verso il proxy Envoy). Questa
   rete ha la subnet  172.18.0.0/16 .                                                                                                              
-  2. Gateway: L'indirizzo  .1  di ogni rete bridge di Docker è l'interfaccia virtuale del tuo computer host (il tuo PC Windows).                  
-                                                                                                                                                  
-  Quindi, dal punto di vista dei container Docker (ad esempio Envoy, che su quella rete ha l'IP  172.18.0.2 ), l'IP  172.18.0.1  rappresenta il   
-  tuo computer fisico (l'host che avvia le richieste o che fa da router verso l'esterno).  
+2. Gateway: L'indirizzo  .1  di ogni rete bridge di Docker è l'interfaccia virtuale del tuo computer host (il tuo PC Windows).                  
+                                                                                                                                                
+Quindi, dal punto di vista dei container Docker (ad esempio Envoy, che su quella rete ha l'IP  172.18.0.2 ), l'IP  172.18.0.1  rappresenta il   
+tuo computer fisico (l'host che avvia le richieste o che fa da router verso l'esterno).  
 
 
 ATTUALE FLUSSO:
