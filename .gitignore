@@ -7,6 +7,10 @@ volumes/mongo/
 volumes/splunk
 *.key
 .DS_Store
+build/
+DerivedData/
 *.xcodeproj/project.xcworkspace/
 *.xcodeproj/xcuserdata/
 *.xcuserstate
+__pycache__/
+*.pyc
