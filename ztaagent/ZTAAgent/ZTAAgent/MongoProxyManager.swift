@@ -34,7 +34,7 @@ class MongoProxySession {
         listener = try NWListener(using: parameters, on: localPort)
         
         listener?.stateUpdateHandler = { state in
-            print("[*] Proxy Listener per \(self.cn) sulla porta \(self.port) stato: \(state)")
+            print("Proxy Listener for \(self.cn) on port \(self.port) state: \(state)")
         }
         
         listener?.newConnectionHandler = { [weak self] localConnection in
@@ -46,22 +46,22 @@ class MongoProxySession {
         }
         
         listener?.start(queue: .main)
-        print("[✓] Sessione proxy avviata per \(self.cn) sulla porta \(self.port)")
+        print("Proxy session started for \(self.cn) on port \(self.port)")
     }
     
     private func handleIncomingConnection(_ localConnection: NWConnection) {
         do {
-            print("[*] Nuova connessione locale sulla porta \(self.port) per \(self.cn)")
+            print("New local connection on port \(self.port) for \(self.cn)")
             let parameters = try buildTLSParameters(for: self.cn)
             
-            // Connessione ad Envoy su localhost:10000
+            // Connection to Envoy on localhost:10000
             let remoteEndpoint = NWEndpoint.hostPort(host: "localhost", port: 10000)
             let remoteConnection = NWConnection(to: remoteEndpoint, using: parameters)
             
             self.activeConnections.append(localConnection)
             self.activeConnections.append(remoteConnection)
             
-            // Avvia la connessione locale
+            // Start local connection
             localConnection.stateUpdateHandler = { state in
                 if case .cancelled = state {
                     remoteConnection.cancel()
@@ -69,15 +69,15 @@ class MongoProxySession {
             }
             localConnection.start(queue: .main)
             
-            // Avvia la connessione remota mTLS
+            // Start remote mTLS connection
             remoteConnection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    print("[✓] Tunnel mTLS Envoy pronto per \(self.cn)")
+                    print("Envoy mTLS tunnel ready for \(self.cn)")
                     self.pipe(from: localConnection, to: remoteConnection)
                     self.pipe(from: remoteConnection, to: localConnection)
                 case .failed(let error):
-                    print("[!] Connessione mTLS Envoy fallita: \(error)")
+                    print("Envoy mTLS connection failed: \(error)")
                     localConnection.cancel()
                 case .cancelled:
                     localConnection.cancel()
@@ -88,7 +88,7 @@ class MongoProxySession {
             remoteConnection.start(queue: .main)
             
         } catch {
-            print("[!] Impossibile configurare TLS per \(self.cn): \(error.localizedDescription)")
+            print("Unable to configure TLS for \(self.cn): \(error.localizedDescription)")
             localConnection.cancel()
         }
     }
@@ -102,7 +102,7 @@ class MongoProxySession {
                 if !errDesc.contains("No message available on STREAM") &&
                    !errDesc.contains("Operation canceled") &&
                    !errDesc.contains("Socket is not connected") {
-                    print("[!] Errore di ricezione nel tunnel: \(errDesc)")
+                    print("Tunnel receive error: \(errDesc)")
                 }
                 source.cancel()
                 destination.cancel()
@@ -115,7 +115,7 @@ class MongoProxySession {
                     if let sendError = sendError {
                         let errDesc = sendError.localizedDescription
                         if !errDesc.contains("Operation canceled") && !errDesc.contains("Socket is not connected") {
-                            print("[!] Errore di invio nel tunnel: \(errDesc)")
+                            print("Tunnel send error: \(errDesc)")
                         }
                         source.cancel()
                         destination.cancel()
@@ -137,7 +137,7 @@ class MongoProxySession {
             conn.cancel()
         }
         activeConnections.removeAll()
-        print("[✓] Sessione proxy fermata per \(self.cn) sulla porta \(self.port)")
+        print("Proxy session stopped for \(self.cn) on port \(self.port)")
     }
     
     private func findIdentity(cn: String) throws -> SecIdentity {
@@ -189,7 +189,7 @@ class MongoProxyManager {
             }
             PKIClient.shared.activeLAContext = context
         } else {
-            print("[*] Biometria non configurata o disponibile sul sistema. Procedo in bypass (contesto dev).")
+            print("Biometrics not configured or available on system. Proceeding with bypass (dev context).")
         }
         
         lock.lock()
@@ -225,7 +225,7 @@ class MongoProxyManager {
         
         if sessions.isEmpty {
             PKIClient.shared.activeLAContext = nil
-            print("[*] Nessuna sessione attiva, contesto biometrico rimosso.")
+            print("No active session, biometric context removed.")
         }
     }
     

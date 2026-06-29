@@ -45,7 +45,7 @@ class PKIClient: NSObject, URLSessionDelegate {
             "cpu_id": hwInfo["cpu"] ?? "unknown",
             "enrollment_session_token": enrollmentSessionToken
         ]
-print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(department), enrollment_session_token=(redacted)")
+        print("Payload Enrollment: user=\(cn), role=\(role), department=\(department), enrollment_session_token=(redacted)")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
         let (eData, eResp) = try await pkiSession.data(for: request)
@@ -64,7 +64,7 @@ print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(depart
     }
     
     func testAuthentication(cn: String) async throws -> String {
-        // Usiamo un URLSession con delegato per gestire mTLS
+        // Use URLSession with delegate for mTLS
         let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
         
         activeCNsLock.lock()
@@ -77,31 +77,31 @@ print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(depart
             activeCNsLock.unlock()
         }
         
-        // Puntiamo a una risorsa protetta dietro Envoy
-        // Aggiungiamo un timestamp per evitare cache
+        // Point to a resource protected by Envoy
+        // Add a timestamp to prevent caching
         let url = URL(string: "\(envoyUrl)/api/resource?t=\(Date().timeIntervalSince1970)")!
         
-        print("[*] Avvio richiesta mTLS a Envoy...")
+        print("Starting mTLS request to Envoy...")
         let (data, response) = try await session.data(from: url)
         let httpResponse = response as! HTTPURLResponse
         
         let responseBody = String(data: data, encoding: .utf8) ?? ""
-        print("[✓] Risposta da Envoy ricevuta correttamente!")
+        print("Response from Envoy successfully received!")
         return "Status: \(httpResponse.statusCode), Data: \(responseBody.replacingOccurrences(of: "\n", with: " "))"
     }
     
-    // GESTIONE mTLS e TRUST
+    // mTLS and TRUST MANAGEMENT
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         
-        // 1. Gestione Server Trust (Accettiamo il certificato di Envoy del lab)
+        // 1. Server Trust Management (Accept the lab's Envoy certificate)
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
-            print("[*] Challenge Server Trust ricevuta.")
+            print("Server Trust Challenge received.")
             
             if let serverTrust = challenge.protectionSpace.serverTrust {
                 if let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate] {
                     for (i, cert) in chain.enumerated() {
                         let subject = (SecCertificateCopySubjectSummary(cert) as String?) ?? "Unknown"
-                        print("[DEBUG] Server Cert \(i) Subject: \(subject)")
+                        print("Server Cert \(i) Subject: \(subject)")
                     }
                 }
             }
@@ -110,19 +110,24 @@ print("[DEBUG] Payload Enrollment: user=\(cn), role=\(role), department=\(depart
             return
         }
         
-        // 2. Gestione Client Certificate (mTLS)
+        // 2. Client Certificate Management (mTLS)
         if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodClientCertificate {
             activeCNsLock.lock()
-            let expectedCN = activeCNs[session] ?? "paolo.roselli"
+            guard let expectedCN = activeCNs[session] else {
+                activeCNsLock.unlock()
+                print("No active CN found for this session. mTLS failed.")
+                completionHandler(.performDefaultHandling, nil)
+                return
+            }
             activeCNsLock.unlock()
             
-            print("[*] Envoy ha richiesto il certificato client (mTLS). Cerco l'identità hardware per \(expectedCN)...")
+            print("Envoy requested client certificate (mTLS). Looking for hardware identity for \(expectedCN)...")
             
             if let identity = HardwareManager.shared.getIdentity(for: expectedCN, context: activeLAContext) {
-                print("[✓] Identità mTLS caricata con successo per \(expectedCN)!")
+                print("mTLS identity successfully loaded for \(expectedCN)!")
                 completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
             } else {
-                print("[!] Nessuna identità ZTA valida trovata per \(expectedCN).")
+                print("No valid ZTA identity found for \(expectedCN).")
                 completionHandler(.performDefaultHandling, nil)
             }
             return
