@@ -15,7 +15,6 @@ from ..auth import (
 from ..database import (
     prepare_combined_pem as _prepare_combined_pem,
 )
-from ..audit import send_audit_event_impl as _send_audit_event_impl
 from .utils import error_response
 
 # Load ZTA roles
@@ -111,9 +110,6 @@ def api_query():
             403
         )
 
-    def _send_audit_event(*args, **kwargs):
-        pass
-
     combined_pem_path = None
     if not local_proxy_port:
         try:
@@ -130,19 +126,6 @@ def api_query():
         role_config = ZTA_ROLES.get(role, {})
         allowed = role_config.get("allowed_collections", [])
         if collection_name not in allowed:
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type="authorization_denied",
-                message=f"Access denied (OPA/RBAC): Role '{role}' is not authorized to access collection '{collection_name}'.",
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
-            )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",
@@ -151,21 +134,7 @@ def api_query():
                 "translated_collection": view_name
             }), 403
 
-        # Action-level permission check
         if not _check_action_permissions(role, collection_name, mongo_action):
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type="authorization_denied",
-                message=f"Access denied (OPA/RBAC): Role '{role}' is not authorized to execute '{mongo_action}' on collection '{collection_name}'.",
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
-            )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",
@@ -290,19 +259,6 @@ def api_query():
             # Remove "Mongo HTTP Proxy error: " prefix for client blocks to keep UI clean and user-friendly
             display_msg = err_msg if err_type in {"waf_blocked", "policy_denied", "authorization_denied"} else f"Mongo HTTP Proxy error: {err_msg}"
             
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type=err_type,
-                message=display_msg,
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
-            )
             return jsonify({
                 "status": "error",
                 "error_type": err_type,
@@ -316,20 +272,6 @@ def api_query():
         results_json = res_data.get("results", [])
         message = res_data.get("message", "Success")
 
-        _send_audit_event(
-            user=user_cn,
-            role=role,
-            collection=collection_name,
-            action=mongo_action,
-            translated_view=target_collection,
-            query_filter=query_filter_str,
-            decision="ALLOW",
-            count=count,
-            message=message,
-            jwt_auth=bool(jwt_token),
-            hardware_mode=hardware_mode
-        )
-
         return jsonify({
             "status": "success",
             "role": role,
@@ -341,19 +283,6 @@ def api_query():
 
     except OperationFailure as e:
         err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
-        _send_audit_event(
-            user=user_cn,
-            role=role,
-            collection=collection_name,
-            action=mongo_action,
-            translated_view=view_name,
-            query_filter=query_filter_str,
-            decision="DENY",
-            error_type="authorization_denied",
-            message=f"OPA/RBAC Access Denied: {err_msg}",
-            jwt_auth=bool(jwt_token),
-            hardware_mode=hardware_mode
-        )
         return jsonify({
             "status": "error",
             "error_type": "authorization_denied",
