@@ -33,7 +33,8 @@ def index():
     
     roles = {k: {"label": v["display_name"]} for k, v in ZTA_ROLES.items()}
     
-    return render_template("index.html", ca=ca_info, roles=roles)
+    ZTA_AGENT_PORT = os.getenv("ZTA_AGENT_PORT", "9090")
+    return render_template("index.html", ca=ca_info, roles=roles, zta_agent_port=ZTA_AGENT_PORT)
 
 
 @admin_bp.get("/admin")

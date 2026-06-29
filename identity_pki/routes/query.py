@@ -66,14 +66,14 @@ def api_query():
 
     if not jwt_token:
         return error_response(
-            "Autenticazione OIDC obbligatoria. L'autenticazione legacy (SCRAM/Password) è disabilitata.",
+            "OIDC authentication mandatory. Legacy authentication (SCRAM/Password) is disabled.",
             401
         )
 
     try:
         query_filter = json.loads(query_filter_str) if query_filter_str else {}
     except json.JSONDecodeError as e:
-        return error_response(f"Filtro JSON non valido: {e}", 400)
+        return error_response(f"Invalid JSON filter: {e}", 400)
 
     # If a specific record_id is given, override the filter for single-doc operations
     if record_id and mongo_action in ("delete", "update"):
@@ -121,7 +121,7 @@ def api_query():
         try:
             combined_pem_path = _prepare_combined_pem(service, user_cn, cert_path, key_path, jwt_token)
         except Exception as e:
-            return error_response(f"Errore nella preparazione del PEM combinato: {e}", 500)
+            return error_response(f"Error preparing combined PEM: {e}", 500)
 
     # Resolve role and hardware_mode
     role, hardware_mode, device_info = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, current_app.logger)
@@ -262,26 +262,26 @@ def api_query():
                     block_reason = response.headers.get("x-zta-block-reason")
                     if block_reason and block_reason != "none":
                         if block_reason == "RISK_THRESHOLD_EXCEEDED":
-                            err_msg = "Accesso negato: il livello di rischio calcolato supera la soglia consentita."
+                            err_msg = "Access denied: the calculated risk level exceeds the permitted threshold."
                         elif block_reason == "STEP_UP_REQUIRED":
-                            err_msg = "Autenticazione secondaria (Step-up) richiesta. Effettua la verifica Touch ID / Windows Hello per procedere."
+                            err_msg = "Secondary (Step-up) authentication required. Please perform Touch ID / Windows Hello verification to proceed."
                         elif block_reason == "STEP_UP_STALE":
-                            err_msg = "Sessione biometrica scaduta. Si prega di rieffettuare la verifica sul dispositivo."
+                            err_msg = "Biometric session expired. Please re-authenticate on your device."
                         elif block_reason == "RBAC_DENIED":
-                            err_msg = f"Il tuo ruolo ({role}) non dispone dei permessi necessari per questa operazione."
+                            err_msg = f"Insufficient permissions. Role '{role}' does not have access to collection '{collection_name}' for operation '{mongo_action}'."
                         elif block_reason == "ROLE_SEGREGATION_DENIED":
-                            err_msg = "Violazione della separazione dei compiti (Segregation of Duties): l'accesso a questa risorsa è bloccato per motivi organizzativi."
+                            err_msg = "Segregation of Duties violation: Access to this resource is blocked for organizational reasons."
                         elif block_reason == "INSPECTION_VIOLATION":
                             if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
-                                err_msg = "I medici sono tenuti a specificare il filtro patient_id durante l'aggiornamento delle cartelle cliniche."
+                                err_msg = "Doctors are required to specify the patient_id filter when updating clinical records."
                             else:
-                                err_msg = "Richiesta non conforme: controlli di sicurezza L7 hanno bloccato la query."
+                                err_msg = "Non-compliant request: L7 security checks blocked the query."
                         elif block_reason == "OIDC_TOKEN_INVALID":
-                            err_msg = "Sessione di autenticazione non valida o scaduta. Effettua nuovamente il login hardware."
+                            err_msg = "Invalid or expired authentication session. Please perform hardware login again."
                         elif block_reason == "UNAUTHENTICATED":
-                            err_msg = "Utente non identificato o certificato non registrato."
+                            err_msg = "Unidentified user or unregistered certificate."
                         else:
-                            err_msg = f"Accesso negato: Decisione Zero Trust (Motivo: {block_reason})."
+                            err_msg = f"Access denied: Zero Trust Decision (Reason: {block_reason})."
                     else:
                         if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
                             err_msg = "OPA/RBAC Access Denied: Doctors are required to filter by patient_id when updating clinical records."

@@ -84,6 +84,8 @@ def provision_mongo_user(service: PKIService, logger: logging.Logger, username: 
 def build_mongo_client(user_cn: str, mongo_db_name: str, local_proxy_port: Optional[int], jwt_token: Optional[str], combined_pem_path: Optional[str], ca_path: str) -> MongoClient:
     MONGO_USER = os.getenv("MONGO_ROOT_USERNAME", "zta_user")
     MONGO_PASS = os.getenv("MONGO_ROOT_PASSWORD", "zta_password")
+    MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
+    ENVOY_PROXY_PORT = os.getenv("ENVOY_PROXY_PORT", "10000")
     
     if jwt_token:
         from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,7 +22,7 @@
         </header>
         
         <section class="panel">
-            <h2>Utenti e Certificati Attivi</h2>
+            <h2>Users and Active Certificates</h2>
             <div class="table-container">
                 <table id="certTable">
                     <thead>
@@ -33,11 +33,11 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td colspan="3" style="text-align: center; color: var(--muted); padding: 24px;">Caricamento identità...</td></tr>
+                        <tr><td colspan="3" style="text-align: center; color: var(--muted); padding: 24px;">Loading identities...</td></tr>
                     </tbody>
                 </table>
             </div>
-            <a href="/" class="ghost-link admin-back">← Torna alla Console</a>
+            <a href="/" class="ghost-link admin-back">← Back to Console</a>
         </section>
     </main>
 
@@ -49,7 +49,7 @@
                 const tbody = document.querySelector('#certTable tbody');
                 
                 if (!certs || certs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--muted); padding: 24px;">Nessun certificato attivo o revocato nel database.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--muted); padding: 24px;">No active or revoked certificates in the database.</td></tr>`;
                     return;
                 }
                 
@@ -70,7 +70,7 @@
         }
 
         async function revoke(user) {
-            if (!confirm(`Sei sicuro di voler REVOCARE l'identità hardware per l'utente ${user}?`)) return;
+            if (!confirm(`Are you sure you want to REVOKE the hardware identity for user ${user}?`)) return;
             try {
                 const resp = await fetch('/api/admin/revoke', {
                     method: 'POST',
@@ -81,10 +81,10 @@
                     loadCerts();
                 } else {
                     const data = await resp.json();
-                    alert(`Errore durante la revoca: ${data.error || 'Server error'}`);
+                    alert(`Revocation error: ${data.error || 'Server error'}`);
                 }
             } catch (err) {
-                alert(`Errore di connessione: ${err.message}`);
+                alert(`Connection error: ${err.message}`);
             }
         }
 

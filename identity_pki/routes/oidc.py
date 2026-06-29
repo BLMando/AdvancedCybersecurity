@@ -71,7 +71,7 @@ def api_oidc_token():
         return jsonify({
             "error": "primary_auth_required",
             "reason": "primary_session_required",
-            "message": "Autenticazione primaria scaduta o non trovata. Esegui il login AD + MFA."
+            "message": "Primary authentication expired or not found. Please login with AD + MFA."
         }), 401
         
     if step_up:
