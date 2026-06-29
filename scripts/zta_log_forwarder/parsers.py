@@ -18,17 +18,13 @@ NFT_LOG_PATTERN = re.compile(
 def extract_envoy_fields(log_entry: dict) -> dict:
     """Extract standard fields from Envoy access log JSON entries."""
     return {
+        "request_id": log_entry.get("request_id") or "unknown",
         "source_ip": log_entry.get("downstream_remote_address") or "unknown",
         "downstream_local": log_entry.get("downstream_local_address") or "unknown",
         "upstream_host": log_entry.get("upstream_host") or "unknown",
         "duration_ms": log_entry.get("duration") or "0",
         "bytes_sent": log_entry.get("bytes_sent") or "0",
         "bytes_received": log_entry.get("bytes_received") or "0",
-        "user": log_entry.get("user") or "unknown",
-        "device": log_entry.get("device") or "no-tpm",
-        "network_ip": log_entry.get("network_ip") or "0.0.0.0",
-        "decision": log_entry.get("decision") or "unknown",
-        "risk_score": log_entry.get("risk_score") or "0",
     }
 
 
@@ -118,3 +114,116 @@ def parse_nftables_line(line: str) -> dict | None:
             logger.warning("Error parsing counter line: %s, error: %s", line, e)
             
     return None
+
+
+def extract_opa_decision_fields(log_entry: dict) -> dict:
+    """Extract relevant fields from an OPA console decision log entry.
+
+    OPA decision log entries contain the full input, result and metadata
+    of each policy evaluation.  We flatten the most useful fields into a
+    Splunk-friendly dict.
+    """
+    result = log_entry.get("result", {}) or {}
+    inp = log_entry.get("input", {}) or {}
+    attrs = inp.get("attributes", {}) or {}
+    request = (attrs.get("request", {}) or {}).get("http", {}) or {}
+    source = attrs.get("source", {}) or {}
+    destination = attrs.get("destination", {}) or {}
+
+    # The result set by main.rego contains allowed, response_headers, etc.
+    # Handle package-level queries where the result has the whole package structure
+    allowed = result.get("allowed")
+    if allowed is None:
+        allowed = result.get("main", {}).get("allowed", False)
+
+    resp_headers = (
+        result.get("response_headers_to_add") or 
+        result.get("main", {}).get("response_headers_to_add") or 
+        result.get("response_headers") or 
+        {}
+    )
+
+    headers = request.get("headers", {}) or {}
+    request_id = headers.get("x-request-id") or headers.get("X-Request-ID") or "unknown"
+
+    # Extract cryptographic hardware CN from peer certificate principal
+    device_cn = source.get("principal") or "unknown"
+
+    # Extract query filter from incoming request body parsed by Envoy/OPA
+    import json
+    parsed_body = inp.get("parsed_body") or {}
+    query_filter = parsed_body.get("query") or parsed_body.get("filter") or {}
+    query_filter_str = json.dumps(query_filter)
+
+    # Extract human-readable username from incoming Flask header or fallback
+    user = (
+        headers.get("x-zta-user") or 
+        headers.get("X-ZTA-User") or 
+        resp_headers.get("x-zta-user") or 
+        parsed_body.get("user") or 
+        "unknown"
+    )
+
+    # Resolve fallbacks for other ZTA context fields
+    role = resp_headers.get("x-zta-role") or "unknown"
+    if role == "unknown" and user != "unknown":
+        user_role_map = {
+            "test.doctor": "doctor",
+            "test.auditor": "auditor",
+            "test.billing": "billing_staff",
+            "test.reception": "receptionist",
+            "test.receptionist": "receptionist",
+            "admin": "admin"
+        }
+        role = user_role_map.get(user, "unknown")
+    
+    command = (
+        resp_headers.get("x-zta-command") or 
+        resp_headers.get("x-zta-action") or 
+        parsed_body.get("command") or 
+        "unknown"
+    )
+    
+    collection = (
+        resp_headers.get("x-zta-collection") or 
+        parsed_body.get("collection") or 
+        "unknown"
+    )
+    
+    risk_score = (
+        resp_headers.get("x-zta-risk-score") or 
+        resp_headers.get("x-zta-eff-risk") or 
+        "0"
+    )
+    
+    device = (
+        resp_headers.get("x-zta-device") or 
+        parsed_body.get("device") or 
+        "unknown"
+    )
+    
+    block_reason = (
+        resp_headers.get("x-zta-block-reason") or 
+        "none"
+    )
+
+    return {
+        "request_id": request_id,
+        "decision_id": log_entry.get("decision_id", ""),
+        "timestamp": log_entry.get("timestamp", ""),
+        "decision": "ALLOW" if allowed else "DENY",
+        "user": user,
+        "device_cn": device_cn,
+        "filter": query_filter_str,
+        "role": role,
+        "command": command,
+        "collection": collection,
+        "risk_score": risk_score,
+        "device": device,
+        "block_reason": block_reason,
+        "source_address": (source.get("address", {}) or {}).get("socketAddress", {}).get("address", "unknown"),
+        "destination_port": (destination.get("address", {}) or {}).get("socketAddress", {}).get("portValue", 0),
+        "request_method": request.get("method", ""),
+        "request_path": request.get("path", ""),
+        "eval_ns": (log_entry.get("metrics", {}) or {}).get("timer_rego_query_eval_ns", 0),
+    }

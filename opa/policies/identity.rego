@@ -84,7 +84,7 @@ network_identity_str := ip if {
 } else := "0.0.0.0"
 
 is_internal_network if {
-	cidr_match := regex.match(`^(172\.20\.|172\.21\.|10\.)`, network_identity_str)
+	cidr_match := regex.match(`^(172\.19\.|172\.20\.|172\.21\.|10\.)`, network_identity_str)
 	cidr_match == true
 }
 
@@ -103,7 +103,7 @@ current_role := role if {
 } else := role if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	role := get_cert_title(cert)
@@ -125,25 +125,21 @@ get_cert_title(cert) := val if {
 }
 
 user_role_map := {
-	"mario.rossi":    "doctor",
-	"anna.verdi":     "billing_staff",
-	"giulia.bianchi": "auditor",
-	"luca.ferrari":   "receptionist",
-	"admin":          "admin",
-	"test.user":      "auditor",
-	"paolo.roselli":  "doctor",
-	"mattia.mando":   "doctor"
+	"test.doctor":    "doctor",
+	"test.auditor":   "auditor",
+	"test.billing":   "billing_staff",
+	"test.reception": "receptionist",
+	"test.receptionist": "receptionist",
+	"admin":          "admin"
 }
 
 known_users := {
-	"mario.rossi",
-	"anna.verdi",
-	"giulia.bianchi", 
-	"luca.ferrari",
-	"admin",
-	"test.user",
-	"paolo.roselli",
-	"mattia.mando"
+	"test.doctor",
+	"test.auditor",
+	"test.billing",
+	"test.reception",
+	"test.receptionist",
+	"admin"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {
@@ -154,7 +150,7 @@ cert_pem_decoded(raw_pem) := decoded if {
 cert_subject_cn := cn if {
 	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
 	cert_pem_raw != ""
-	cert_pem := urlquery.decode(cert_pem_raw)
+	cert_pem := cert_pem_decoded(cert_pem_raw)
 	certs := crypto.x509.parse_certificates(cert_pem)
 	cert := certs[0]
 	cn := get_cert_cn(cert)
@@ -250,13 +246,13 @@ verify_oidc_jwt(token) := claims if {
 	jwks_resp := http.send({
 		"method": "get",
 		"url": "https://identity-pki:8080/.well-known/jwks.json",
-		"tls_insecure_skip_verify": true,
+		"tls_ca_cert_file": "/etc/certs/ca/ca.crt",
+		"tls_server_name": "identity-pki",
 		"timeout": 1000000000
 	})
 	jwks_resp.status_code == 200
-	jwks := json.marshal(jwks_resp.body)
 	
-	io.jwt.verify_rs256(token, jwks)
+	io.jwt.verify_rs256(token, jwks_resp.body)
 	[_, claims, _] := io.jwt.decode(token)
 }
 
@@ -286,8 +282,9 @@ is_valid_token_binding(claims, cert_subject_cn) if {
 	# Direct client: CN matches sub, cert fingerprint matches cnf
 	cert_subject_cn == claims.sub
 	
-	cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem != ""
+	raw_cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	raw_cert_pem != ""
+	cert_pem := cert_pem_decoded(raw_cert_pem)
 	
 	cert_der := cert_der_bytes(cert_pem)
 	client_cert_hex := crypto.sha256(cert_der)
@@ -302,52 +299,7 @@ is_valid_token_binding(claims, cert_subject_cn) if {
 
 # ─── Request Attributes extraction ───────────────────────────────────────────
 
-# Estrazione dei metadati di MongoDB da envoy.filters.network.mongo_proxy
-extracted_mongo_ops contains info if {
-	mongo_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})["envoy.filters.network.mongo_proxy"]
-	some db_coll, op_details in mongo_meta
-	contains(db_coll, ".")
-	parts := split(db_coll, ".")
-	coll := parts[1]
-	some cmd_name, cmd_details in op_details
-	query := object.get(cmd_details, "query", object.get(cmd_details, "filter", {}))
-	info := {
-		"command": cmd_name,
-		"collection": coll,
-		"query": query
-	}
-}
-
-extracted_mongo_ops contains info if {
-	mongo_meta := object.get(object.get(object.get(input, "attributes", {}), "metadata_context", {}), "filter_metadata", {})["envoy.filters.network.mongo_proxy"]
-	req := mongo_meta.request
-	cmd := req.command
-	coll := req.collection
-	query := object.get(req, "query", object.get(req, "filter", {}))
-	info := {
-		"command": cmd,
-		"collection": coll,
-		"query": query
-	}
-}
-
-extracted_mongo_op := val if {
-	count(extracted_mongo_ops) > 0
-	val := any_val(extracted_mongo_ops)
-} else := {
-	"command": "unknown",
-	"collection": "unknown",
-	"query": {}
-}
-
-any_val(s) := v if {
-	v := s[_]
-}
-
 action_name := cmd if {
-	extracted_mongo_op.command != "unknown"
-	cmd := extracted_mongo_op.command
-} else := cmd if {
 	cmd := object.get(input.parsed_body, "command", "")
 	cmd != ""
 } else := "find" if {
@@ -377,9 +329,6 @@ action_name := cmd if {
 } else := "unknown"
 
 collection_name := coll if {
-	extracted_mongo_op.collection != "unknown"
-	coll := extracted_mongo_op.collection
-} else := coll if {
 	coll := object.get(input.parsed_body, "collection", "")
 	coll != ""
 } else := coll if {
@@ -415,9 +364,6 @@ query_raw := q if {
 } else := "{}"
 
 query_doc := parsed if {
-	extracted_mongo_op.command != "unknown"
-	parsed := extracted_mongo_op.query
-} else := parsed if {
 	json.is_valid(query_raw)
 	parsed := json.unmarshal(query_raw)
 } else := parsed if {
@@ -431,8 +377,26 @@ query_has_field(field) if {
 
 is_empty_query := count(object.keys(query_doc)) == 0
 
-is_http_request if {
+is_db_query if {
 	attrs := object.get(input, "attributes", {})
 	request := object.get(attrs, "request", {})
-	object.get(request, "http", "") != ""
+	http := object.get(request, "http", {})
+	path := object.get(http, "path", "")
+	path == "/query"
 }
+
+is_db_query if {
+	not is_non_db_http_request
+}
+
+is_non_db_http_request if {
+	attrs := object.get(input, "attributes", {})
+	request := object.get(attrs, "request", {})
+	http := object.get(request, "http", {})
+	path := object.get(http, "path", "")
+	path != ""
+	path != "/query"
+}
+ 
+
+

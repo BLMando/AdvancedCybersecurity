@@ -86,26 +86,22 @@ hard_deny if {
 # ─── Content Inspection (L7 WAF queries) ──────────────────────────────────────
 
 inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "clinical_records"
 	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
 }
 
-inspection_violation if {
-	not identity.is_http_request
-	identity.normalized_collection_name == "billing"
-	identity.query_has_field("$where")
-}
+inspection_violation if {                                         
+	identity.is_db_query
+	walk(identity.query_doc, [path, value])
+	some segment in path
+	is_string(segment)
+	segment in {"$where", "$function"}
+} 
 
 inspection_violation if {
-	not identity.is_http_request
-	identity.normalized_collection_name == "billing"
-	identity.query_has_field("$function")
-}
-
-inspection_violation if {
-	not identity.is_http_request
+	identity.is_db_query
 	identity.normalized_collection_name == "patients"
 	identity.current_role != "admin"
 	identity.action_name == "find"
@@ -123,8 +119,8 @@ permissions := {
 	"doctor": {
 		"patients":         {"find"},
 		"providers":        {"find"},
-		"admissions":       {"find", "insert", "update"},
-		"clinical_records": {"find", "insert", "update"},
+		"admissions":       {"find", "insert", "update", "delete"},
+		"clinical_records": {"find", "insert", "update", "delete"},
 		"billing":          {}
 	},
 	"billing_staff": {
@@ -132,7 +128,7 @@ permissions := {
 		"providers":        {"find"},
 		"admissions":       {"find"},
 		"clinical_records": {},
-		"billing":          {"find", "insert", "update"}
+		"billing":          {"find", "insert", "update", "delete"}
 	},
 	"auditor": {
 		"patients":         {"find"},
@@ -144,7 +140,7 @@ permissions := {
 	"receptionist": {
 		"patients":         {"find", "insert", "update"},
 		"providers":        {"find"},
-		"admissions":       {"find", "insert", "update"},
+		"admissions":       {"find", "insert", "update", "delete"},
 		"clinical_records": {},
 		"billing":          {}
 	},

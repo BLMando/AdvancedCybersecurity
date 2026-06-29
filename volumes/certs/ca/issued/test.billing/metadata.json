@@ -3,9 +3,9 @@
   "enrollment_method": "hardware_proof",
   "hardware": {
     "cpu": "AMD Ryzen 7 5700U with Radeon Graphics",
-    "mac": "00-15-5D-90-C4-E4"
+    "mac": "00-15-5D-43-3D-ED"
   },
   "role": "billing_staff",
-  "timestamp": "2026-06-24T16:47:47.197033+00:00",
+  "timestamp": "2026-06-27T07:37:10.155768+00:00",
   "user": "test.billing"
 }

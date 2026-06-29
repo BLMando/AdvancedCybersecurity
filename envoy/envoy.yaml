@@ -6,27 +6,6 @@ static_resources:
         socket_address:
           address: 0.0.0.0
           port_value: 10000
-      # Access log records every connection decision to a shared volume
-      # that the zta-log-forwarder reads and ships to Splunk.
-      access_log:
-        - name: envoy.access_loggers.file
-          typed_config:
-            "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
-            path: /var/log/envoy/access.log
-            log_format:
-              json_format:
-                timestamp: "%START_TIME%"
-                downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
-                downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
-                duration: "%DURATION%"
-                bytes_sent: "%BYTES_SENT%"
-                bytes_received: "%BYTES_RECEIVED%"
-                upstream_host: "%UPSTREAM_HOST%"
-                user: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-user)%"
-                device: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-device)%"
-                network_ip: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-network)%"
-                decision: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-decision)%"
-                risk_score: "%DYNAMIC_METADATA(envoy.filters.network.ext_authz:x-zta-risk-score)%"
       listener_filters:
         # Run before TLS termination so Envoy can inspect the ClientHello
         # and derive the JA3 fingerprint used as a device hint.
@@ -58,54 +37,193 @@ static_resources:
               # present a valid certificate.
               require_client_certificate: true
           filters:
-            # Mongo proxy inspects the MongoDB wire protocol so we can log the
-            # actual command and collection being accessed.
-            - name: envoy.filters.network.mongo_proxy
+            - name: envoy.filters.network.http_connection_manager
               typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.mongo_proxy.v3.MongoProxy
-                stat_prefix: mongo_stats
-                emit_dynamic_metadata: true
-
-            # Ask OPA for an allow/deny decision before forwarding traffic to
-            # MongoDB. This is the policy gate of the system.
-            - name: envoy.filters.network.ext_authz
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.ext_authz.v3.ExtAuthz #Ext Authz --> explicit authorization
-                stat_prefix: opa_authz
-                transport_api_version: V3
-                include_peer_certificate: true
-                metadata_context_namespaces:
-                  - envoy.filters.listener.tls_inspector
-                  - envoy.filters.network.mongo_proxy
-                grpc_service:
-                  envoy_grpc:
-                    cluster_name: opa_cluster
-                  timeout: 2s
-                failure_mode_allow: false
-                # Fail closed: if OPA is unavailable, the request is denied.
-
-            # If the request passes the checks, forward it to MongoDB.
-            - name: envoy.filters.network.tcp_proxy
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
-                stat_prefix: mongo_tcp
-                cluster: mongo_cluster
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                access_log:
+                  - name: envoy.access_loggers.file
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+                      path: /var/log/envoy/access.log
+                      log_format:
+                        json_format:
+                          timestamp: "%START_TIME%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+                          downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
+                          downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
+                          duration: "%DURATION%"
+                          bytes_sent: "%BYTES_SENT%"
+                          bytes_received: "%BYTES_RECEIVED%"
+                          upstream_host: "%UPSTREAM_HOST%"
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: local_service
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: mongo_proxy_cluster
+                http_filters:
+                  - name: envoy.filters.http.buffer
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                      max_request_bytes: 65536
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      stat_prefix: opa_authz
+                      transport_api_version: V3
+                      include_peer_certificate: true
+                      with_request_body:
+                        max_request_bytes: 8192
+                        pack_as_bytes: true
+                      metadata_context_namespaces:
+                        - envoy.filters.listener.tls_inspector
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: opa_cluster
+                        timeout: 2s
+                      failure_mode_allow: false
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      inline_code: |
+                        function envoy_on_request(request_handle)
+                          local body = request_handle:body()
+                          if body then
+                            local len = body:length()
+                            if len > 0 then
+                              local body_str = tostring(body:getBytes(0, len))
+                              local blocked_patterns = { "%$where", "%$function", "%$regex", "%$ne", "%$gt", "sleep%(", "while%(" }
+                              local is_blocked = false
+                              local matched_pattern = nil
+                              
+                              for _, pattern in ipairs(blocked_patterns) do
+                                if string.match(body_str, pattern) then
+                                  is_blocked = true
+                                  matched_pattern = pattern
+                                  break
+                                end
+                              end
+                              
+                              if is_blocked then
+                                local req_headers = request_handle:headers()
+                                local request_id = req_headers:get("x-request-id") or "unknown"
+                                local user = req_headers:get("x-zta-user") or "unknown"
+                                local role = req_headers:get("x-zta-role") or "unknown"
+                                local command = req_headers:get("x-zta-command") or "unknown"
+                                local collection = req_headers:get("x-zta-collection") or "unknown"
+                                local device = req_headers:get("x-zta-device") or "unknown"
+                                local risk_score = req_headers:get("x-zta-risk-score") or "0"
+                                  
+                                  local timestamp = "2026-06-27T15:48:08Z"
+                                  pcall(function()
+                                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                                  end)
+                                  local decision_id = "lua-waf-" .. request_id
+                                  
+                                  local block_reason = "WAF_GENERIC_INJECTION"
+                                  local block_message = "Bloccato da WAF L7: Rilevato pattern di query non autorizzato."
+                                  
+                                  if matched_pattern == "%$where" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$where' non consentito)."
+                                  elseif matched_pattern == "%$function" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$function' non consentito)."
+                                  elseif matched_pattern == "sleep%(" or matched_pattern == "while%(" then
+                                    block_reason = "WAF_DOS_INJECTION"
+                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di Denial of Service (pattern time-delay o ciclo infinito)."
+                                  elseif matched_pattern == "%$regex" or matched_pattern == "%$ne" or matched_pattern == "%$gt" then
+                                    block_reason = "WAF_NOSQL_INJECTION"
+                                    local operator_name = string.gsub(matched_pattern, "%%", "")
+                                    block_message = string.format("Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '%s' non consentito).", operator_name)
+                                  end
+                                  
+                                  local payload = string.format([[
+                                    {
+                                      "decision_id": "%s",
+                                      "timestamp": "%s",
+                                      "input": {
+                                        "attributes": {
+                                          "request": {
+                                            "http": {
+                                              "headers": {
+                                                "x-request-id": "%s",
+                                                "x-zta-user": "%s"
+                                              },
+                                              "method": "%s",
+                                              "path": "%s"
+                                            }
+                                          },
+                                          "source": {
+                                            "principal": "%s"
+                                          }
+                                        },
+                                        "parsed_body": {
+                                          "query": {}
+                                        }
+                                      },
+                                      "result": {
+                                        "allowed": false,
+                                        "response_headers_to_add": {
+                                          "x-zta-role": "%s",
+                                          "x-zta-command": "%s",
+                                          "x-zta-collection": "%s",
+                                          "x-zta-risk-score": "%s",
+                                          "x-zta-device": "%s",
+                                          "x-zta-block-reason": "%s"
+                                        }
+                                      }
+                                    }
+                                  ]], decision_id, timestamp, request_id, user, req_headers:get(":method") or "POST", req_headers:get(":path") or "/query", device, role, command, collection, risk_score, device, block_reason)
+                                  
+                                  local log_headers = {
+                                    [":method"] = "POST",
+                                    [":path"] = "/logs",
+                                    [":authority"] = "zta-log-forwarder:5000",
+                                    ["content-type"] = "application/json"
+                                  }
+                                  request_handle:httpCall("zta_log_forwarder_cluster", log_headers, payload, 1000)
+                                  
+                                  local response_headers = {
+                                    [":status"] = "403",
+                                    ["content-type"] = "application/json"
+                                  }
+                                  local response_body = string.format('{"status":"error","error_type":"waf_blocked","reason":"%s","message":"%s"}', block_reason, block_message)
+                                  request_handle:respond(response_headers, response_body)
+                                else
+                                  local command = string.match(body_str, '"command"%s*:%s*"([^"]+)"') or "unknown"
+                                  local collection = string.match(body_str, '"collection"%s*:%s*"([^"]+)"') or "unknown"
+                                  local meta = request_handle:streamInfo():dynamicMetadata()
+                                  meta:set("envoy.filters.http.lua", "command", command)
+                                  meta:set("envoy.filters.http.lua", "collection", collection)
+                                end
+                              end
+                            end
+                          end
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
 
   # ─── Clusters ──────────────────────────────────────
   clusters:
-    - name: mongo_cluster
+    - name: mongo_proxy_cluster
       connect_timeout: 2s
       type: STRICT_DNS
       load_assignment:
-        cluster_name: mongo_cluster
+        cluster_name: mongo_proxy_cluster
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: mongo
-                      port_value: 27017
+                      address: mongo-proxy
+                      port_value: 5001
       transport_socket:
         name: envoy.transport_sockets.tls
         typed_config:
@@ -137,6 +255,19 @@ static_resources:
                     socket_address:
                       address: opa
                       port_value: 9002
+
+    - name: zta_log_forwarder_cluster
+      connect_timeout: 0.5s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: zta_log_forwarder_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: zta-log-forwarder
+                      port_value: 5000
 
 admin:
   access_log:

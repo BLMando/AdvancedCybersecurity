@@ -11,10 +11,10 @@ if sys.platform == 'win32':
 OPA_URL = "http://127.0.0.1:8181/v1/data/envoy/authz"
 
 ROLE_TO_USER = {
-    "doctor": "mario.rossi",
-    "billing_staff": "anna.verdi",
-    "auditor": "giulia.bianchi",
-    "receptionist": "luca.ferrari",
+    "doctor": "test.doctor",
+    "billing_staff": "test.billing",
+    "auditor": "test.auditor",
+    "receptionist": "test.receptionist",
     "admin": "admin"
 }
 
@@ -35,8 +35,8 @@ PERMISSIONS = {
     "doctor": {
         "patients": {"find"},
         "providers": {"find"},
-        "admissions": {"find", "insert", "update"},
-        "clinical_records": {"find", "insert", "update"},
+        "admissions": {"find", "insert", "update", "delete"},
+        "clinical_records": {"find", "insert", "update", "delete"},
         "billing": set()
     },
     "billing_staff": {
@@ -44,7 +44,7 @@ PERMISSIONS = {
         "providers": {"find"},
         "admissions": {"find"},
         "clinical_records": set(),
-        "billing": {"find", "insert", "update"}
+        "billing": {"find", "insert", "update", "delete"}
     },
     "auditor": {
         "patients": {"find"},
@@ -56,7 +56,7 @@ PERMISSIONS = {
     "receptionist": {
         "patients": {"find", "insert", "update"},
         "providers": {"find"},
-        "admissions": {"find", "insert", "update"},
+        "admissions": {"find", "insert", "update", "delete"},
         "clinical_records": set(),
         "billing": set()
     }
@@ -65,8 +65,13 @@ PERMISSIONS = {
 def calculate_expected_allowed(user, collection, command, device="device-laptop-001", network_ip="172.20.0.5"):
     # Replicates the OPA policy logic:
     # 1. Resolve role
-    role = ROLE_TO_USER.get(user)
+    USER_TO_ROLE = {v: k for k, v in ROLE_TO_USER.items()}
+    role = USER_TO_ROLE.get(user)
     if not role or role not in PERMISSIONS:
+        return False
+        
+    # Actions update and delete are sensitive and require step-up (not simulated here)
+    if command in ("update", "delete"):
         return False
         
     # 2. RBAC check (role_action_allowed)

@@ -14,6 +14,7 @@ from parsers import (
     extract_snort_fields,
     extract_mongo_fields,
     parse_nftables_line,
+    extract_opa_decision_fields,
 )
 from risk import calculate_risk_boost
 from splunk_search import run_splunk_search, SPLUNK_PASSWORD
@@ -29,6 +30,78 @@ hec_envoy = HEClient(
     token=os.environ.get("SPLUNK_HEC_TOKEN_ENVOY", ""),
     batch_size=int(os.environ.get("HEC_BATCH_SIZE", "100")),
 )
+
+
+class LogCorrelator:
+    """Correlates and merges OPA ALLOW logs with subsequent Lua WAF DENY logs in memory
+
+    to ensure Splunk indexes a single consistent decision event per request.
+    """
+    def __init__(self, hec_client):
+        self.hec_client = hec_client
+        self.opa_logs = {}      # request_id -> fields
+        self.waf_logs = {}      # request_id -> fields
+        self.lock = threading.Lock()
+
+    def add_log(self, fields):
+        req_id = fields.get("request_id", "unknown")
+        dec_id = fields.get("decision_id", "")
+        
+        if req_id == "unknown":
+            self.hec_client.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+            self.hec_client.flush()
+            return
+
+        is_lua = dec_id.startswith("lua-waf-")
+
+        with self.lock:
+            if is_lua:
+                if req_id in self.opa_logs:
+                    # OPA log is pending! Merge them and flush immediately
+                    opa_fields = self.opa_logs.pop(req_id)
+                    opa_fields["decision"] = "DENY"
+                    opa_fields["block_reason"] = fields.get("block_reason", "WAF_BLOCKED")
+                    self.hec_client.send_event(opa_fields, index="zta_envoy", sourcetype="opa:decision")
+                    self.hec_client.flush()
+                else:
+                    # OPA log has not arrived yet, keep the WAF log
+                    self.waf_logs[req_id] = fields
+                    threading.Timer(5.0, self._flush_waf_fallback, args=[req_id]).start()
+            else:
+                if req_id in self.waf_logs:
+                    # WAF log already arrived! Merge them and flush immediately
+                    waf_fields = self.waf_logs.pop(req_id)
+                    fields["decision"] = "DENY"
+                    fields["block_reason"] = waf_fields.get("block_reason", "WAF_BLOCKED")
+                    self.hec_client.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+                    self.hec_client.flush()
+                else:
+                    # OPA log arrived first
+                    if fields.get("decision") == "ALLOW":
+                        # Buffer ALLOW decisions briefly to see if a WAF block comes
+                        self.opa_logs[req_id] = fields
+                        threading.Timer(1.5, self._flush_opa_fallback, args=[req_id]).start()
+                    else:
+                        # DENY decisions are sent immediately
+                        self.hec_client.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+                        self.hec_client.flush()
+
+    def _flush_opa_fallback(self, req_id):
+        with self.lock:
+            if req_id in self.opa_logs:
+                fields = self.opa_logs.pop(req_id)
+                self.hec_client.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+                self.hec_client.flush()
+
+    def _flush_waf_fallback(self, req_id):
+        with self.lock:
+            if req_id in self.waf_logs:
+                fields = self.waf_logs.pop(req_id)
+                self.hec_client.send_event(fields, index="zta_envoy", sourcetype="opa:decision")
+                self.hec_client.flush()
+
+
+log_correlator = LogCorrelator(hec_envoy)
 
 ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
 SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
@@ -69,8 +142,8 @@ def handle_stats_query():
         f'| eval eta_min = (now() - _time) / 60 '
         f'| eval peso = if(index="zta_envoy", 1.0, exp(-0.231 * eta_min)) '
         f'| eval type=case('
-        f'  index="zta_envoy" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
-        f'  index="zta_envoy" AND sourcetype="envoy:access" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
+        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
+        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
         f'  index="zta_snort", "snort_alerts",'
         f'  index="zta_nftables", "nftables_drops",'
         f'  index="zta_mongodb_audit", "mongo_failures"'
@@ -108,7 +181,7 @@ def handle_stats_query():
     current_count = 0.0
 
     baseline_query = (
-        f'search index=zta_envoy user="{esc(user)}" earliest=-7d '
+        f'search index=zta_envoy sourcetype="opa:decision" user="{esc(user)}" earliest=-7d '
         f'| eval is_current = if(_time >= now() - 900, 1, 0) '
         f'| bucket _time span=15m '
         f'| stats count as query_count by _time, is_current '
@@ -263,6 +336,34 @@ def tail_mongo_audit_logs(stop_event: threading.Event) -> None:
     )
 
 
+@app.route("/logs", methods=["POST"])
+@app.route("/v1/logs", methods=["POST"])
+def handle_opa_logs():
+    """Receive HTTP decision logs pushed by OPA, decompress if gzipped, and forward to Splunk."""
+    import gzip
+    try:
+        content_encoding = request.headers.get("Content-Encoding", "").lower()
+        if "gzip" in content_encoding:
+            data = gzip.decompress(request.data)
+        else:
+            data = request.data
+            
+        logs = json.loads(data)
+        if not isinstance(logs, list):
+            logs = [logs]
+            
+        for log_entry in logs:
+            if "decision_id" not in log_entry:
+                continue
+            fields = extract_opa_decision_fields(log_entry)
+            log_correlator.add_log(fields)
+            
+        return "", 200
+    except Exception as e:
+        logger.error("Error processing OPA decision logs: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -282,44 +383,7 @@ def handle_envoy_log():
     return jsonify({"status": "queued"}), 202
 
 
-@app.route("/api/audit", methods=["POST"])
-def handle_app_audit():
-    """Receive application-level audit events from Flask and forward to Splunk.
 
-    Unlike Envoy access logs (which only capture connection-level metadata),
-    this endpoint receives the *actual* query details (collection, command,
-    filter, result) from the Flask application layer after each /api/query
-    execution.  Events are indexed separately as sourcetype 'zta:app:query'
-    so Splunk dashboards can correlate them with Envoy connection logs.
-    """
-    try:
-        body = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "invalid json"}), 400
-
-    event = {
-        "timestamp": body.get("timestamp", ""),
-        "user": body.get("user", "unknown"),
-        "role": body.get("role", "unknown"),
-        "resource": body.get("resource", "unknown"),
-        "command": body.get("command", "unknown"),
-        "translated_view": body.get("translated_view", "unknown"),
-        "filter": body.get("filter", "{}"),
-        "decision": body.get("decision", "unknown"),
-        "count": body.get("count", 0),
-        "error_type": body.get("error_type", ""),
-        "message": body.get("message", ""),
-        "jwt_auth": body.get("jwt_auth", False),
-        "hardware_mode": body.get("hardware_mode", False),
-    }
-
-    hec_envoy.send_event(event, index="zta_envoy", sourcetype="zta:app:query")
-    logger.info(
-        "App audit: user=%s role=%s cmd=%s resource=%s decision=%s",
-        event["user"], event["role"], event["command"],
-        event["resource"], event["decision"],
-    )
-    return jsonify({"status": "queued"}), 202
 
 
 _stop_event = threading.Event()

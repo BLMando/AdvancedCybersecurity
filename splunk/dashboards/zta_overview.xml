@@ -1,314 +1,222 @@
-<dashboard version="1.1">
-  <label>ZTA - Zero Trust Architecture Overview</label>
-  <description>Real-time monitoring of Envoy access logs, Snort IDS alerts, and nftables firewall activity (indexes: zta_envoy, zta_snort, zta_nftables)</description>
+<form version="1.1">
+  <label>ZTA - Centro di comando per la sicurezza</label>
+  <description>Dashboard di monitoraggio delle minacce, analisi del comportamento utente (UBA) per l'Architettura Zero Trust</description>
+  
   <fieldset submitButton="true">
     <input type="time" token="timerange">
-      <label>Time Range</label>
+      <label>Intervallo Temporale</label>
       <default>
         <earliest>-24h</earliest>
         <latest>now</latest>
       </default>
     </input>
   </fieldset>
-
+  
   <row>
     <panel>
-      <title>Decisioni in Tempo Reale (allow/deny)</title>
+      <html>
+        <h2 style="color:#1a73e8;border-bottom:1px solid #1a73e8;padding-bottom:5px;margin-top:0;">1. Postura Zero Trust &amp; Controllo degli Accessi</h2>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Rapporto Decisioni (ALLOW vs. DENY)</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | timechart span=1m count by decision
+          <query>index=zta_envoy sourcetype="opa:decision"
+            | timechart span=10m count by decision
             | sort _time</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.fieldColors">{"ALLOW": 0x137333, "DENY": 0xc5221f}</option>
+        <option name="charting.axisTitleX.text">Tempo</option>
+        <option name="charting.axisTitleY.text">Transazioni</option>
       </chart>
     </panel>
     <panel>
-      <title>Stato Decisioni (ultimi 5 min)</title>
+      <title>Metodi di Autenticazione Dispositivo (TPM vs. Software)</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | stats count by decision</query>
-          <earliest>-5m</earliest>
-          <latest>now</latest>
+          <query>index=zta_envoy sourcetype="opa:decision"
+            | eval device_type = if(device="no-tpm" OR device="unknown", "Certificato Software (No TPM / Alto Rischio)", "Vincolato all'Hardware (TPM / Basso Rischio)")
+            | stats count by device_type</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
         </search>
         <option name="charting.chart">pie</option>
-      </chart>
-    </panel>
-  </row>
-
-  <row>
-    <panel>
-      <title>Distribuzione Risk Score</title>
-      <chart>
-        <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | eval risk_num = tonumber(risk_score)
-            | eval risk_bucket = case(
-                risk_num &lt;= 15, "0-15 (Low)",
-                risk_num &lt;= 30, "16-30 (Medium)",
-                risk_num &lt;= 45, "31-45 (High)",
-                1=1, "46+ (Critical)"
-              )
-            | stats count by risk_bucket</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">bar</option>
+        <option name="charting.fieldColors">{"Vincolato all'Hardware (TPM / Basso Rischio)": 0x137333, "Certificato Software (No TPM / Alto Rischio)": 0xe67c73}</option>
       </chart>
     </panel>
     <panel>
-      <title>Risk Score Medio per Utente</title>
+      <title>Distribuzione delle Categorie di Blocco</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | eval risk_num = tonumber(risk_score)
-            | stats avg(risk_num) as avg_risk by user
-            | sort -avg_risk
-            | head 10</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">horizontal_bar</option>
-      </chart>
-    </panel>
-  </row>
-
-  <row>
-    <panel>
-      <title>Top Utenti Bloccati</title>
-      <chart>
-        <search>
-          <query>index=zta_envoy sourcetype="envoy:access" decision="DENY"
-            | top limit=10 user
-            | table user count percent</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">bar</option>
-      </chart>
-    </panel>
-    <panel>
-      <title>Top Motivi di Blocco</title>
-      <chart>
-        <search>
-          <query><![CDATA[index=zta_envoy sourcetype="envoy:access" decision="DENY"
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision" decision="DENY"
             | eval reason = case(
-                match(user, "urn:device:"), "Certificato Non Registrato",
-                device == "no-tpm", "Dispositivo Non Sotto Controllo (No TPM)",
-                risk_score > 15, "Risk Score Superiore alla Soglia",
-                1=1, "Violazione Policy Accesso"
+                block_reason == "OIDC_TOKEN_INVALID", "Token OIDC Invalido o Scaduto",
+                block_reason == "RISK_THRESHOLD_EXCEEDED", "Soglia Rischio Adattiva Superata",
+                block_reason == "INVALID_ACTION", "Azione DB Non Valida",
+                block_reason == "RBAC_DENIED", "RBAC Negato",
+                block_reason == "STEP_UP_REQUIRED", "Biometria Step-Up Richiesta",
+                block_reason == "STEP_UP_STALE", "Biometria Scaduta",
+                block_reason == "UNAUTHENTICATED", "Utente Non Autenticato",
+                block_reason == "ROLE_SEGREGATION_DENIED", "Violazione Separazione Compiti",
+                block_reason == "INSPECTION_VIOLATION", "Violazione Content WAF L7",
+                block_reason == "WAF_BLOCKED", "Bloccato da WAF Envoy (Lua)",
+                1=1, coalesce(block_reason, "Politica Generica")
               )
-            | top limit=10 reason
-            | table reason count percent]]></query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">bar</option>
-      </chart>
-    </panel>
-  </row>
-
-  <row>
-    <panel>
-      <title>Collection Access Heatmap (Utente x Collection)</title>
-      <chart>
-        <search>
-          <query><![CDATA[index=zta_mongodb (component=COMMAND OR component=ACCESS)
-            | spath
-            | eval ctx = mvindex(context, 0)
-            | eval temp_user = replace(mvindex('attributes.user', 0), "oidc/", "")
-            | sort 0 timestamp
-            | streamstats current=t last(temp_user) as user_by_ctx by ctx
-            | eval final_user = coalesce(user_by_ctx, temp_user)
-            | where component="COMMAND" AND mvindex('attributes.isFromUserConnection', 0)="true" AND isnotnull(final_user) AND final_user != "" AND final_user != "unknown"
-            | eval ns = mvindex('attributes.ns', 0)
-            | eval resource=mvindex(split(ns, "."), 1)
-            | where resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views"
-            | rename final_user as user
-            | stats count by user, resource
-            | sort -count
-            | head 50]]></query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">heatmap</option>
-      </chart>
-    </panel>
-  </row>
-
-  <row>
-    <panel>
-      <title>Distribuzione Comandi MongoDB</title>
-      <chart>
-        <search>
-          <query><![CDATA[index=zta_mongodb component="COMMAND"
-            | spath
-            | where mvindex('attributes.isFromUserConnection', 0)="true"
-            | eval ns = mvindex('attributes.ns', 0)
-            | eval resource=mvindex(split(ns, "."), 1)
-            | where resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views"
-            | eval command=case(
-                isnotnull(mvindex('attributes.command.find', 0)), "find",
-                isnotnull(mvindex('attributes.command.insert', 0)), "insert",
-                isnotnull(mvindex('attributes.command.update', 0)), "update",
-                isnotnull(mvindex('attributes.command.delete', 0)), "delete",
-                isnotnull(mvindex('attributes.command.aggregate', 0)), "aggregate",
-                isnotnull(mvindex('attributes.command.count', 0)), "count",
-                isnotnull(mvindex('attributes.command.drop', 0)), "drop",
-                1=1, "unknown"
-              )
-            | stats count by command
-            | sort -count]]></query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
+            | stats count by reason]]>
+          </query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
         </search>
         <option name="charting.chart">pie</option>
       </chart>
     </panel>
+  </row>
+  <row>
     <panel>
-      <title>Decisioni per Device Type</title>
+      <html>
+        <h2 style="color:#c5221f;border-bottom:1px solid #c5221f;padding-bottom:5px;margin-top:10px;">2. Threat Hunting &amp; Indicatori di Compromissione (IoC)</h2>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Allarmi NIDS Snort: PEP vs. Risorsa</title>
       <chart>
         <search>
-          <query>index=zta_envoy sourcetype="envoy:access"
-            | eval device_type = if(device="no-tpm", "No TPM (Software)", "Hardware-Bound")
-            | stats count by device_type decision
-            | table device_type decision count</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
+          <query>index=zta_snort sourcetype="snort:alert_json"
+            | eval sensor_type = if(sensor=="pep", "PEP", "Risorsa")
+            | stats count by sensor_type, msg</query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
         </search>
         <option name="charting.chart">column</option>
         <option name="charting.chart.stackMode">stacked</option>
       </chart>
     </panel>
-  </row>
-
-  <row>
     <panel>
-      <title>Eventi Recenti</title>
+      <title>Attività di Ricognizione (Scansione Rete nftables)</title>
       <table>
         <search>
-          <query><![CDATA[(index=zta_mongodb (component=COMMAND OR component=ACCESS)) OR (index=zta_envoy sourcetype="envoy:access")
-            | spath
-            | eval ctx = mvindex(context, 0)
-            | eval temp_user = if(index="zta_envoy", mvindex(user, 0), replace(mvindex('attributes.user', 0), "oidc/", ""))
-            | sort 0 _time timestamp
-            | streamstats current=t last(temp_user) as user_by_ctx by ctx
-            | eval final_user = coalesce(user_by_ctx, temp_user)
-            | eval event_type = if(index="zta_envoy", "envoy", "mongo")
-            | sort 0 -_time event_type
-            | streamstats current=t last(device) as device, last(network_ip) as network_ip, last(risk_score) as risk_score, last(decision) as decision by final_user
-            | sort 0 -_time
-            | where (index="zta_mongodb" AND component="COMMAND" AND mvindex('attributes.isFromUserConnection', 0)="true") OR (index="zta_envoy" AND decision="DENY")
-            | eval ns = mvindex('attributes.ns', 0)
-            | eval resource = if(index="zta_envoy", "N/A", mvindex(split(ns, "."), 1))
-            | eval command = case(
-                index="zta_envoy", "N/A",
-                isnotnull(mvindex('attributes.command.find', 0)), "find",
-                isnotnull(mvindex('attributes.command.insert', 0)), "insert",
-                isnotnull(mvindex('attributes.command.update', 0)), "update",
-                isnotnull(mvindex('attributes.command.delete', 0)), "delete",
-                isnotnull(mvindex('attributes.command.aggregate', 0)), "aggregate",
-                isnotnull(mvindex('attributes.command.count', 0)), "count",
-                isnotnull(mvindex('attributes.command.drop', 0)), "drop",
-                1=1, "unknown"
-              )
-            | where isnotnull(final_user) AND final_user != "" AND final_user != "unknown"
-            | where index="zta_envoy" OR (resource != "$$cmd" AND resource != "admin.$$cmd" AND resource != "config.$$cmd" AND resource != "system" AND resource != "system.views")
-            | rename final_user as user
-            | table _time user resource command decision risk_score device network_ip
-            | head 25]]></query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
+          <query>
+            <![CDATA[index=zta_nftables sourcetype="nftables:log" action="DROP"
+            | bin _time span=1m
+            | stats count as drops by src_ip, _time
+            | where drops > 15
+            | stats sum(drops) as total_drops, count(eval(drops > 15)) as active_scanning_minutes by src_ip
+            | rename src_ip as "IP Attaccante", total_drops as "Pacchetti Droppati", active_scanning_minutes as "Minuti di Scansione Rilevati"
+            | sort - "Pacchetti Droppati"]]>
+          </query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Tentativi Brute Force / Accessi Falliti su MongoDB</title>
+      <table>
+        <search>
+          <query><![CDATA[index=zta_mongodb_audit sourcetype="mongodb:audit" result!=0 (atype="authenticate" OR "auth")
+            | stats count as fallimenti, values(users{}.user) as utenti_tentati, values(param.user) as utenti_param by ip
+            | eval utenti = coalesce(utenti_tentati, utenti_param)
+            | where fallimenti >= 3
+            | rename ip as "IP Sorgente", fallimenti as "Tentativi Falliti", utenti as "Username Tentati"
+            | sort - "Tentativi Falliti"]]></query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
         </search>
         <option name="wrap">false</option>
         <option name="rowNumbers">true</option>
       </table>
     </panel>
   </row>
-
-  <!-- ═══ SNORT IDS ALERTS ═══ -->
   <row>
     <panel>
-      <title>Snort IDS — Alert Timeline</title>
-      <chart>
-        <search>
-          <query>index=zta_snort sourcetype="snort:alert_json"
-            | timechart span=5m count by msg</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">column</option>
-        <option name="charting.chart.stackMode">stacked</option>
-      </chart>
-    </panel>
-    <panel>
-      <title>Snort IDS — Top Alerts</title>
-      <chart>
-        <search>
-          <query>index=zta_snort sourcetype="snort:alert_json"
-            | top limit=10 msg
-            | table msg count percent</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">pie</option>
-      </chart>
+      <html>
+        <h2 style="color:#f9ab00;border-bottom:1px solid #f9ab00;padding-bottom:5px;margin-top:10px;">3. Analisi Comportamentale Utenti ed Entità (UEBA) &amp; Rischio Dinamico</h2>
+      </html>
     </panel>
   </row>
-
-  <!-- ═══ NFTABLES FIREWALL ═══ -->
   <row>
     <panel>
-      <title>Firewall — Attività per Azione</title>
-      <chart>
-        <search>
-          <query>index=zta_nftables sourcetype="nftables:log"
-            | timechart span=5m count by action</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">column</option>
-        <option name="charting.chart.stackMode">stacked</option>
-      </chart>
-    </panel>
-    <panel>
-      <title>Firewall — Top IP Bloccati</title>
-      <chart>
-        <search>
-          <query>index=zta_nftables sourcetype="nftables:log" action="DROP"
-            | top limit=10 src_ip
-            | table src_ip count percent</query>
-          <earliest>-24h</earliest>
-          <latest>now</latest>
-        </search>
-        <option name="charting.chart">bar</option>
-      </chart>
-    </panel>
-  </row>
-
-  <!-- ═══ CORRELAZIONE CROSS-INDEX ═══ -->
-  <row>
-    <panel>
-      <title>Correlazione Snort Alert + OPA Deny (stesso IP)</title>
+      <title>UBA: Rilevamento Anomalie (Z-Score &gt; 2.0)</title>
       <table>
         <search>
-          <query>index=zta_snort OR index=zta_envoy
-            | eval src=coalesce(src_addr, source_ip)
-            | eval event_type=if(index="zta_snort", "SNORT: ".msg, "OPA: ".decision)
-            | where index="zta_snort" OR decision="DENY"
-            | stats count by src event_type
-            | sort -count
-            | head 20</query>
-          <earliest>-24h</earliest>
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
+            | bucket _time span=15m
+            | stats count as query_count by user, _time
+            | eventstats avg(query_count) as media, stdev(query_count) as dev_std by user
+            | where _time >= now() - 1800
+            | eval z_score = if(dev_std > 0, (query_count - media) / dev_std, 0)
+            | where z_score > 2.0
+            | eval z_score = round(z_score, 2), media = round(media, 1), dev_std = round(dev_std, 1)
+            | rename user as "Utente", query_count as "Query Correnti (15m)", media as "Media Storica", dev_std as "Deviazione Standard", z_score as "Z-Score (Anomalia)"
+            | table "Utente" "Query Correnti (15m)" "Media Storica" "Deviazione Standard" "Z-Score (Anomalia)"
+            | sort - "Z-Score (Anomalia)"]]>
+          </query>
+          <earliest>-7d</earliest>
           <latest>now</latest>
         </search>
         <option name="wrap">false</option>
         <option name="rowNumbers">true</option>
       </table>
     </panel>
+    <panel>
+      <title>Top entità ad alto rischio</title>
+      <table>
+        <search>
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
+            | eval risk_num = tonumber(risk_score)
+            | stats max(risk_num) as max_risk, avg(risk_num) as avg_risk, count(eval(decision="DENY")) as total_denies, values(device) as devices by user, source_address
+            | eval avg_risk = round(avg_risk, 1)
+            | rename user as "Utente", source_address as "IP Chiamante", max_risk as "Risk Score Max", avg_risk as "Risk Score Medio", total_denies as "Totale Dinieghi", devices as "Dispositivo"
+            | sort - "Risk Score Max"
+            | head 15]]>
+          </query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+      </table>
+    </panel>
   </row>
-</dashboard>
+  <row>
+    <panel>
+      <html>
+        <h2 style="color:#5f6368;border-bottom:1px solid #5f6368;padding-bottom:5px;margin-top:10px;">5. Giornale delle Transazioni (Audit Log Completo)</h2>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Ultimi 50 Eventi di Controllo Accessi</title>
+      <table>
+        <search>
+          <query>
+            <![CDATA[index=zta_envoy sourcetype="opa:decision"
+            | eval device_type = if(device="no-tpm" OR device="unknown", "Software", "Hardware TPM")
+            | table _time user role collection command decision risk_score device_type source_address block_reason
+            | rename _time as "Data/Ora", user as "Utente", role as "Ruolo", collection as "Collezione", command as "Azione", decision as "Decisione", risk_score as "Rischio", device_type as "Sicurezza HW", source_address as "IP Client", block_reason as "Motivo Blocco"
+            | head 50]]>
+          </query>
+          <earliest>$timerange.earliest$</earliest>
+          <latest>$timerange.latest$</latest>
+        </search>
+        <option name="wrap">false</option>
+        <option name="rowNumbers">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

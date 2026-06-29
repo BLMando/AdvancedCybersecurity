@@ -6,14 +6,14 @@ ZTA_ROLES = {
         "display_name": "Medico",
         "mongo_role": "zta_doctor",
         "default_department": "Cardiologia",
-        "allowed_collections": ["patients", "admissions", "clinical_records"],
+        "allowed_collections": ["patients", "providers", "admissions", "clinical_records"],
         "description": "Accesso a dati clinici e cartelle pazienti"
     },
     "billing_staff": {
         "display_name": "Personale Amministrativo",
         "mongo_role": "zta_billing",
         "default_department": "Amministrazione",
-        "allowed_collections": ["patients", "admissions", "billing"],
+        "allowed_collections": ["patients", "providers", "admissions", "billing"],
         "description": "Accesso ai dati di fatturazione"
     },
     "auditor": {
