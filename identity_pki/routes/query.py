@@ -13,8 +13,6 @@ from ..auth import (
     resolve_user_metadata as _resolve_user_metadata,
 )
 from ..database import (
-    build_mongo_client as _build_mongo_client,
-    execute_mongo_operation as _execute_mongo_operation,
     prepare_combined_pem as _prepare_combined_pem,
 )
 from ..audit import send_audit_event_impl as _send_audit_event_impl
@@ -56,13 +54,13 @@ def api_query():
     patient_id = payload.get("patient_id")        # patient_id to satisfy OPA WAF checks
 
     if not user_cn or not collection_name:
-        return error_response("Il CN dell'utente e il nome della collezione sono obbligatori.", 400)
+        return error_response("User CN and collection name are mandatory.", 400)
 
     service = current_app.config["pki_service"]
 
     # Check if user is revoked
     if os.path.exists(os.path.join(service.revoked_dir, f"{user_cn}.rev")):
-        return error_response("Identità revocata o sospesa dall'amministratore.", 401)
+        return error_response("Identity revoked or suspended by administrator.", 401)
 
     if not jwt_token:
         return error_response(
@@ -101,15 +99,15 @@ def api_query():
         key_path = os.path.join(service.cert_dir, "issued", user_cn, "private_key.pem")
 
     if not os.path.exists(cert_path) and not jwt_token:
-        return error_response(f"Credenziali non trovate per l'utente '{user_cn}'. Si prega di registrare prima l'utente.", 404)
+        return error_response(f"Credentials not found for user '{user_cn}'. Please register the user first.", 404)
 
     if not jwt_token and not local_proxy_port and not os.path.exists(key_path):
         return error_response(
-            f"L'utente '{user_cn}' è registrato in modalità Hardware Bound (TPM/Secure Enclave). "
-            f"La chiave privata risiede in sicurezza sul client e non è disponibile sul server. "
-            f"Per usare questa console web, registra l'utente in modalità Lab (/api/certificates) "
-            f"in modo che il server possa ospitare la chiave temporaneamente, oppure esegui le query tramite "
-            f"la CLI del client hardware dal tuo computer host.",
+            f"User '{user_cn}' is registered in Hardware Bound mode (TPM/Secure Enclave). "
+            f"The private key resides securely on the client and is not available on the server. "
+            f"To use this web console, register the user in Lab mode (/api/certificates) "
+            f"so the server can host the key temporarily, or execute queries via "
+            f"the hardware client CLI from your host computer.",
             403
         )
 
@@ -141,14 +139,14 @@ def api_query():
                 query_filter=query_filter_str,
                 decision="DENY",
                 error_type="authorization_denied",
-                message=f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad accedere alla collezione '{collection_name}'.",
+                message=f"Access denied (OPA/RBAC): Role '{role}' is not authorized to access collection '{collection_name}'.",
                 jwt_auth=bool(jwt_token),
                 hardware_mode=hardware_mode
             )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",
-                "message": f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad accedere alla collezione '{collection_name}'.",
+                "message": f"Access denied (OPA/RBAC): Role '{role}' is not authorized to access collection '{collection_name}'.",
                 "role": role,
                 "translated_collection": view_name
             }), 403
@@ -164,14 +162,14 @@ def api_query():
                 query_filter=query_filter_str,
                 decision="DENY",
                 error_type="authorization_denied",
-                message=f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad eseguire '{mongo_action}' sulla collezione '{collection_name}'.",
+                message=f"Access denied (OPA/RBAC): Role '{role}' is not authorized to execute '{mongo_action}' on collection '{collection_name}'.",
                 jwt_auth=bool(jwt_token),
                 hardware_mode=hardware_mode
             )
             return jsonify({
                 "status": "error",
                 "error_type": "authorization_denied",
-                "message": f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad eseguire '{mongo_action}' sulla collezione '{collection_name}'.",
+                "message": f"Access denied (OPA/RBAC): Role '{role}' is not authorized to execute '{mongo_action}' on collection '{collection_name}'.",
                 "role": role,
                 "translated_collection": view_name
             }), 403
@@ -182,7 +180,7 @@ def api_query():
                 return jsonify({
                     "status": "error",
                     "error_type": "authorization_denied",
-                    "message": "Accesso negato (OPA/RBAC): Documento non conforme (manca il filtro patient_id obbligatorio).",
+                    "message": "Access denied (OPA/RBAC): Non-compliant document (mandatory patient_id filter missing).",
                     "role": role,
                     "translated_collection": view_name
                 }), 403
