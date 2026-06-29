@@ -25,7 +25,7 @@ raw_user := user if {
 	request := object.get(attrs, "request", {})
 	http := object.get(request, "http", {})
 	headers := object.get(http, "headers", {})
-	user := object.get(headers, "x-user", "")
+	user := object.get(headers, "x-zta-user", "")
 	user != ""
 } else := "unknown"
 
@@ -47,18 +47,6 @@ device_identity := device if {
 	# 2. Fallback to payload for tests/non-mTLS bypass
 	device := object.get(input.parsed_body, "device", "")
 	device != ""
-} else := ja3 if {
-	# 3. Fallback to JA3
-	tls_meta := object.get(object.get(input.attributes, "metadata_context", {}), "filter_metadata", {})
-	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
-	ja3 := object.get(tls_inspector, "ja3", "")
-	ja3 != ""
-} else := ja3h if {
-	# 4. Fallback to JA3 hash
-	tls_meta := object.get(object.get(input.attributes, "metadata_context", {}), "filter_metadata", {})
-	tls_inspector := object.get(tls_meta, "envoy.filters.listener.tls_inspector", {})
-	ja3h := object.get(tls_inspector, "ja3_hash", "")
-	ja3h != ""
 } else := "no-tpm"
 
 get_cert_mac(cert) := val if {
@@ -109,7 +97,15 @@ current_role := role if {
 	role := get_cert_title(cert)
 	role != ""
 } else := role if {
-	role := user_role_map[user_identity]
+	role := object.get(input.parsed_body, "role", "")
+	role != ""
+} else := role if {
+	attrs := object.get(input, "attributes", {})
+	request := object.get(attrs, "request", {})
+	http := object.get(request, "http", {})
+	headers := object.get(http, "headers", {})
+	role := object.get(headers, "x-zta-role", "")
+	role != ""
 } else := "unknown"
 
 get_cert_title(cert) := val if {
@@ -122,22 +118,6 @@ get_cert_title(cert) := val if {
 	name.Type == [2, 5, 4, 12]
 	val := name.Value
 	val != ""
-}
-
-user_role_map := {
-	"test.doctor":    "doctor",
-	"test.auditor":   "auditor",
-	"test.billing":   "billing_staff",
-	"test.receptionist": "receptionist",
-	"admin":          "admin"
-}
-
-known_users := {
-	"test.doctor",
-	"test.auditor",
-	"test.billing",
-	"test.receptionist",
-	"admin"
 }
 
 cert_pem_decoded(raw_pem) := decoded if {

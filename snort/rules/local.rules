@@ -6,7 +6,7 @@
 # In architettura ZTA, MongoDB (porta 27017) deve essere raggiunto
 # SOLO attraverso Envoy. Qualsiasi altro tentativo è una violazione.
 alert tcp any any -> any 27017 ( \
-    msg:"ZTA-001: Direct MongoDB access attempt - PEP bypass"; \
+    msg:"Direct MongoDB access attempt - PEP bypass"; \
     flow:to_server,established; \
     classtype:policy-violation; \
     sid:1000001; rev:1; \
@@ -15,68 +15,50 @@ alert tcp any any -> any 27017 ( \
 # ── REGOLA 2: Port Scan Detection ──
 # Tentativi di mappatura della rete interna (ricognizione)
 alert tcp any any -> $HOME_NET any ( \
-    msg:"ZTA-002: TCP SYN port scan detected"; \
+    msg:"TCP SYN port scan detected"; \
     flags:S; \
     detection_filter: track by_src, count 20, seconds 5; \
     classtype:attempted-recon; \
     sid:1000002; rev:1; \
 )
 
-# ── REGOLA 3: NoSQL Injection nel traffico verso Envoy ──
-# Rileva tentativi di injection MongoDB ($where, $function)
-# nel traffico applicativo che transita verso il PEP
-alert tcp any any -> any 10000 ( \
-    msg:"ZTA-003: NoSQL injection attempt ($where) in MongoDB traffic"; \
-    flow:to_server,established; \
-    content:"$where",nocase; \
-    classtype:web-application-attack; \
-    sid:1000003; rev:1; \
-)
 
-alert tcp any any -> any 10000 ( \
-    msg:"ZTA-004: NoSQL injection attempt ($function) in MongoDB traffic"; \
-    flow:to_server,established; \
-    content:"$function",nocase; \
-    classtype:web-application-attack; \
-    sid:1000004; rev:1; \
-)
-
-# ── REGOLA 5: ICMP Exfiltration / Tunnel ──
+# ── REGOLA 3: ICMP Exfiltration / Tunnel ──
 # Pacchetti ICMP con payload anomalo (>100 bytes)
 # possono indicare tunneling o esfiltrazione dati
 alert icmp any any -> any any ( \
-    msg:"ZTA-005: Suspicious ICMP packet with large payload (possible exfiltration)"; \
+    msg:"Suspicious ICMP packet with large payload (possible exfiltration)"; \
     dsize:>100; \
     itype:8; \
     classtype:misc-activity; \
     sid:1000005; rev:1; \
 )
 
-# ── REGOLA 6: SSH Brute Force ──
+# ── REGOLA 4: SSH Brute Force ──
 # Troppi tentativi SSH in poco tempo
 alert tcp any any -> any 22 ( \
-    msg:"ZTA-006: SSH brute force attempt detected"; \
+    msg:"SSH brute force attempt detected"; \
     flow:to_server,established; \
     detection_filter: track by_src, count 5, seconds 60; \
     classtype:attempted-admin; \
     sid:1000006; rev:1; \
 )
 
-# ── REGOLA 7: Lateral Movement (scansione interna est-ovest) ──
+# ── REGOLA 5: Lateral Movement (scansione interna est-ovest) ──
 # Un host interno che tenta di raggiungere molte porte
 # su altri host interni indica movimento laterale
 alert tcp $HOME_NET any -> $HOME_NET any ( \
-    msg:"ZTA-007: Internal lateral movement detected (east-west scan)"; \
+    msg:"Internal lateral movement detected (east-west scan)"; \
     flags:S; \
     detection_filter: track by_src, count 50, seconds 30; \
     classtype:attempted-recon; \
     sid:1000007; rev:1; \
 )
 
-# ── REGOLA 8: DNS Tunneling ──
+# ── REGOLA 6: DNS Tunneling ──
 # Query DNS con dominio molto lungo (possibile canale C2)
 alert udp any any -> any 53 ( \
-    msg:"ZTA-008: Possible DNS tunneling (long query)"; \
+    msg:"Possible DNS tunneling (long query)"; \
     dsize:>200; \
     classtype:misc-activity; \
     sid:1000008; rev:1; \

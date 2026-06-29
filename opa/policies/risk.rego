@@ -24,7 +24,7 @@ total_risk_score := (
 # Identity Risk Dimension (30% weight)
 identity_risk := user_risk_val + device_risk_val + network_risk_val
 
-user_risk_val := 0 if { identity.known_users[identity.user_identity] } else := 30
+user_risk_val := 0 if { identity.current_role != "unknown" } else := 30
 
 device_risk_val := 0 if { identity.device_identity != "no-tpm" } else := 20
 

@@ -92,17 +92,13 @@ inspection_violation if {
 	not identity.query_has_field("patient_id")
 }
 
-inspection_violation if {
+inspection_violation if {                                         
 	identity.is_db_query
-	identity.normalized_collection_name == "billing"
-	identity.query_has_field("$where")
-}
-
-inspection_violation if {
-	identity.is_db_query
-	identity.normalized_collection_name == "billing"
-	identity.query_has_field("$function")
-}
+	walk(identity.query_doc, [path, value])
+	some segment in path
+	is_string(segment)
+	segment in {"$where", "$function"}
+} 
 
 inspection_violation if {
 	identity.is_db_query
