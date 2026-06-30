@@ -33,10 +33,7 @@ client = MongoClient(
 )
 db = client[MONGO_DB]
 
-print()
-print("╔══════════════════════════════════════════════════════════════╗")
-print("║  ZTA Healthcare DB — initialising …                          ║")
-print("╚══════════════════════════════════════════════════════════════╝")
+print("\n *** ZTA Healthcare DB — initialising *** ")
 
 
 # Helper
@@ -576,10 +573,6 @@ db_external.command(
     roles=envoy_roles
 )
 print("X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
-print()
-print("╔════════════════════════════════════════════════════════════════╗")
-print("║  RLS complete: views + roles + users ready.                    ║")
-print("║  Run: python3 scripts/seed-db.py                               ║")
-print("╚════════════════════════════════════════════════════════════════╝")
+print("\n *** RLS complete: views + roles + users ready ***")
 
 client.close()

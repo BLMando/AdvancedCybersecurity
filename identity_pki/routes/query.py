@@ -8,7 +8,6 @@ from flask import Blueprint, request, jsonify, current_app
 from pymongo.errors import OperationFailure
 
 from ..auth import (
-    check_action_permissions as _check_action_permissions,
     get_rls_view_name as _get_rls_view_name,
     resolve_user_metadata as _resolve_user_metadata,
 )
@@ -123,37 +122,6 @@ def api_query():
     # Translate collection to RLS view
     view_name = collection_name
     if role != "admin":
-        role_config = ZTA_ROLES.get(role, {})
-        allowed = role_config.get("allowed_collections", [])
-        if collection_name not in allowed:
-            return jsonify({
-                "status": "error",
-                "error_type": "authorization_denied",
-                "message": f"Access denied (OPA/RBAC): Role '{role}' is not authorized to access collection '{collection_name}'.",
-                "role": role,
-                "translated_collection": view_name
-            }), 403
-
-        if not _check_action_permissions(role, collection_name, mongo_action):
-            return jsonify({
-                "status": "error",
-                "error_type": "authorization_denied",
-                "message": f"Access denied (OPA/RBAC): Role '{role}' is not authorized to execute '{mongo_action}' on collection '{collection_name}'.",
-                "role": role,
-                "translated_collection": view_name
-            }), 403
-
-        # Enforce that update operations on clinical_records contain patient_id in the query filter
-        if collection_name == "clinical_records" and mongo_action == "update":
-            if not query_filter.get("patient_id"):
-                return jsonify({
-                    "status": "error",
-                    "error_type": "authorization_denied",
-                    "message": "Access denied (OPA/RBAC): Non-compliant document (mandatory patient_id filter missing).",
-                    "role": role,
-                    "translated_collection": view_name
-                }), 403
-
         view_name = _get_rls_view_name(role, collection_name)
 
     ca_path = os.path.join(service.cert_dir, "ca.crt")

@@ -10,24 +10,12 @@ from flask import Flask
 from pymongo import MongoClient 
 from .pki import PKIService
 
-# Re-export session structures to preserve backward compatibility for tests
 from .auth import (
     AD_USERS,
     PENDING_OTPS,
     ENROLLMENT_SESSIONS,
     PRIMARY_SESSIONS,
 )
-
-# Load ZTA roles
-try:
-    from shared.zta_roles import ZTA_ROLES, VALID_ROLE_NAMES
-except ImportError:
-    try:
-        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-        from shared.zta_roles import ZTA_ROLES, VALID_ROLE_NAMES
-    except ImportError:
-        ZTA_ROLES = {}
-        VALID_ROLE_NAMES = []
 
 logger = logging.getLogger(__name__)
 

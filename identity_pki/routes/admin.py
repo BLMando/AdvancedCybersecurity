@@ -36,12 +36,6 @@ def index():
     return render_template("index.html", ca=ca_info, roles=roles)
 
 
-@admin_bp.get("/admin")
-def admin_dashboard():
-    """Serve the admin dashboard."""
-    return render_template("admin.html")
-
-
 @admin_bp.get("/api/admin/certificates")
 def api_list_certificates():
     """List all certificates."""

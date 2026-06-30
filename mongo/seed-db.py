@@ -235,10 +235,7 @@ bulk(db.clinical_records, clinical_ops,  "clinical_records ")
 bulk(db.billing,          billing_ops,   "billing          ")
 
 # Summary
-print()
-print("╔══════════════════════════════════════════════════════════════╗")
-print("║  Seed complete — collection counts                           ║")
-print("╚══════════════════════════════════════════════════════════════╝")
+print("\n *** Seed complete — collection counts *** ")
 for col in ["patients", "providers", "admissions", "clinical_records", "billing"]:
     n = db[col].count_documents({})
     print(f"  {col:<20} {n:>8,} documents")
