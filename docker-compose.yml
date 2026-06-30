@@ -197,9 +197,9 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-
-        # In sidecar mode, sniffa sull'interfaccia eth1 di Envoy (backend-net)
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth1" -l /var/log/snort 2>&1; then
+        
+        # In sidecar mode, sniffa sull'interfaccia eth0 di Envoy (frontend-net)
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
