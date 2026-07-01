@@ -17,7 +17,7 @@ services:
       ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
     volumes:
       - ./volumes/certs/ca:/data/certs
       - ./volumes/certs/server:/data/server
@@ -42,7 +42,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
     volumes:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
@@ -64,7 +64,7 @@ services:
     ports:
       - "127.0.0.1:5001:5001"
     environment:
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
     volumes:
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
@@ -295,6 +295,7 @@ services:
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
+    user: root
     # removed platform: linux/amd64 to use native arm64 on Apple Silicon
     # nome utente: admin
     environment:
@@ -303,6 +304,13 @@ services:
       - SPLUNK_PASSWORD=SplunkPassword123!
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
+    entrypoint: >
+      /bin/bash -c "
+      mkdir -p /opt/splunk/etc/auth/mycerts &&
+      cat /etc/certs/server/splunk.crt /etc/certs/server/splunk.key > /opt/splunk/etc/auth/mycerts/server_combined.pem &&
+      cp /etc/certs/ca/ca.crt /opt/splunk/etc/auth/mycerts/cacert.pem &&
+      exec /sbin/entrypoint.sh start-service
+      "
     ports:
       - "8000:8000"
       - "8088:8088"
@@ -311,6 +319,9 @@ services:
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
+      - ./splunk:/opt/splunk/etc/apps/zta
     networks:
       - backend-net
     restart: always

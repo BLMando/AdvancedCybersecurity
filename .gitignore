@@ -27,7 +27,11 @@ DerivedData/
 __pycache__/
 *.pyc
 
-scratch/
+
+# Splunk local overrides
+splunk/local/
+splunk/metadata/local.meta
+
 
 
 
