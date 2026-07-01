@@ -269,6 +269,27 @@ class HardwareManager {
     }
     
     func saveCertificate(cn: String, certData: Data) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassCertificate,
+            kSecReturnRef as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var items: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess, let items = items {
+            let certificates = (CFGetTypeID(items) == CFArrayGetTypeID()) ? (items as! [SecCertificate]) : [items as! SecCertificate]
+            for cert in certificates {
+                let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? ""
+                if summary == cn {
+                    let deleteQuery: [String: Any] = [
+                        kSecClass as String: kSecClassCertificate,
+                        kSecValueRef as String: cert
+                    ]
+                    SecItemDelete(deleteQuery as CFDictionary)
+                    print("Deleted old certificate for \(cn) from Keychain before importing new one.")
+                }
+            }
+        }
+
         let certFile = ztaDir.appendingPathComponent("\(cn).crt")
         try certData.write(to: certFile)
         print("Certificate for \(cn) saved to file system at \(certFile.path).")
