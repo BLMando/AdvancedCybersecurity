@@ -27,14 +27,17 @@ class PKICAMixin:
 
         logger.info("Generating new root CA for lab environment")
         self.ca_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
+        
+        ZTA_CA_CN = os.getenv("ZTA_CA_CN", "AdvancedCybersecurity-CA")
+        ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
 
         subject = issuer = x509.Name(
             [
                 x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
                 x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Milano"),
                 x509.NameAttribute(NameOID.LOCALITY_NAME, "Milano"),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "ZTA Root CA"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
+                x509.NameAttribute(NameOID.COMMON_NAME, ZTA_CA_CN),
             ]
         )
 
@@ -64,7 +67,7 @@ class PKICAMixin:
         self._ca_record = CARecord(created=now)
 
     def _get_ca_password(self) -> Optional[bytes]:
-        password = os.environ.get("ZTA_CA_KEY_PASSWORD")
+        password = os.getenv("ZTA_CA_KEY_PASSWORD")
         return password.encode("utf-8") if password else None
 
     def _get_ca_encryption(self) -> serialization.KeySerializationEncryption:

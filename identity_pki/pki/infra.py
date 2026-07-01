@@ -1,5 +1,6 @@
 import ipaddress
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,9 +26,10 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new Envoy server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
+    ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
     subject = x509.Name([
         x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
         x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
     ])
 
@@ -60,7 +62,7 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         )
     )
     cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    logger.info("✓ Envoy server certificates generated successfully")
+    logger.info("Envoy server certificates generated successfully")
 
 
 def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, validity_days: int = 365) -> None:
@@ -76,9 +78,10 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new MongoDB server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
+    ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
     subject = x509.Name([
         x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
         x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
     ])
 
@@ -112,4 +115,4 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     combined_pem = key_pem + cert_pem
     mongo_pem_path.write_bytes(combined_pem)
 
-    logger.info("✓ MongoDB server certificates generated successfully (mongo.pem)")
+    logger.info("MongoDB server certificates generated successfully (mongo.pem)")

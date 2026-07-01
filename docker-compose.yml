@@ -1,6 +1,6 @@
 services:
 
-  # ── Identity & PKI (Certificate Management) ─────
+  # Identity & PKI (Certificate Management)
   identity-pki:
     build:
       context: ./identity_pki
@@ -12,8 +12,12 @@ services:
     environment:
       IDENTITY_APP_DEBUG: false
       ZTA_PKI_DATA_DIR: /data/certs
-      ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
-      ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
+      ZTA_CA_VALIDITY_DAYS: 3650
+      ZTA_CERT_VALIDITY_DAYS: 365
+      ZTA_CHALLENGE_TTL_MINUTES: 5
+      ZTA_CA_CN: ${ZTA_CA_CN}
+      ZTA_CA_KEY_PASSWORD: ${ZTA_CA_KEY_PASSWORD}
+      ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_DATABASE: ${MONGO_DATABASE}
@@ -31,7 +35,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # ── MongoDB ────────────────────────────────────────
+  # MongoDB
   mongo:
     build:
       context: ./mongo
@@ -41,6 +45,7 @@ services:
     ports:
       - "127.0.0.1:${MONGO_PORT}:27017"
     environment:
+      ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_DATABASE: ${MONGO_DATABASE}
@@ -53,7 +58,7 @@ services:
     networks:
       - backend-net
 
-  # ── Custom MongoDB Proxy ────────────────────────────
+  # Custom MongoDB Proxy
   mongo-proxy:
     build:
       context: ./mongo_proxy
@@ -73,7 +78,7 @@ services:
     networks:
       - backend-net
 
-  # ── Envoy Log Init (Correzione Permessi Volume) ────
+  # Envoy Log Init (Fix Volume Permissions)
   envoy-log-init:
     image: alpine:latest
     container_name: envoy-log-init
@@ -82,7 +87,7 @@ services:
       - envoy-logs:/var/log/envoy
     command: chown -R 101:101 /var/log/envoy
 
-  # ── Envoy Proxy (PEP) ─────────────────────────────
+  # Envoy Proxy (PEP)
   envoy:
     build:
       context: ./envoy
@@ -116,7 +121,7 @@ services:
       timeout: 2s
       retries: 5
 
-  # ── ZTA Log Forwarder (Sidecar) ─────────────────
+  # ZTA Log Forwarder (Sidecar)
   zta-log-forwarder:
     build:
       context: ./scripts/zta_log_forwarder
@@ -142,7 +147,7 @@ services:
     networks:
       - backend-net
 
-  # ── OPA (PDP) ──────────────────────────────────────
+  # OPA (PDP)
   opa:
     platform: linux/amd64
     build:
@@ -175,7 +180,7 @@ services:
     networks:
       - backend-net
 
-  # ── Snort 3 — Sonda PEP (post-firewall, pre-autorizzazione) ──────────
+  # Snort 3 — PEP Probe (post-firewall, pre-authorization)
   snort-pep:
     image: ciscotalos/snort3:latest
     container_name: snort-pep
@@ -197,14 +202,14 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-        
-        # In sidecar mode, sniffa sull'interfaccia eth0 di Envoy (frontend-net)
+
+        # In sidecar mode, sniff on Envoy's eth0 interface (frontend-net)
         if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── Snort 3 — Sonda Risorsa (ispeziona il traffico autenticato e autorizzato) ────
+  # Snort 3 — Resource Probe (inspects authenticated and authorized traffic)
   snort-resource:
     image: ciscotalos/snort3:latest
     container_name: snort-resource
@@ -227,13 +232,13 @@ services:
         echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
         mkdir -p /var/log/snort
 
-        # In sidecar mode, sniffa sull'interfaccia eth0 di MongoDB
+        # In sidecar mode, sniff on MongoDB's eth0 interface
         if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
           echo "[snort-resource] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── NFTables (L3/L4 Firewall — applica regole netfilter al traffico in ingresso verso il PEP) ────
+  # NFTables (L3/L4 Firewall — applies netfilter rules to incoming traffic towards the PEP)
   nftables:
     image: alpine:latest
     container_name: nftables
@@ -259,10 +264,10 @@ services:
       - |
         apk add --no-cache nftables
 
-        # Crea directory log
+        # Create log directory
         mkdir -p /var/log/nftables
 
-        # Applica regole nftables nel namespace di Envoy
+        # Apply nftables rules in Envoy namespace
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
           if nft -f /tmp/nftables.conf; then
@@ -275,7 +280,7 @@ services:
           echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
 
-        # Cattura log da nft counter (polling periodico)
+        # Capture logs from nft counter (periodic polling)
         echo "[nftables] Starting counter log capture..."
         while true; do
           nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
