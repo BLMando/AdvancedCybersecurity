@@ -194,6 +194,9 @@ services:
     depends_on:
       envoy:
         condition: service_healthy
+    environment:
+      - SNORT_HOME_NET=172.19.0.0/16
+      - SNORT_EXTERNAL_NET=172.20.0.0/16 !172.19.0.0/16
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules/pep.rules:/etc/snort/rules/local.rules:ro
@@ -202,9 +205,7 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-
-        # In sidecar mode, sniff on Envoy's eth0 interface (frontend-net)
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0:eth1" -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
@@ -227,12 +228,13 @@ services:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules/resource.rules:/etc/snort/rules/local.rules:ro
       - snort-resource-logs:/var/log/snort
+    environment:
+      - SNORT_HOME_NET=172.19.0.0/16
+      - SNORT_EXTERNAL_NET=!172.19.0.0/16
     command:
       - |
         echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
         mkdir -p /var/log/snort
-
-        # In sidecar mode, sniff on MongoDB's eth0 interface
         if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
           echo "[snort-resource] ERROR: Snort failed to start"
         fi
