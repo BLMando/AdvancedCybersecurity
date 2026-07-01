@@ -53,6 +53,9 @@
       <button id="btn-certs" class="tab-btn" onclick="switchTab('certs')">
         Certificate Management
       </button>
+      <button id="btn-blocklist" class="tab-btn" onclick="switchTab('blocklist')">
+        Firewall Blocklist
+      </button>
     </div>
 
     <!-- Enrollment Tab Content -->
@@ -315,6 +318,51 @@
         </section>
       </section>
     </div>
+
+    <!-- Blocklist Tab Content -->
+    <div id="tab-blocklist" class="tab-content">
+      <section class="panel-grid">
+        <!-- Add IP Section -->
+        <section class="panel">
+          <h2>Block IP Address</h2>
+          <p class="lede" style="margin-bottom: 1.5rem;">
+            Manually add an IP address to the firewall blocklist.
+          </p>
+          <div id="blocklist-error" class="error-box" style="display: none; margin-bottom: 1rem;"></div>
+          <div id="blocklist-success" class="success-box" style="display: none; margin-bottom: 1rem;"></div>
+          <form id="form-block-ip" onsubmit="addIpToBlocklist(event)">
+            <div class="form-group" style="margin-bottom: 1.25rem;">
+              <label for="block-ip-address" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">IP Address</label>
+              <input type="text" id="block-ip-address" placeholder="e.g. 198.51.100.1" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+            </div>
+            <button type="submit" class="btn primary" style="width: 100%;">Block IP</button>
+          </form>
+        </section>
+
+        <!-- Blocked IPs List Section -->
+        <section class="panel">
+          <h2>Active Blocklist</h2>
+          <p class="lede" style="margin-bottom: 1.5rem;">
+            Currently blocked IP addresses. These IPs are dropped by nftables before reaching Envoy.
+          </p>
+          <div class="table-container">
+            <table id="blocklist-table">
+              <thead>
+                <tr>
+                  <th>IP Address</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="2" style="text-align: center; color: var(--muted); padding: 24px;">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </div>
   </main>
 
   <!-- Modal for Primary AD Auth + OTP -->
@@ -430,6 +478,10 @@
         document.getElementById("btn-certs").classList.add("active");
         document.getElementById("tab-certs").classList.add("active");
         loadCertsTable(); // Load list of all certs for management
+      } else if (tabName === "blocklist") {
+        document.getElementById("btn-blocklist").classList.add("active");
+        document.getElementById("tab-blocklist").classList.add("active");
+        loadBlocklist();
       }
     }
 
@@ -527,6 +579,93 @@
           loadActiveCertificates(); // Update query dropdown too
         } else {
           alert(`Revocation error: ${data.message || data.error}`);
+        }
+      } catch (err) {
+        alert(`Connection error: ${err.message}`);
+      }
+    }
+
+    // Load blocklist table content
+    async function loadBlocklist() {
+      const tbody = document.querySelector("#blocklist-table tbody");
+      try {
+        const resp = await fetch("/api/admin/blocklist");
+        const ips = await resp.json();
+
+        if (!ips || ips.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: var(--muted); padding: 24px;">No IP addresses in the blocklist.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = ips
+          .map(
+            (ip) => `
+            <tr>
+              <td style="font-family: monospace; font-weight: 600;">${ip}</td>
+              <td>
+                <button class="btn-action btn-delete" style="padding: 6px 12px; font-size: 0.8em;" onclick="removeIpFromUI('${ip}')">Remove</button>
+              </td>
+            </tr>
+          `,
+          )
+          .join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: var(--error); padding: 24px;">Loading error: ${err.message}</td></tr>`;
+      }
+    }
+
+    // Add an IP to the blocklist
+    async function addIpToBlocklist(event) {
+      event.preventDefault();
+      const ipInput = document.getElementById("block-ip-address");
+      const ip = ipInput.value.trim();
+      const errorBox = document.getElementById("blocklist-error");
+      const successBox = document.getElementById("blocklist-success");
+
+      errorBox.style.display = "none";
+      successBox.style.display = "none";
+
+      if (!ip) return;
+
+      try {
+        const resp = await fetch("/api/admin/blocklist/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ip }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          successBox.innerText = `IP ${ip} successfully added to blocklist.`;
+          successBox.style.display = "block";
+          ipInput.value = "";
+          loadBlocklist();
+        } else {
+          errorBox.innerText = data.message || data.error || "Failed to block IP";
+          errorBox.style.display = "block";
+        }
+      } catch (err) {
+        errorBox.innerText = `Connection error: ${err.message}`;
+        errorBox.style.display = "block";
+      }
+    }
+
+    // Remove an IP from the blocklist
+    async function removeIpFromUI(ip) {
+      if (!confirm(`Are you sure you want to remove ${ip} from the blocklist?`)) {
+        return;
+      }
+      try {
+        const resp = await fetch("/api/admin/blocklist/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ip }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          alert(`IP ${ip} successfully removed from blocklist!`);
+          loadBlocklist();
+        } else {
+          alert(`Error: ${data.message || data.error}`);
         }
       } catch (err) {
         alert(`Connection error: ${err.message}`);

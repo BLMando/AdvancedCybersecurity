@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import threading
+import fcntl
 from pathlib import Path
 
 from flask import Flask, request, jsonify
@@ -156,6 +157,26 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
     )
 
 
+def auto_block_ip(ip: str) -> None:
+    path = "/etc/certs/ca/blocklist.txt"
+    try:
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                pass
+            os.chmod(path, 0o644)
+        with open(path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            ips = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+            if ip not in ips:
+                f.seek(0, 2)
+                f.write(f"{ip}\n")
+                logger.info("IP %s automatically blocked due to severe Snort alert", ip)
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception as e:
+        logger.error("Failed to auto-block IP %s: %s", ip, e)
+
+
 def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
     """Background thread that tails a Snort 3 alert_json log file."""
     def handle_line(line: str) -> None:
@@ -164,6 +185,11 @@ def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> Non
             fields = extract_snort_fields(log_entry)
             fields["sensor"] = sensor
             hec_envoy.send_event(fields, index="zta_snort", sourcetype="snort:alert_json")
+
+            priority = fields.get("priority", 0)
+            src_addr = fields.get("src_addr", "0.0.0.0")
+            if priority in (1, 2) and src_addr not in ("0.0.0.0", "127.0.0.1", "localhost", "host.docker.internal"):
+                auto_block_ip(src_addr)
         except json.JSONDecodeError:
             logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)
 

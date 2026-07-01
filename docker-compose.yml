@@ -142,6 +142,7 @@ services:
       - snort-resource-logs:/var/log/snort-resource:ro
       - nftables-logs:/var/log/nftables:ro
       - mongo-logs:/var/log/mongodb:ro
+      - ./volumes/certs/ca:/etc/certs/ca
     depends_on:
       - splunk
     networks:
@@ -259,6 +260,7 @@ services:
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
       - nftables-logs:/var/log/nftables
+      - ./volumes/certs/ca:/etc/certs/ca:ro
     healthcheck:
       test: [ "CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1" ]
       interval: 10s
@@ -266,7 +268,7 @@ services:
       retries: 3
     command:
       - |
-        apk add --no-cache nftables
+        apk add --no-cache nftables inotify-tools
 
         # Create log directory
         mkdir -p /var/log/nftables
@@ -289,6 +291,32 @@ services:
         while true; do
           nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
           sleep 30
+        done &
+
+        # Background sync loop using inotify events for blocklist.txt
+        echo "[nftables] Starting blocklist sync daemon..."
+        BLOCKLIST_DIR="/etc/certs/ca"
+        BLOCKLIST_FILE="$$BLOCKLIST_DIR/blocklist.txt"
+        touch "$$BLOCKLIST_FILE"
+
+        sync_blocklist() {
+          IPs=$$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$$BLOCKLIST_FILE" 2>/dev/null | tr -d '\r')
+          nft flush set inet zero_trust_fw blocklist 2>/dev/null
+          if [ -n "$$IPs" ]; then
+            ELEMENTS=$$(echo "$$IPs" | paste -sd, -)
+            echo "[nftables] Syncing blocklist elements: $$ELEMENTS"
+            nft add element inet zero_trust_fw blocklist "{ $$ELEMENTS }" 2>/dev/null
+          fi
+        }
+
+        # Run initial sync
+        sync_blocklist
+
+        # Watch for changes and sync instantly
+        inotifywait -q -m -e close_write,moved_to "$$BLOCKLIST_DIR" | while read -r directory events filename; do
+          if [ "$$filename" = "blocklist.txt" ]; then
+            sync_blocklist
+          fi
         done &
 
         echo "[nftables] Sidecar ready (Envoy namespace)"
