@@ -293,6 +293,7 @@ services:
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
+    user: root
     platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
