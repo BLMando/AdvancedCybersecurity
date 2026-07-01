@@ -14,3 +14,5 @@ DerivedData/
 *.xcuserstate
 __pycache__/
 *.pyc
+splunk/local/
+splunk/metadata/local.meta

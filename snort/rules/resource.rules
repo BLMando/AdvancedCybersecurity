@@ -12,49 +12,22 @@ alert tcp any any -> any 27017 ( \
     sid:4000001; rev:1; \
 )
 
-# ── Comando admin: dropDatabase ──
+# ── Rilevamento Connection Flood su MongoDB ──
 alert tcp any any -> any 27017 ( \
-    msg:"MongoDB admin command (dropDatabase)"; \
-    flow:to_server,established; \
-    content:"dropDatabase"; \
-    classtype:attempted-admin; \
+    msg:"MongoDB TCP connection flood - possible resource exhaustion"; \
+    flags:S; \
+    detection_filter: track by_src, count 50, seconds 10; \
+    classtype:denial-of-service; \
     sid:4000002; rev:1; \
 )
 
-# ── Comando admin: shutdown ──
-alert tcp any any -> any 27017 ( \
-    msg:"MongoDB admin command (shutdown)"; \
-    flow:to_server,established; \
-    content:"shutdown"; \
-    classtype:attempted-admin; \
+# ── Reconnaissance Interna su MongoDB (Port Sweep) ──
+alert tcp $HOME_NET any -> any 27017 ( \
+    msg:"Internal MongoDB port sweep - possible reconnaissance"; \
+    flags:S; \
+    detection_filter: track by_src, count 10, seconds 5; \
+    classtype:attempted-recon; \
     sid:4000003; rev:1; \
-)
-
-# ── Accesso a collection di sistema ──
-alert tcp any any -> any 27017 ( \
-    msg:"Access to system collection (system.users)"; \
-    flow:to_server,established; \
-    content:"system.users"; \
-    classtype:attempted-admin; \
-    sid:4000004; rev:1; \
-)
-
-# ── Comando admin: dropUser ──
-alert tcp any any -> any 27017 ( \
-    msg:"MongoDB admin command (dropUser)"; \
-    flow:to_server,established; \
-    content:"dropUser"; \
-    classtype:attempted-admin; \
-    sid:4000005; rev:1; \
-)
-
-# ── Comando admin: createUser (privilege escalation) ──
-alert tcp any any -> any 27017 ( \
-    msg:"MongoDB admin command (createUser) - possible privilege escalation"; \
-    flow:to_server,established; \
-    content:"createUser"; \
-    classtype:attempted-admin; \
-    sid:4000006; rev:1; \
 )
 
 # ── Accesso diretto MongoDB da IP non Docker (bypass PEP) ──
@@ -65,13 +38,4 @@ alert tcp !172.16.0.0/12 any -> any 27017 ( \
     flow:to_server,established; \
     classtype:policy-violation; \
     sid:4000007; rev:1; \
-)
-
-# ── Comando admin: replSetReconfig ──
-alert tcp any any -> any 27017 ( \
-    msg:"MongoDB replication reconfiguration attempt"; \
-    flow:to_server,established; \
-    content:"replSetReconfig"; \
-    classtype:attempted-admin; \
-    sid:4000008; rev:1; \
 )
