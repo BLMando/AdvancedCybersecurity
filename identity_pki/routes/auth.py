@@ -107,7 +107,7 @@ def api_auth_login():
     current_app.logger.info(f"AD Login Success for {email}. OTP Generated (email_sent={email_sent})")
     return jsonify({
         "status": "otp_required",
-        "message": f"Codice OTP inviato a {email}",
+        "message": f"OTP code sent to {email}",
         "email": email,
         "email_sent": email_sent
     })

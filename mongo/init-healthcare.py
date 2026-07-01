@@ -33,10 +33,7 @@ client = MongoClient(
 )
 db = client[MONGO_DB]
 
-print()
-print("╔══════════════════════════════════════════════════════════════╗")
-print("║  ZTA Healthcare DB — initialising …                          ║")
-print("╚══════════════════════════════════════════════════════════════╝")
+print("\n *** ZTA Healthcare DB — initialising *** ")
 
 
 # Helper
@@ -250,7 +247,7 @@ db.command("create", "v_patients_billing", viewOn="patients", pipeline=[
             "_id": 1,
             "full_name": 1,
             "age": 1,
-            # gender, blood_type, created_at not listed → hidden
+            # gender, blood_type, created_at not listed -> hidden
         }
     }
 ])
@@ -267,7 +264,7 @@ db.command("create", "v_patients_reception", viewOn="patients", pipeline=[
             "age": 1,
             "gender": 1,
             "created_at": 1,
-            # blood_type not listed → hidden
+            # blood_type not listed -> hidden
         }
     }
 ])
@@ -299,7 +296,7 @@ db.command("create", "v_admissions_billing", viewOn="admissions", pipeline=[
             "_id": 1, "patient_id": 1,
             "admission_type": 1, "date_of_admission": 1, "discharge_date": 1,
             "status": 1,
-            # room_number, doctor_id, hospital_id not listed → hidden
+            # room_number, doctor_id, hospital_id not listed -> hidden
         }
     }
 ])
@@ -348,7 +345,7 @@ db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
     {"$unwind": {"path": "$patient", "preserveNullAndEmptyArrays": True}},
     {
         "$addFields": {
-            # "Mario Rossi" → "M.R." — auditor can check patterns, not individuals
+            # "Mario Rossi" -> "M.R." — auditor can check patterns, not individuals
             "patient_initials": {
                 "$reduce": {
                     "input": {"$split": [{"$ifNull": ["$patient.full_name", ""]}, " "]},
@@ -389,7 +386,7 @@ db.command("create", "v_clinical_auditor", viewOn="clinical_records", pipeline=[
             "medication": 1,
             "test_results": 1,
             "recorded_at": 1,
-            # patient_id, patient embed not listed → hidden
+            # patient_id, patient embed not listed -> hidden
         }
     },
 ])
@@ -416,14 +413,14 @@ print("View: v_billing_staff")
 db.command("create", "v_billing_auditor", viewOn="billing", pipeline=[
     {
         "$addFields": {
-            # 18856.28 → 19000 — order of magnitude visible, exact amount hidden
+            # 18856.28 -> 19000 — order of magnitude visible, exact amount hidden
             "billing_amount_approx": {
                 "$multiply": [
                     {"$round": [{"$divide": ["$billing_amount", 1000]}, 0]},
                     1000,
                 ]
             },
-            # "Blue Cross" → "Blu***" — provider category visible, not exact name
+            # "Blue Cross" -> "Blu***" — provider category visible, not exact name
             "insurance_masked": {
                 "$concat": [
                     {"$substrCP": ["$insurance_provider", 0, 3]},
@@ -439,7 +436,7 @@ db.command("create", "v_billing_auditor", viewOn="billing", pipeline=[
             "insurance_masked": 1,         # first 3 chars + ***
             "payment_status": 1,
             "created_at": 1,
-            # billing_amount, insurance_provider not listed → hidden
+            # billing_amount, insurance_provider not listed -> hidden
         }
     },
 ])
@@ -508,7 +505,7 @@ roles_def = [
             {"resource": {"db": MONGO_DB, "collection": "v_patients_doctor"},   "actions": ["find"]},
             {"resource": {"db": MONGO_DB, "collection": "v_providers_all"},     "actions": ["find"]},
             {"resource": {"db": MONGO_DB, "collection": "v_admissions_auditor"}, "actions": ["find"]},
-            {"resource": {"db": MONGO_DB, "collection": "v_clinical_auditor"},  "actions": ["find"]},  # patient name → initials
+            {"resource": {"db": MONGO_DB, "collection": "v_clinical_auditor"},  "actions": ["find"]},  # patient name -> initials
             {"resource": {"db": MONGO_DB, "collection": "v_billing_auditor"},   "actions": ["find"]},  # amount rounded, provider masked
             # Auditors NEVER write anything
         ],
@@ -563,8 +560,10 @@ except OperationFailure as e:
     else:
         print(f"Warning: Failed to create impersonatorRole: {e}")
 
+ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
+
 try:
-    db_external.command("dropUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
+    db_external.command("dropUser", f"CN=envoy,O={ZTA_ORGANIZATION},C=IT")
 except OperationFailure:
     pass
 
@@ -572,14 +571,10 @@ envoy_roles = [{"role": role_config["mongo_role"], "db": MONGO_DB} for role_conf
 envoy_roles.append({"role": "impersonatorRole", "db": "admin"})
 
 db_external.command(
-    "createUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT",
+    "createUser", f"CN=envoy,O={ZTA_ORGANIZATION},C=IT",
     roles=envoy_roles
 )
-print("X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
-print()
-print("╔════════════════════════════════════════════════════════════════╗")
-print("║  RLS complete: views + roles + users ready.                    ║")
-print("║  Run: python3 scripts/seed-db.py                               ║")
-print("╚════════════════════════════════════════════════════════════════╝")
+print(f"X.509 User created in $external: CN=envoy,O={ZTA_ORGANIZATION},C=IT")
+print("\n *** RLS complete: views + roles + users ready ***")
 
 client.close()

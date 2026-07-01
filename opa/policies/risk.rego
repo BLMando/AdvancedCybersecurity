@@ -73,27 +73,26 @@ content_risk := 100 if {
 	identity.is_empty_query
 } else := 0
 
-# Anomaly Risk Dimension (20% weight) - Query sincrona a Splunk via  forwarder
+# Anomaly Risk Dimension (20% weight) - Query sincrona diretta a Splunk via REST API (oneshot)
 anomaly_risk := boost if {
 	# Evitiamo chiamate esterne per i comandi di sistema esclusi (bypass)
 	not identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo", "ping", "getLog", "getCmdLineOpts", "serverStatus"}
 
 	resp := http.send({
 		"method": "POST",
-		"url": "http://zta-log-forwarder:5000/api/stats",
-		"headers": {"Content-Type": "application/json"},
-		"body": {
-			"user": identity.user_identity,
-			"network_ip": identity.network_identity_str,
-			"device": identity.device_identity,
-			"resource": identity.normalized_collection_name,
-			"command": identity.action_name
+		"url": "https://splunk:8089/servicesNS/admin/zta/search/jobs",
+		"headers": {
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Authorization": "Basic YWRtaW46U3BsdW5rUGFzc3dvcmQxMjMh"
 		},
-		"timeout": "500000000" # 500ms in nanosecondi
+		"body": sprintf("search=%%7C+savedsearch+Calcolo_Rischio_Contestuale_ZTA+user%%3D%%22%v%%22+client_ip%%3D%%22%v%%22&exec_mode=oneshot&output_mode=json", [identity.user_identity, identity.network_identity_str]),
+		"tls_ca_cert_file": "/etc/certs/ca/ca.crt", # Convalida crittografica tramite la CA di progetto
+		"timeout": "400000000" # 400ms in nanosecondi
 	})
 
 	resp.status_code == 200
-	boost := resp.body.risk_boost
+	score_str := resp.body.results[0].anomaly_risk
+	boost := to_number(score_str)
 } else := 0
 
 # ─── Adaptive Thresholds ──────────────────────────────────────────────────────

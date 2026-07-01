@@ -1,6 +1,6 @@
 static_resources:
   listeners:
-    # ─── MongoDB Listener with mTLS ────────────────────
+    # MongoDB Listener with mTLS
     - name: mongo_listener
       address:
         socket_address:
@@ -126,21 +126,21 @@ static_resources:
                                   local decision_id = "lua-waf-" .. request_id
                                   
                                   local block_reason = "WAF_GENERIC_INJECTION"
-                                  local block_message = "Bloccato da WAF L7: Rilevato pattern di query non autorizzato."
+                                  local block_message = "Blocked by L7 WAF: Unauthorized query pattern detected."
                                   
                                   if matched_pattern == "%$where" then
                                     block_reason = "WAF_NOSQL_INJECTION"
-                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$where' non consentito)."
+                                    block_message = "Blocked by L7 WAF: NoSQL Injection attempt detected (operator '$where' not allowed)."
                                   elseif matched_pattern == "%$function" then
                                     block_reason = "WAF_NOSQL_INJECTION"
-                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '$function' non consentito)."
+                                    block_message = "Blocked by L7 WAF: NoSQL Injection attempt detected (operator '$function' not allowed)."
                                   elseif matched_pattern == "sleep%(" or matched_pattern == "while%(" then
                                     block_reason = "WAF_DOS_INJECTION"
-                                    block_message = "Bloccato da WAF L7: Rilevato tentativo di Denial of Service (pattern time-delay o ciclo infinito)."
+                                    block_message = "Blocked by L7 WAF: Denial of Service attempt detected (time-delay pattern or infinite loop)."
                                   elseif matched_pattern == "%$regex" or matched_pattern == "%$ne" or matched_pattern == "%$gt" then
                                     block_reason = "WAF_NOSQL_INJECTION"
                                     local operator_name = string.gsub(matched_pattern, "%%", "")
-                                    block_message = string.format("Bloccato da WAF L7: Rilevato tentativo di NoSQL Injection (operatore '%s' non consentito).", operator_name)
+                                    block_message = string.format("Blocked by L7 WAF: NoSQL Injection attempt detected (operator '%s' not allowed).", operator_name)
                                   end
                                   
                                   local payload = string.format([[
@@ -210,7 +210,7 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
 
-  # ─── Clusters ──────────────────────────────────────
+  # Clusters
   clusters:
     - name: mongo_proxy_cluster
       connect_timeout: 2s

@@ -171,7 +171,6 @@ def extract_opa_decision_fields(log_entry: dict) -> dict:
             "test.doctor": "doctor",
             "test.auditor": "auditor",
             "test.billing": "billing_staff",
-            "test.reception": "receptionist",
             "test.receptionist": "receptionist",
             "admin": "admin"
         }

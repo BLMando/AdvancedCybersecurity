@@ -44,20 +44,6 @@ def provision_mongo_user(service: PKIService, logger: logging.Logger, username: 
         role_config = ZTA_ROLES.get(role, {})
         mongo_role = role_config.get("mongo_role", "read")
         
-        password = f"{''.join(x.capitalize() for x in username.split('.'))}2026!"
-        
-        try:
-            db.command("dropUser", username)
-        except Exception:
-            pass
-            
-        db.command(
-            "createUser", username,
-            pwd=password,
-            roles=[{"role": mongo_role, "db": MONGO_DB}]
-        )
-        logger.info(f"Auto-provisioned MongoDB user '{username}' with role '{mongo_role}'")
-
         # Create user in $external database for MONGODB-OIDC authentication
         db_external = client["$external"]
         oidc_username = f"oidc/{username}"

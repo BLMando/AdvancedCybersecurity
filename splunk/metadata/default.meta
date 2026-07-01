@@ -1,0 +1,4 @@
+# Application-level permissions for ZTA App
+[]
+access = read : [ * ], write : [ admin ]
+export = system

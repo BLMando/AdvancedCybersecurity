@@ -7,7 +7,7 @@ from identity_pki.pki.ca import PKICAMixin
 from identity_pki.pki.attestation import PKIAttestationMixin
 from identity_pki.pki.issuance import PKIIssuanceMixin
 from identity_pki.pki.revocation import PKIRevocationMixin
-from identity_pki.pki.infra import ensure_envoy_certs, ensure_mongo_certs
+from identity_pki.pki.infra import ensure_envoy_certs, ensure_mongo_certs, ensure_splunk_certs
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,9 @@ class PKIService(PKICAMixin, PKIAttestationMixin, PKIIssuanceMixin, PKIRevocatio
         self.client_dir = self.cert_dir_path / "client"
         self.challenges = {}
 
-        self.ca_validity_days = int(os.environ.get("ZTA_CA_VALIDITY_DAYS", "3650"))
-        self.cert_validity_days = int(os.environ.get("ZTA_CERT_VALIDITY_DAYS", "365"))
-        self.challenge_ttl_minutes = int(os.environ.get("ZTA_CHALLENGE_TTL_MINUTES", "5"))
+        self.ca_validity_days = int(os.getenv("ZTA_CA_VALIDITY_DAYS", "3650"))
+        self.cert_validity_days = int(os.getenv("ZTA_CERT_VALIDITY_DAYS", "365"))
+        self.challenge_ttl_minutes = int(os.getenv("ZTA_CHALLENGE_TTL_MINUTES", "5"))
 
         self.issued_dir.mkdir(parents=True, exist_ok=True)
         self.revoked_dir.mkdir(parents=True, exist_ok=True)
@@ -38,4 +38,5 @@ class PKIService(PKICAMixin, PKIAttestationMixin, PKIIssuanceMixin, PKIRevocatio
         self._ensure_ca()
         ensure_envoy_certs(self.cert_dir_path, self.ca_cert, self.ca_key, self.cert_validity_days)
         ensure_mongo_certs(self.cert_dir_path, self.ca_cert, self.ca_key, self.cert_validity_days)
+        ensure_splunk_certs(self.cert_dir_path, self.ca_cert, self.ca_key, self.cert_validity_days)
         self.generate_crl()

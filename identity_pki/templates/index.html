@@ -66,18 +66,18 @@
           <!-- STEP 1: AD Login Form -->
           <div id="enroll-step-login">
             <h3 style="margin-bottom: 1rem; color: var(--accent)">
-              Step 1: Corporate Active Directory Authentication (SSO)
+              Step 1: Active Directory Authentication (SSO)
             </h3>
             <form id="login-form" class="form-grid">
               <label for="login-email" style="grid-column: span 2">
-                <span>Corporate Email</span>
+                <span>Email</span>
                 <select id="login-email" required>
                   <option value="" disabled selected>Loading AD users...</option>
                 </select>
               </label>
 
               <label for="login-password" style="grid-column: span 2">
-                <span>Directory Password</span>
+                <span>Password</span>
                 <input type="password" id="login-password" value="password123" required />
               </label>
 
@@ -258,34 +258,7 @@
               </div>
               <div>Documents: <strong id="query-resp-count">0</strong></div>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center">
-              <!-- Live search bar -->
-              <div style="position: relative">
-                <input type="text" id="table-live-search" placeholder="Filter table..." style="
-                      padding: 6px 12px;
-                      border-radius: 10px;
-                      font-size: 0.82rem;
-                      width: 200px;
-                      min-height: 0;
-                    " oninput="liveFilterTable(this.value)" />
-              </div>
-              <button type="button" id="result-view-table" class="tab-btn active" style="
-                    padding: 4px 12px;
-                    font-size: 0.8rem;
-                    min-height: 30px;
-                    border-radius: 8px;
-                  ">
-                Table
-              </button>
-              <button type="button" id="result-view-json" class="tab-btn" style="
-                    padding: 4px 12px;
-                    font-size: 0.8rem;
-                    min-height: 30px;
-                    border-radius: 8px;
-                  ">
-                { } JSON
-              </button>
-            </div>
+
           </div>
 
           <!-- Table -->
@@ -368,16 +341,16 @@
               ">
             The primary session has expired or Step-Up Authentication is
             required to perform the sensitive operation. Please log in to
-            the Corporate Directory.
+            the Directory.
           </p>
           <form id="modal-login-form" class="form-grid">
             <label for="modal-login-email" style="grid-column: span 2">
-              <span>Corporate Email</span>
+              <span>Email</span>
               <input type="email" id="modal-login-email" readonly
                 style="opacity: 0.7; background: rgba(8, 15, 27, 0.4)" />
             </label>
             <label for="modal-login-password" style="grid-column: span 2">
-              <span>Directory Password</span>
+              <span>Password</span>
               <input type="password" id="modal-login-password" value="password123" required />
             </label>
             <div class="actions" style="grid-column: span 2; margin-top: 1rem">
@@ -691,23 +664,7 @@
       container.innerHTML = (MAP[collection] || []).join("");
     }
 
-    // ─── Live search across visible table rows ────────────────────────────────
-    function liveFilterTable(val) {
-      const filter = val.toLowerCase();
-      const tbody = document.querySelector("#query-output-table tbody");
-      if (!tbody) return;
-      Array.from(tbody.querySelectorAll('tr[id^="data-row-"]')).forEach(
-        (tr) => {
-          const text = tr.innerText.toLowerCase();
-          const editRow = document.getElementById(
-            tr.id.replace("data-row-", "edit-row-"),
-          );
-          const show = !filter || text.includes(filter);
-          tr.style.display = show ? "" : "none";
-          if (editRow) editRow.style.display = "none"; // always collapse edit on filter
-        },
-      );
-    }
+
 
     function parseItalianFloat(str) {
       if (typeof str !== "string") return parseFloat(str);
@@ -1407,32 +1364,7 @@
       }
     }
 
-    // Toggle Result View event handlers
-    document
-      .getElementById("result-view-table")
-      .addEventListener("click", () => {
-        document.getElementById("result-view-table").classList.add("active");
-        document
-          .getElementById("result-view-json")
-          .classList.remove("active");
-        document.getElementById(
-          "query-output-table-container",
-        ).style.display = "block";
-        document.getElementById("query-output-json").style.display = "none";
-      });
 
-    document
-      .getElementById("result-view-json")
-      .addEventListener("click", () => {
-        document.getElementById("result-view-json").classList.add("active");
-        document
-          .getElementById("result-view-table")
-          .classList.remove("active");
-        document.getElementById(
-          "query-output-table-container",
-        ).style.display = "none";
-        document.getElementById("query-output-json").style.display = "block";
-      });
 
     document
       .getElementById("query-collection")
@@ -1621,7 +1553,7 @@
         }
       });
 
-    // CN to Corporate Email Map for Query Auth Modal
+    // CN to Email Map for Query Auth Modal
     let cnToEmailMap = {};
 
     async function loadADUsers() {
@@ -1646,8 +1578,8 @@
 
     let primaryAuthCallbacks = null;
 
-    // isStepUp=true  → calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
-    // isStepUp=false → calls /api/auth/verify-otp (full enrollment session token)
+    // isStepUp=true  -> calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
+    // isStepUp=false -> calls /api/auth/verify-otp (full enrollment session token)
     function promptPrimaryAuth(email, isStepUp = false) {
       return new Promise((resolve, reject) => {
         document.getElementById("modal-login-email").value = email;
@@ -1799,6 +1731,11 @@
         successBox.style.display = "none";
         resSection.style.display = "none";
         mainPanel.classList.remove("forbidden-card");
+
+        document.getElementById("query-output-table").innerHTML = "";
+        document.getElementById("query-output-table-container").style.display =
+          "none";
+        outputBox.textContent = "";
 
         if (!user) {
           errBox.textContent =
@@ -1979,6 +1916,8 @@
           );
 
           // Render Table
+          document.getElementById("query-output-table-container").style.display =
+            "block";
           renderQueryResults(data.results, collection);
 
           resSection.style.display = "block";

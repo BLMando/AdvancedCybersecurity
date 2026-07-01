@@ -1,68 +1,66 @@
-# ═══════════════════════════════════════════════════════════════════
-# Snort 3 — Regole Sonda PEP (Envoy sidecar)
-# Posizione: namespace di rete condiviso con Envoy
-# Vede: traffico post-firewall, pre-autorizzazione
-# ═══════════════════════════════════════════════════════════════════
 
-# ── NoSQL Injection: $where ──
-# Tentativo di injection nel traffico MongoDB via Envoy
-alert tcp any any -> any 10000 ( \
-    msg:"NoSQL injection attempt ($where) in MongoDB traffic"; \
-    flow:to_server,established; \
-    content:"$where",nocase; \
-    classtype:web-application-attack; \
-    sid:3000001; rev:1; \
+# Snort 3 — Regole Sonda PEP
+
+
+# ── Rilevamento Downgrade SSL/TLS (Client Hello in chiaro) ──
+# Cattura i tentativi provenienti dall'esterno ($EXTERNAL_NET) diretti alla porta pubblica di Envoy
+alert tcp $EXTERNAL_NET any -> any 10000 (
+    msg:"Legacy TLS version/SSL downgrade attempt targeting Envoy";
+    ssl_version:sslv2,sslv3,tls1.0,tls1.1;
+    classtype:policy-violation;
+    sid:3000001; rev:3;
 )
 
-# ── NoSQL Injection: $function ──
-alert tcp any any -> any 10000 ( \
-    msg:"NoSQL injection attempt ($function) in MongoDB traffic"; \
-    flow:to_server,established; \
-    content:"$function",nocase; \
-    classtype:web-application-attack; \
-    sid:3000002; rev:1; \
-)
-
-# ── NoSQL Injection: $regex (ReDoS) ──
-alert tcp any any -> any 10000 ( \
-    msg:"NoSQL injection attempt ($regex) - possible ReDoS"; \
-    flow:to_server,established; \
-    content:"$regex",nocase; \
-    classtype:web-application-attack; \
-    sid:3000003; rev:1; \
+# ── Prevenzione DDoS / SYN Flood su Envoy ──
+# Monitora i flood di pacchetti SYN provenienti dall'esterno sulla porta pubblica di Envoy
+alert tcp $EXTERNAL_NET any -> any 10000 (
+    msg:"Possible SYN flood DDoS targeting PEP Envoy";
+    flags:S;
+    detection_filter: track by_src, count 100, seconds 5;
+    classtype:denial-of-service;
+    sid:3000002; rev:3;
 )
 
 # ── Lateral Movement: scansione est-ovest tra container ──
-alert tcp any any -> any any ( \
-    msg:"Internal lateral movement detected (east-west scan)"; \
-    flags:S; \
-    detection_filter: track by_src, count 50, seconds 30; \
-    classtype:attempted-recon; \
-    sid:3000004; rev:1; \
+# Si attiva se l'attacco parte da dentro il backend ($HOME_NET) e scansiona altre porte interne
+alert tcp $HOME_NET any -> any any (
+    msg:"Internal lateral movement detected (east-west scan)";
+    flags:S;
+    detection_filter: track by_src, count 50, seconds 30;
+    classtype:attempted-recon;
+    sid:3000004; rev:3;
 )
 
-# ── Envoy Admin access da rete non-localhost ──
-alert tcp any any -> any 9901 ( \
-    msg:"Envoy admin access attempt"; \
-    flow:to_server,established; \
-    classtype:policy-violation; \
-    sid:3000005; rev:1; \
+# ── Envoy Admin access da rete interna ──
+# Rileva se un container compromesso tenta di interrogare la porta di controllo di Envoy
+alert tcp $HOME_NET any -> any 9901 (
+    msg:"Envoy admin access attempt from internal network";
+    flow:to_server,established;
+    classtype:policy-violation;
+    sid:3000005; rev:3;
 )
 
-# ── Port scan verso Envoy ──
-alert tcp any any -> any any ( \
-    msg:"TCP SYN port scan targeting PEP"; \
-    flags:S; \
-    detection_filter: track by_src, count 20, seconds 5; \
-    classtype:attempted-recon; \
-    sid:3000006; rev:1; \
+# ── Port scan perimetrale verso Envoy ──
+# Rileva le scansioni di porte classiche che arrivano dal frontend ($EXTERNAL_NET)
+alert tcp $EXTERNAL_NET any -> any any (
+    msg:"TCP SYN port scan targeting PEP perimeter";
+    flags:S;
+    detection_filter: track by_src, count 20, seconds 5;
+    classtype:attempted-recon;
+    sid:3000006; rev:3;
 )
 
-# ── ICMP verso Envoy (possibile tunneling) ──
-alert icmp any any -> any any ( \
-    msg:"Suspicious ICMP large payload (possible exfiltration via PEP)"; \
-    dsize:>100; \
-    itype:8; \
-    classtype:misc-activity; \
-    sid:3000007; rev:1; \
+# ── ICMP verso Envoy (possibile tunneling / esfiltrazione) ──
+alert icmp $EXTERNAL_NET any -> any any (
+    msg:"Suspicious ICMP large payload (possible exfiltration via PEP)";
+    dsize:>100;
+    itype:8;
+    classtype:misc-activity;
+    sid:3000007; rev:3;
 )
+
+# ── DIAGNOSTIC: Tracciamento Flusso (Utili per verificare Splunk) ──
+# Mostra il pacchetto quando entra dal Frontend (eth0)
+alert tcp $EXTERNAL_NET any -> any 10000 (msg:"DIAGNOSTIC: Traffic entered FRONTEND (eth0)"; sid:9999998; rev:3;)
+# Mostra lo stesso pacchetto quando viene inoltrato al Backend (eth1)
+alert tcp $HOME_NET any -> any any (msg:"DIAGNOSTIC: Traffic forwarded to BACKEND (eth1)"; sid:9999999; rev:3;)

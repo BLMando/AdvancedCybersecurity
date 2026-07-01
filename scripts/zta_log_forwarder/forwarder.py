@@ -16,8 +16,6 @@ from parsers import (
     parse_nftables_line,
     extract_opa_decision_fields,
 )
-from risk import calculate_risk_boost
-from splunk_search import run_splunk_search, SPLUNK_PASSWORD
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("forwarder")
@@ -108,115 +106,6 @@ SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
 NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
 MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
-
-
-@app.route("/api/stats", methods=["POST"])
-def handle_stats_query():
-    """
-    Called by OPA policy via http.send.
-    Input: {user, network_ip, device, resource, command}
-    Output: stats + derived risk boost.
-    """
-    try:
-        body = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid json"}), 400
-
-    user = str(body.get("user", "unknown"))
-    network_ip = str(body.get("network_ip", "0.0.0.0"))
-    device = str(body.get("device", "no-tpm"))
-    resource = str(body.get("resource", "unknown"))
-    command = str(body.get("command", "unknown"))
-
-    if not SPLUNK_PASSWORD:
-        logger.error("SPLUNK_PASSWORD is not configured; cannot query Splunk stats")
-        return jsonify({"error": "splunk credentials not configured"}), 500
-
-    # Costruiamo una singola query di aggregazione che copre tutti i vettori di rischio degli ultimi 15m
-    esc = lambda s: s.replace('"', '\\"')
-    splunk_query = (
-        f'search (index=zta_envoy earliest=-15m) '
-        f'OR (index=zta_snort src_addr="{esc(network_ip)}" earliest=-15m) '
-        f'OR (index=zta_nftables action=DROP src_ip="{esc(network_ip)}" earliest=-15m) '
-        f'OR (index=zta_mongodb_audit atype=authenticate result!=0 param.user="{esc(user)}" earliest=-15m) '
-        f'| eval eta_min = (now() - _time) / 60 '
-        f'| eval peso = if(index="zta_envoy", 1.0, exp(-0.231 * eta_min)) '
-        f'| eval type=case('
-        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="DENY" AND user="{esc(user)}", "user_denies",'
-        f'  index="zta_envoy" AND sourcetype="opa:decision" AND decision="ALLOW" AND user="{esc(user)}", "user_allows",'
-        f'  index="zta_snort", "snort_alerts",'
-        f'  index="zta_nftables", "nftables_drops",'
-        f'  index="zta_mongodb_audit", "mongo_failures"'
-        f') '
-        f'| stats sum(peso) as weighted_score by type'
-    )
-
-    # Inizializziamo i contatori a zero
-    counts = {
-        "user_allows": 0.0,
-        "user_denies": 0.0,
-        "snort_alerts": 0.0,
-        "nftables_drops": 0.0,
-        "mongo_failures": 0.0
-    }
-
-    try:
-        results = run_splunk_search(splunk_query)
-        for res in results:
-            t = res.get("type")
-            c = res.get("weighted_score")
-            if t in counts and c:
-                try:
-                    counts[t] = float(c)
-                except ValueError:
-                    pass
-    except Exception as e:
-        logger.error("Failed querying Splunk stats: %s", e)
-        return jsonify({"error": "splunk query failed"}), 502
-
-    # 2. Query 2: User Baseline Anomaly Detection over 7 Days (earliest=-7d)
-    z_score = 0.0
-    baseline_media = 0.0
-    baseline_std = 0.0
-    current_count = 0.0
-
-    baseline_query = (
-        f'search index=zta_envoy sourcetype="opa:decision" user="{esc(user)}" earliest=-7d '
-        f'| eval is_current = if(_time >= now() - 900, 1, 0) '
-        f'| bucket _time span=15m '
-        f'| stats count as query_count by _time, is_current '
-        f'| stats avg(query_count) as media, stdev(query_count) as dev_std, max(eval(if(is_current=1, query_count, 0))) as current_count '
-        f'| eval z_score = if(dev_std > 0, (current_count - media) / dev_std, 0)'
-    )
-
-    try:
-        baseline_results = run_splunk_search(baseline_query)
-        if baseline_results:
-            res = baseline_results[0]
-            z_score = float(res.get("z_score", 0.0) or 0.0)
-            baseline_media = float(res.get("media", 0.0) or 0.0)
-            baseline_std = float(res.get("dev_std", 0.0) or 0.0)
-            current_count = float(res.get("current_count", 0.0) or 0.0)
-            logger.info(
-                "User %s 7d baseline: avg=%.2f, std=%.2f, current=%.2f, z_score=%.2f",
-                user, baseline_media, baseline_std, current_count, z_score
-            )
-    except Exception as e:
-        logger.warning("Failed querying Splunk user baseline (non-critical): %s", e)
-
-    # Calcolo del risk boost combinato (multi-vettore)
-    risk_boost = calculate_risk_boost(counts, z_score)
-
-    return jsonify(
-        {
-            "stats": counts,
-            "risk_boost": risk_boost,
-            "z_score": z_score,
-            "baseline_media": baseline_media,
-            "baseline_std": baseline_std,
-            "current_count": current_count
-        }
-    ), 200
 
 
 def tail_log_file(path: Path, stop_event: threading.Event, line_handler, post_batch_handler=None, sleep_interval=2.0) -> None:
