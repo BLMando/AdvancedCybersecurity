@@ -7,13 +7,13 @@ local env_external = os.getenv("SNORT_EXTERNAL_NET")
 if env_home and env_home ~= "" then
     HOME_NET = [[ ]] .. env_home .. [[ ]]
 else
-    HOME_NET = [[ 172.18.0.0/16 ]]
+    HOME_NET = [[ 172.19.0.0/16 ]]
 end
 
 if env_external and env_external ~= "" then
     EXTERNAL_NET = [[ ]] .. env_external .. [[ ]]
 else
-    EXTERNAL_NET = [[ 172.20.0.0/16 !172.18.0.0/16 ]]
+    EXTERNAL_NET = [[ 172.20.0.0/16 !172.19.0.0/16 ]]
 end
 
 include 'snort_defaults.lua'

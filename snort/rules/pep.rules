@@ -2,18 +2,16 @@
 
 # ── Rilevamento Downgrade SSL/TLS (Client Hello in chiaro) ──
 # Ispeziona solo i pacchetti IP/TCP diretti specificamente alla porta 10000
-alert ip any any -> any 10000 (
+alert tcp any any -> any 10000 (
     msg:"Legacy TLS version/SSL downgrade attempt targeting Envoy";
-    ip_proto:tcp;
     ssl_version:sslv2,sslv3,tls1.0,tls1.1;
     classtype:policy-violation;
     sid:3000001; rev:7;
 )
 
 # ── Prevenzione DDoS / SYN Flood su Envoy ──
-alert ip any any -> any 10000 (
+alert tcp any any -> any 10000 (
     msg:"Possible SYN flood DDoS targeting PEP Envoy";
-    ip_proto:tcp;
     detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
     sid:3000002; rev:7;
@@ -21,9 +19,8 @@ alert ip any any -> any 10000 (
 
 # ── Lateral Movement: scansione est-ovest tra container ──
 # Monitora le scansioni generiche su qualsiasi porta
-alert ip any any -> any any (
+alert tcp any any -> any any (
     msg:"Internal lateral movement detected (east-west scan)";
-    ip_proto:tcp;
     detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
     sid:3000004; rev:10;
@@ -31,17 +28,15 @@ alert ip any any -> any any (
 
 # ── Envoy Admin access da rete interna ──
 # Scatta SOLO se il pacchetto IP/TCP è diretto rigidamente alla porta admin 9901
-alert ip any any -> any 9901 (
+alert tcp any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
-    ip_proto:tcp;
     classtype:policy-violation;
     sid:3000005; rev:6;
 )
 
 # ── Port scan perimetrale verso Envoy ──
-alert ip any any -> any any (
+alert tcp any any -> any any (
     msg:"TCP SYN port scan targeting PEP perimeter";
-    ip_proto:tcp;
     detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
     sid:3000006; rev:10;
@@ -54,12 +49,4 @@ alert icmp any any -> any any (
     itype:8;
     classtype:misc-activity;
     sid:3000007; rev:7;
-)
-
-# ── DIAGNOSTIC: Test di transito istantaneo ──
-alert ip any any -> any 10000 (
-    msg:"DIAGNOSTIC: RAW IP Packet Intercepted on Envoy port 10000"; 
-    ip_proto:tcp; 
-    sid:9999998; 
-    rev:10;
 )

@@ -205,8 +205,8 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-        # Ascolto mirato su eth0 (frontend interface) con afpacket
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0 -l /var/log/snort 2>&1; then
+        # Ascolto mirato su eth0 e eth1 con afpacket e disabilitazione checksum per Docker
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0:eth1 -k none -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
@@ -236,8 +236,8 @@ services:
       - |
         echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
         mkdir -p /var/log/snort
-        # Ascolto su eth0 (backend interface)
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0 -l /var/log/snort 2>&1; then
+        # Ascolto su eth0 (backend interface) con disabilitazione checksum per Docker
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0 -k none -l /var/log/snort 2>&1; then
           echo "[snort-resource] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
@@ -342,5 +342,11 @@ volumes:
 networks:
   frontend-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
   backend-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16

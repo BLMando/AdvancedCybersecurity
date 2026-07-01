@@ -3,35 +3,31 @@
 # ##########################################################################
 
 # ── Accesso diretto MongoDB (Bypass del PEP) ──
-alert ip any any -> any 27017 (
+alert tcp any any -> any 27017 (
     msg:"Direct MongoDB access attempt - PEP bypass";
-    ip_proto:tcp;
     classtype:policy-violation;
     sid:4000001; rev:7;
 )
 
 # ── Connection Flood su MongoDB ──
-alert ip any any -> any 27017 (
+alert tcp any any -> any 27017 (
     msg:"MongoDB TCP connection flood - possible resource exhaustion";
-    ip_proto:tcp;
     detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
     sid:4000002; rev:7;
 )
 
 # ── Reconnaissance Interna su MongoDB (Port Sweep) ──
-alert ip any any -> any 27017 (
+alert tcp any any -> any 27017 (
     msg:"Internal MongoDB port sweep - possible reconnaissance";
-    ip_proto:tcp;
     detection_filter: track by_src, count 5, seconds 5;
     classtype:attempted-recon;
     sid:4000003; rev:7;
 )
 
 # ── DIAGNOSTIC: Verifica ricezione pacchetti su Mongo ──
-alert ip any any -> any 27017 (
+alert tcp any any -> any 27017 (
     msg:"RESOURCE DIAGNOSTIC: IP Packet reached MongoDB network namespace"; 
-    ip_proto:tcp;
     sid:4999999; 
     rev:6;
 )
