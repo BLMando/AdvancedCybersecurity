@@ -8,9 +8,6 @@ import urllib.request
 from pathlib import Path
 
 
-def log(msg: str) -> None:
-    print(f"[splunk-setup] {msg}", flush=True)
-
 SPLUNK_VERIFY_TLS = os.environ.get("SPLUNK_VERIFY_TLS", "false").lower() in ("true", "1", "yes")
 
 
@@ -27,7 +24,7 @@ def _url(host: str, port: int, path: str) -> str:
     return f"https://{host}:{port}{path}"
 
 
-# ─── Splunk Authentication ─────────────────────────────────────────
+# Splunk Authentication
 
 def splunk_login(host: str, port: int, username: str, password: str) -> str:
     """Authenticate to Splunk and return a session key."""
@@ -39,16 +36,11 @@ def splunk_login(host: str, port: int, username: str, password: str) -> str:
         body = resp.read().decode()
         match = re.search(r"<sessionKey>(.*?)</sessionKey>", body)
         if match:
-            log("Authentication successful.")
             return match.group(1)
-        log(f"ERROR: Could not parse session key from response: {body[:200]}")
         sys.exit(1)
     except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        log(f"Login failed (HTTP {e.code}): {body[:200]}")
         sys.exit(1)
     except Exception as e:
-        log(f"Login request failed: {e}")
         raise
 
 
@@ -65,36 +57,39 @@ def splunk_request(session_key: str, method: str, url: str, data: bytes | None =
         return (resp.status, resp.read().decode())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode()
-        log(f"HTTP {e.code} on {method} {url}: {err_body[:200]}")
         return (e.code, err_body)
 
 
-# ─── Setup Functions ───────────────────────────────────────────────
+# Setup Functions
 
 def wait_for_splunk(host: str, port: int, retries: int = 60, delay: int = 5) -> None:
-    log(f"Waiting for Splunk at {host}:{port}...")
+    print(f"Waiting for Splunk at {host}:{port}...")
     for attempt in range(1, retries + 1):
         try:
             ctx = _ssl_ctx()
             req = urllib.request.Request(_url(host, port, "/services/server/info"))
             urllib.request.urlopen(req, context=ctx, timeout=10)
-            log("Splunk is ready.")
+            print("Splunk is ready.")
             return
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                log("Splunk is ready (requires authentication).")
+                print("Splunk is ready (requires authentication).")
                 return
-            log(f"Attempt {attempt}/{retries} - HTTP {e.code}, retrying in {delay}s...")
+            print(f"Attempt {attempt}/{retries} - HTTP {e.code}, retrying in {delay}s...")
             time.sleep(delay)
         except Exception as e:
-            log(f"Attempt {attempt}/{retries} - {e}, retrying in {delay}s...")
+            print(f"Attempt {attempt}/{retries} - {e}, retrying in {delay}s...")
             time.sleep(delay)
-    log("ERROR: Splunk did not become ready in time.")
+    print("ERROR: Splunk did not become ready in time.")
     sys.exit(1)
 
 
 def create_index(session_key: str, host: str, port: int, index_name: str) -> None:
-    log(f"Creating index: {index_name}...")
+    status, _ = splunk_request(session_key, "GET", _url(host, port, f"/services/data/indexes/{index_name}"))
+    if status == 200:
+        print(f"Index {index_name} exists")
+        return
+
     data = urllib.parse.urlencode({
         "name": index_name,
         "datatype": "event",
@@ -102,73 +97,53 @@ def create_index(session_key: str, host: str, port: int, index_name: str) -> Non
     status, _ = splunk_request(session_key, "POST",
                                   _url(host, port, "/services/data/indexes"), data)
     if status in (200, 201):
-        log(f"Index '{index_name}' created successfully.")
+        print(f"Index {index_name} created")
     elif status == 409:
-        log(f"Index '{index_name}' already exists.")
+        print(f"Index {index_name} exists")
     else:
-        log(f"WARNING: Could not create index '{index_name}' (HTTP {status})")
+        print(f"Index {index_name} error {status}")
 
 
 def import_dashboard(session_key: str, host: str, port: int,
                      dashboard_path: str, dashboard_name: str = "zta_overview") -> None:
-    log(f"Importing dashboard: {dashboard_name}...")
     dashboard_file = Path(dashboard_path)
     if not dashboard_file.exists():
-        log(f"Dashboard file not found: {dashboard_path}")
+        print(f"Dashboard {dashboard_path} missing")
         return
     dashboard_xml = dashboard_file.read_text(encoding="utf-8")
-    if 'version="1.1"' not in dashboard_xml:
-        log("WARNING: Dashboard XML is missing version=\"1.1\" on root <dashboard> node.")
 
-    data = urllib.parse.urlencode({
-        "name": dashboard_name,
-        "eai:data": dashboard_xml,
-    }).encode()
+    dash_url = _url(host, port, f"/servicesNS/admin/search/data/ui/views/{dashboard_name}")
+    status, _ = splunk_request(session_key, "GET", dash_url)
 
-    views_url = _url(host, port, "/servicesNS/admin/search/data/ui/views")
-    status, _ = splunk_request(session_key, "POST", views_url, data)
-
-    if status in (200, 201):
-        log(f"Dashboard '{dashboard_name}' imported successfully.")
-        return
-
-    if status == 409:
-        log(f"Dashboard '{dashboard_name}' already exists, updating...")
-        update_url = _url(host, port, f"/servicesNS/admin/search/data/ui/views/{dashboard_name}")
-        
-        # When updating an existing view, we only pass eai:data, not the name
+    if status == 200:
+        # Dashboard exists, update it
         update_data = urllib.parse.urlencode({"eai:data": dashboard_xml}).encode()
-        
-        # Splunk REST API updates views via POST, not PUT.
-        status2, _ = splunk_request(session_key, "POST", update_url, update_data)
+        status2, _ = splunk_request(session_key, "POST", dash_url, update_data)
         if status2 in (200, 201):
-            log(f"Dashboard '{dashboard_name}' updated successfully.")
-            return
-
-        log(f"POST update failed (HTTP {status2}), recreating dashboard...")
-        splunk_request(session_key, "DELETE", update_url)
-        status3, _ = splunk_request(session_key, "POST", views_url, data)
-        if status3 in (200, 201):
-            log(f"Dashboard '{dashboard_name}' recreated successfully.")
+            print(f"Dashboard {dashboard_name} updated")
         else:
-            log(f"WARNING: Dashboard recreate returned status {status3}")
-        return
+            print(f"Dashboard {dashboard_name} update error {status2}")
+    else:
+        # Dashboard does not exist, create it
+        create_data = urllib.parse.urlencode({
+            "name": dashboard_name,
+            "eai:data": dashboard_xml,
+        }).encode()
+        views_url = _url(host, port, "/servicesNS/admin/search/data/ui/views")
+        status3, _ = splunk_request(session_key, "POST", views_url, create_data)
+        if status3 in (200, 201):
+            print(f"Dashboard {dashboard_name} imported")
+        else:
+            print(f"Dashboard {dashboard_name} import error {status3}")
 
-    log(f"WARNING: Dashboard import returned status {status}")
 
-
-# ─── Main ──────────────────────────────────────────────────────────
+# Main 
 
 def main():
     SPLUNK_HOST = "splunk"
     SPLUNK_PORT = 8089
     SPLUNK_USERNAME = os.environ.get("SPLUNK_USERNAME", "admin")
     SPLUNK_PASSWORD = os.environ.get("SPLUNK_PASSWORD", "")
-
-    if SPLUNK_VERIFY_TLS:
-        log("TLS certificate verification enabled (SPLUNK_VERIFY_TLS=true).")
-    else:
-        log("TLS certificate verification disabled (lab/Docker Splunk). Set SPLUNK_VERIFY_TLS=true in production.")
 
     wait_for_splunk(SPLUNK_HOST, SPLUNK_PORT)
     session_key = splunk_login(SPLUNK_HOST, SPLUNK_PORT, SPLUNK_USERNAME, SPLUNK_PASSWORD)
@@ -187,17 +162,9 @@ def main():
     if dashboard_file.exists():
         import_dashboard(session_key, SPLUNK_HOST, SPLUNK_PORT, str(dashboard_file))
     else:
-        log(f"Dashboard file not found at {dashboard_file}, skipping import.")
+        print(f"Dashboard {dashboard_file} missing, skipping")
 
-    log("")
-    log("=" * 60)
-    log("SPLUNK SETUP COMPLETE")
-    log("=" * 60)
-    log("Indexes: zta_envoy, zta_snort, zta_nftables, zta_mongodb, zta_mongodb_audit")
-    log("HEC token: create manually in Splunk Web (HTTP Event Collector)")
-    log("  index=zta_envoy,zta_snort,zta_nftables,zta_mongodb,zta_mongodb_audit")
-    log("  then set SPLUNK_HEC_TOKEN_ENVOY in .env")
-    log("=" * 60)
+    print("Splunk Setup complete")
 
 
 if __name__ == "__main__":
