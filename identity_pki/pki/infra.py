@@ -111,6 +111,7 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         encryption_algorithm=serialization.NoEncryption(),
     )
     cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
+    combined_pem = key_pem + cert_pem
 
     mongo_pem_path.write_bytes(combined_pem)
 
