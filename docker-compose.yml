@@ -297,7 +297,6 @@ services:
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
-    user: root
     platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
@@ -305,8 +304,6 @@ services:
       - SPLUNK_PASSWORD=${SPLUNK_PASSWORD}
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
-    entrypoint: >
-      /bin/bash -c " mkdir -p /opt/splunk/etc/auth/mycerts && cat /etc/certs/server/splunk.crt /etc/certs/server/splunk.key > /opt/splunk/etc/auth/mycerts/server_combined.pem && cp /etc/certs/ca/ca.crt /opt/splunk/etc/auth/mycerts/cacert.pem && exec /sbin/entrypoint.sh start-service "
     ports:
       - "${SPLUNK_WEB_PORT}:8000"
       - "${SPLUNK_HEC_PORT}:8088"
@@ -323,11 +320,8 @@ services:
     networks:
       - backend-net
     restart: always
-    command:
-      - -c
-      - |
-        (python3 /app/splunk_setup.py || true) &
-        exec /sbin/entrypoint.sh start-service
+    entrypoint: >
+      /bin/bash -c " (python3 /app/splunk_setup.py || true) & exec /sbin/entrypoint.sh start-service "
 
 volumes:
   splunk-var:

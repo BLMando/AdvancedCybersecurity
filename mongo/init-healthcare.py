@@ -560,10 +560,8 @@ except OperationFailure as e:
     else:
         print(f"Warning: Failed to create impersonatorRole: {e}")
 
-ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
-
 try:
-    db_external.command("dropUser", f"CN=envoy,O={ZTA_ORGANIZATION},C=IT")
+    db_external.command("dropUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
 except OperationFailure:
     pass
 
@@ -571,10 +569,10 @@ envoy_roles = [{"role": role_config["mongo_role"], "db": MONGO_DB} for role_conf
 envoy_roles.append({"role": "impersonatorRole", "db": "admin"})
 
 db_external.command(
-    "createUser", f"CN=envoy,O={ZTA_ORGANIZATION},C=IT",
+    "createUser", f"CN=envoy,O=AdvancedCybersecurity-Clients,C=IT",
     roles=envoy_roles
 )
-print(f"X.509 User created in $external: CN=envoy,O={ZTA_ORGANIZATION},C=IT")
+print(f"X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
 print("\n *** RLS complete: views + roles + users ready ***")
 
 client.close()

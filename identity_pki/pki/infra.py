@@ -26,10 +26,9 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new Envoy server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
     subject = x509.Name([
         x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
         x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
     ])
 
@@ -51,6 +50,8 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
             ]),
             critical=False,
         )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
@@ -102,6 +103,8 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
             ]),
             critical=False,
         )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
@@ -113,6 +116,7 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
     combined_pem = key_pem + cert_pem
 
+    combined_pem = key_pem + cert_pem
     mongo_pem_path.write_bytes(combined_pem)
 
     logger.info("MongoDB server certificates generated successfully (mongo.pem)")
@@ -132,10 +136,9 @@ def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, 
     logger.info("Generating new Splunk server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
     subject = x509.Name([
         x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
         x509.NameAttribute(NameOID.COMMON_NAME, "splunk"),
     ])
 
@@ -156,15 +159,22 @@ def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, 
             ]),
             critical=False,
         )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
-    key_path.write_bytes(
-        private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
+    key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
     )
-    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
+
+    key_path.write_bytes(key_pem)
+    cert_path.write_bytes(cert_pem)
+    
+    pem_path = server_dir / "splunk.pem"
+    pem_path.write_bytes(cert_pem + key_pem)
+    
     logger.info("Splunk server certificates generated successfully")
