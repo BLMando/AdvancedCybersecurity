@@ -1,66 +1,65 @@
-
 # Snort 3 — Regole Sonda PEP
 
-
 # ── Rilevamento Downgrade SSL/TLS (Client Hello in chiaro) ──
-# Cattura i tentativi provenienti dall'esterno ($EXTERNAL_NET) diretti alla porta pubblica di Envoy
-alert tcp $EXTERNAL_NET any -> any 10000 (
+# Ispeziona solo i pacchetti IP/TCP diretti specificamente alla porta 10000
+alert ip any any -> any 10000 (
     msg:"Legacy TLS version/SSL downgrade attempt targeting Envoy";
+    ip_proto:tcp;
     ssl_version:sslv2,sslv3,tls1.0,tls1.1;
     classtype:policy-violation;
-    sid:3000001; rev:3;
+    sid:3000001; rev:7;
 )
 
 # ── Prevenzione DDoS / SYN Flood su Envoy ──
-# Monitora i flood di pacchetti SYN provenienti dall'esterno sulla porta pubblica di Envoy
-alert tcp $EXTERNAL_NET any -> any 10000 (
+alert ip any any -> any 10000 (
     msg:"Possible SYN flood DDoS targeting PEP Envoy";
-    flags:S;
-    detection_filter: track by_src, count 100, seconds 5;
+    ip_proto:tcp;
+    detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
-    sid:3000002; rev:3;
+    sid:3000002; rev:7;
 )
 
 # ── Lateral Movement: scansione est-ovest tra container ──
-# Si attiva se l'attacco parte da dentro il backend ($HOME_NET) e scansiona altre porte interne
-alert tcp $HOME_NET any -> any any (
+# Monitora le scansioni generiche su qualsiasi porta
+alert ip any any -> any any (
     msg:"Internal lateral movement detected (east-west scan)";
-    flags:S;
-    detection_filter: track by_src, count 50, seconds 30;
+    ip_proto:tcp;
+    detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
-    sid:3000004; rev:3;
+    sid:3000004; rev:10;
 )
 
 # ── Envoy Admin access da rete interna ──
-# Rileva se un container compromesso tenta di interrogare la porta di controllo di Envoy
-alert tcp $HOME_NET any -> any 9901 (
+# Scatta SOLO se il pacchetto IP/TCP è diretto rigidamente alla porta admin 9901
+alert ip any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
-    flow:to_server,established;
+    ip_proto:tcp;
     classtype:policy-violation;
-    sid:3000005; rev:3;
+    sid:3000005; rev:6;
 )
 
 # ── Port scan perimetrale verso Envoy ──
-# Rileva le scansioni di porte classiche che arrivano dal frontend ($EXTERNAL_NET)
-alert tcp $EXTERNAL_NET any -> any any (
+alert ip any any -> any any (
     msg:"TCP SYN port scan targeting PEP perimeter";
-    flags:S;
-    detection_filter: track by_src, count 20, seconds 5;
+    ip_proto:tcp;
+    detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
-    sid:3000006; rev:3;
+    sid:3000006; rev:10;
 )
 
-# ── ICMP verso Envoy (possibile tunneling / esfiltrazione) ──
-alert icmp $EXTERNAL_NET any -> any any (
-    msg:"Suspicious ICMP large payload (possible exfiltration via PEP)";
+# ── ICMP Exfiltration / Tunnel verso Envoy ──
+alert icmp any any -> any any (
+    msg:"Suspicious ICMP packet with large payload (possible exfiltration)";
     dsize:>100;
     itype:8;
     classtype:misc-activity;
-    sid:3000007; rev:3;
+    sid:3000007; rev:7;
 )
 
-# ── DIAGNOSTIC: Tracciamento Flusso (Utili per verificare Splunk) ──
-# Mostra il pacchetto quando entra dal Frontend (eth0)
-alert tcp $EXTERNAL_NET any -> any 10000 (msg:"DIAGNOSTIC: Traffic entered FRONTEND (eth0)"; sid:9999998; rev:3;)
-# Mostra lo stesso pacchetto quando viene inoltrato al Backend (eth1)
-alert tcp $HOME_NET any -> any any (msg:"DIAGNOSTIC: Traffic forwarded to BACKEND (eth1)"; sid:9999999; rev:3;)
+# ── DIAGNOSTIC: Test di transito istantaneo ──
+alert ip any any -> any 10000 (
+    msg:"DIAGNOSTIC: RAW IP Packet Intercepted on Envoy port 10000"; 
+    ip_proto:tcp; 
+    sid:9999998; 
+    rev:10;
+)

@@ -1,51 +1,37 @@
+# ##########################################################################
+# Snort 3 — Regole Sonda Risorsa (MongoDB sidecar) - Versione Integrale
+# ##########################################################################
 
-# Snort 3 — Regole Sonda MongoDB
-
-
-# ── Bulk Read anomalo (possibile data exfiltration) ──
-# Rileva un volume massiccio di query sulla sessione TCP stabilita provenienti dalla rete interna lecita
-alert tcp $HOME_NET any -> any 27017 (
-    msg:"Bulk MongoDB access - possible data exfiltration";
-    flow:to_server,established;
-    detection_filter: track by_src, count 100, seconds 10;
+# ── Accesso diretto MongoDB (Bypass del PEP) ──
+alert ip any any -> any 27017 (
+    msg:"Direct MongoDB access attempt - PEP bypass";
+    ip_proto:tcp;
     classtype:policy-violation;
-    sid:4000001; rev:3;
+    sid:4000001; rev:7;
 )
 
-# ── Rilevamento Connection Flood su MongoDB ──
-# Rileva tentativi di Denial of Service (DoS) tramite l'invio massiccio di pacchetti SYN da host interni
-alert tcp $HOME_NET any -> any 27017 (
+# ── Connection Flood su MongoDB ──
+alert ip any any -> any 27017 (
     msg:"MongoDB TCP connection flood - possible resource exhaustion";
-    flags:S;
-    detection_filter: track by_src, count 50, seconds 10;
+    ip_proto:tcp;
+    detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
-    sid:4000002; rev:3;
+    sid:4000002; rev:7;
 )
 
 # ── Reconnaissance Interna su MongoDB (Port Sweep) ──
-# Rileva scansioni rapide sulla porta di Mongo da parte di altri host
-alert tcp $HOME_NET any -> any 27017 (
+alert ip any any -> any 27017 (
     msg:"Internal MongoDB port sweep - possible reconnaissance";
-    flags:S;
-    detection_filter: track by_src, count 15, seconds 5;
+    ip_proto:tcp;
+    detection_filter: track by_src, count 5, seconds 5;
     classtype:attempted-recon;
-    sid:4000003; rev:3;
-)
-
-# ── Accesso diretto MongoDB (Bypass del PEP) ──
-# Se il pacchetto proviene da EXTERNAL_NET (ovvero fuori dalla subnet 172.18.0.0/16 del backend),
-# significa che qualcuno ha trovato una rotta per saltare Envoy e parlare direttamente con il database.
-alert tcp $EXTERNAL_NET any -> any 27017 (
-    msg:"MongoDB access from non-Backend network (PEP bypass)";
-    flow:to_server,established;
-    classtype:policy-violation;
-    sid:4000007; rev:3;
+    sid:4000003; rev:7;
 )
 
 # ── DIAGNOSTIC: Verifica ricezione pacchetti su Mongo ──
-# Spara un log per ogni pacchetto TCP intercettato sulla porta di Mongo, utilissimo per testare Splunk
-alert tcp any any -> any 27017 (
-    msg:"RESOURCE DIAGNOSTIC: Packet reached MongoDB network namespace"; 
+alert ip any any -> any 27017 (
+    msg:"RESOURCE DIAGNOSTIC: IP Packet reached MongoDB network namespace"; 
+    ip_proto:tcp;
     sid:4999999; 
-    rev:2;
+    rev:6;
 )
