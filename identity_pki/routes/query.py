@@ -189,7 +189,7 @@ def api_query():
 
         view_name = _get_rls_view_name(role, collection_name)
 
-    mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+    mongo_db_name = os.environ.get("MONGO_DATABASE", "zta_db")
     ca_path = os.path.join(service.cert_dir, "ca.crt")
 
     try:

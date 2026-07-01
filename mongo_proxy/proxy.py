@@ -13,7 +13,7 @@ logger = logging.getLogger("mongo_proxy")
 
 app = Flask(__name__)
 
-MONGO_DB_NAME = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+MONGO_DB_NAME = os.environ.get("MONGO_DATABASE", "zta_db")
 CA_PATH = "/etc/certs/ca/ca.crt"
 CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
 
@@ -146,7 +146,7 @@ def handle_query():
         }), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PROXY_PORT", "5001"))
+    port = int(os.environ.get("MONGO_PROXY_PORT", "5001"))
     
     # Configure mTLS for the Flask HTTPS server
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
