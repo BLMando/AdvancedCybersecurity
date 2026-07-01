@@ -1,6 +1,4 @@
-# ═══════════════════════════════════════════════════════════════════
 # Snort 3 — Regole Zero Trust Architecture
-# ═══════════════════════════════════════════════════════════════════
 
 # ── REGOLA 1: Accesso diretto a MongoDB (bypass del PEP Envoy) ──
 # In architettura ZTA, MongoDB (porta 27017) deve essere raggiunto

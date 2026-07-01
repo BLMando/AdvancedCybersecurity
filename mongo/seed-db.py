@@ -83,7 +83,7 @@ db: Any = client.get_database()
 print("  Connected\n")
 
 # 1. PROVIDERS
-print("→ Seeding: providers …", flush=True)
+print("-> Seeding: providers …", flush=True)
 provider_ops = []
 
 doctors = df["Doctor"].dropna().unique()
@@ -110,9 +110,9 @@ if provider_ops:
 print(f"   {len(doctors):,} doctors, {len(hospitals):,} hospitals")
 
 # 2. PATIENTS
-print("→ Seeding: patients …", flush=True)
+print("-> Seeding: patients …", flush=True)
 patient_ops = []
-patient_id_map = {}  # name → uuid
+patient_id_map = {}  # name -> uuid
 
 unique_patients = df.drop_duplicates(subset=["Name"]).copy()
 for _, row in unique_patients.iterrows():
@@ -136,7 +136,7 @@ if patient_ops:
 print(f"   {len(unique_patients):,} unique patients")
 
 # 3. ADMISSIONS + 4. CLINICAL RECORDS + 5. BILLING
-print("→ Seeding: admissions / clinical_records / billing …", flush=True)
+print("-> Seeding: admissions / clinical_records / billing …", flush=True)
 admission_ops = []
 clinical_ops = []
 billing_ops = []

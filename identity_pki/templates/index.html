@@ -1578,8 +1578,8 @@
 
     let primaryAuthCallbacks = null;
 
-    // isStepUp=true  → calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
-    // isStepUp=false → calls /api/auth/verify-otp (full enrollment session token)
+    // isStepUp=true  -> calls /api/auth/step-up (refresh last_mfa_time only, no new enrollment token)
+    // isStepUp=false -> calls /api/auth/verify-otp (full enrollment session token)
     function promptPrimaryAuth(email, isStepUp = false) {
       return new Promise((resolve, reject) => {
         document.getElementById("modal-login-email").value = email;

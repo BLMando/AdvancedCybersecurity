@@ -1,8 +1,6 @@
-# ═══════════════════════════════════════════════════════════════════
 # Snort 3 — Regole Sonda PEP (Envoy sidecar)
 # Posizione: namespace di rete condiviso con Envoy
 # Vede: traffico post-firewall, pre-autorizzazione
-# ═══════════════════════════════════════════════════════════════════
 
 # ── NoSQL Injection: $where ──
 # Tentativo di injection nel traffico MongoDB via Envoy

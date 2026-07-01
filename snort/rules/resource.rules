@@ -1,8 +1,6 @@
-# ═══════════════════════════════════════════════════════════════════
 # Snort 3 — Regole Sonda Risorsa (MongoDB sidecar)
 # Posizione: namespace di rete condiviso con MongoDB
 # Vede: traffico autenticato e autorizzato (post-mTLS, post-OPA)
-# ═══════════════════════════════════════════════════════════════════
 
 # ── Bulk Read anomalo (possibile data exfiltration) ──
 # Molte connessioni MongoDB in poco tempo dallo stesso source
