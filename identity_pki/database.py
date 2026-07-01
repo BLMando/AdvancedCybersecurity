@@ -3,19 +3,9 @@ import json
 import logging
 from typing import Optional, Any
 from datetime import datetime, timezone
-from pymongo import MongoClient as RealMongoClient
+from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 from .pki import PKIService
-
-class MongoClientProxy:
-    def __new__(cls, *args, **kwargs):
-        import sys
-        app_module = sys.modules.get('identity_pki.app')
-        if app_module and hasattr(app_module, 'MongoClient'):
-            return app_module.MongoClient(*args, **kwargs)
-        return RealMongoClient(*args, **kwargs)
-
-MongoClient = MongoClientProxy
 
 def provision_mongo_user(service: PKIService, logger: logging.Logger, username: str, role: str) -> None:
     """Auto-provisions a MongoDB SCRAM and external OIDC user with role permissions."""
