@@ -114,7 +114,8 @@ parsed_client_cert := cert if {
 
 is_mongodb_oidc if {
 	input.parsed_body.query.mechanism == "MONGODB-OIDC"
-} else if {
+}
+is_mongodb_oidc if {
 	input.parsed_body.mechanism == "MONGODB-OIDC"
 }
 
@@ -124,12 +125,11 @@ oidc_payload_field := val if {
 	val := input.parsed_body.payload
 } else := ""
 
-cert_der_bytes(pem_str) := der if {
+cert_der_bytes(pem_str) := base64.decode(clean_pem) if {
 	clean1 := replace(pem_str, "-----BEGIN CERTIFICATE-----", "")
 	clean2 := replace(clean1, "-----END CERTIFICATE-----", "")
 	clean3 := replace(clean2, "\n", "")
 	clean_pem := replace(clean3, "\r", "")
-	der := base64.decode(clean_pem)
 }
 
 trusted_proxies := {
@@ -140,13 +140,10 @@ trusted_proxies := {
 valid_oidc_token if {
 	payload_val := oidc_payload_field
 	payload_val != ""
-	
 	token := extract_jwt_from_payload(payload_val)
 	token != "unknown"
-	
 	claims := verify_oidc_jwt(token)
 	claims.exp > time.now_ns() / 1000000000
-	
 	is_valid_token_binding(claims, cert_subject_cn)
 }
 
@@ -154,30 +151,6 @@ extract_jwt_from_payload(payload_val) := token if {
 	is_string(payload_val)
 	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, payload_val)
 	token := payload_val
-} else := token if {
-	is_string(payload_val)
-	decoded := base64.decode(payload_val)
-	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
-	token := decoded
-} else := token if {
-	is_string(payload_val)
-	decoded := base64.decode(payload_val)
-	json.is_valid(decoded)
-	parsed := json.unmarshal(decoded)
-	token := parsed.jwt
-} else := token if {
-	is_object(payload_val)
-	base64_data := payload_val["$binary"].base64
-	decoded := base64.decode(base64_data)
-	json.is_valid(decoded)
-	parsed := json.unmarshal(decoded)
-	token := parsed.jwt
-} else := token if {
-	is_object(payload_val)
-	base64_data := payload_val["$binary"].base64
-	decoded := base64.decode(base64_data)
-	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
-	token := decoded
 } else := "unknown"
 
 verify_oidc_jwt(token) := claims if {
@@ -215,15 +188,11 @@ token_step_up_fresh if {
 
 is_valid_token_binding(claims, cert_subject_cn) if {
 	cert_subject_cn == claims.sub
-	
 	raw_cert_pem := input.attributes.source.certificate
 	raw_cert_pem != ""
 	cert_pem := cert_pem_decoded(raw_cert_pem)
-	
 	cert_der := cert_der_bytes(cert_pem)
-	client_cert_hex := crypto.sha256(cert_der)
-	
-	claims.cnf["x5t#S256_hex"] == client_cert_hex
+	claims.cnf["x5t#S256_hex"] == crypto.sha256(cert_der)
 }
 
 is_valid_token_binding(claims, cert_subject_cn) if {
