@@ -1,5 +1,12 @@
 # tpm_handlers.ps1 - HTTP route handlers
 
+function Get-ErrorMessage ($err) {
+    if ($null -ne $err.Exception) {
+        return $err.Exception.Message
+    }
+    return $err.ToString()
+}
+
 function Handle-CertRequest ($cn) {
     Write-Host "[API] Ricevuto /cert per CN=$cn" -ForegroundColor Gray
     $cert = Get-ZtaCertificateWithFallback $cn
@@ -38,6 +45,7 @@ function Handle-EnrollRequest ($cn, $jsonBody) {
         return (200, @{ status = "success"; message = "Enrollment completato!" })
     } catch {
         Write-Host "[API] Enrollment TPM/Store fallito per CN=$cn : $_. Provo fallback software file-based..." -ForegroundColor Yellow
+        Write-Host "[API] Enrollment TPM/Store fallito per CN=$cn : $(Get-ErrorMessage $_). Provo fallback software file-based..." -ForegroundColor Yellow
         return Handle-SoftwareFallbackEnroll $cn $role $dept $mac $cpu $sessionToken
     }
 }
@@ -63,8 +71,8 @@ function Handle-SoftwareFallbackEnroll ($cn, $role, $dept, $mac, $cpu, $sessionT
         Write-Host "[API] /enroll software fallback completato per CN=$cn" -ForegroundColor Green
         return (200, @{ status = "success"; message = "Enrollment completato (Fallback Software File-based)!" })
     } catch {
-        Write-Host "[API] /enroll fallback software fallito per CN=$cn : $_" -ForegroundColor Red
-        return (500, @{ status = "error"; message = "TPM enrollment e software fallback falliti entrambi: $($_.Exception.Message)" })
+        Write-Host "[API] /enroll fallback software fallito per CN=$cn : $(Get-ErrorMessage $_)" -ForegroundColor Red
+        return (500, @{ status = "error"; message = "TPM enrollment e software fallback falliti entrambi: $(Get-ErrorMessage $_)" })
     }
 }
 
@@ -80,8 +88,8 @@ function Handle-ProxyStartRequest ($cn, $jsonBody) {
             expires_at = (Get-Date).AddSeconds($ttl).ToString("o")
         })
     } catch {
-        Write-Host "[API] /proxy/start fallito per CN=$cn : $_" -ForegroundColor Yellow
-        return (404, @{ error = $_.Exception.Message })
+        Write-Host "[API] /proxy/start fallito per CN=$cn : $(Get-ErrorMessage $_)" -ForegroundColor Yellow
+        return (404, @{ error = (Get-ErrorMessage $_) })
     }
 }
 
@@ -134,7 +142,7 @@ function Handle-OidcTokenRequest ($cn, $jsonBody) {
     } catch {
         Write-Host "[API] /oidc/token fallito per CN=$tokenCN : $_" -ForegroundColor Red
         $statusCode = 500
-        $responseObj = @{ status = "error"; message = $_.Exception.Message }
+        $responseObj = @{ status = "error"; message = (Get-ErrorMessage $_) }
         if ($_.Exception -and $_.Exception.Response) {
             try {
                 $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
@@ -166,7 +174,7 @@ function Handle-SignRequest ($cn, $jsonBody) {
         $sigB64 = [Convert]::ToBase64String($sigBytes)
         return (200, @{ signature_b64 = $sigB64; pub_key_pem = Get-PublicKeyPem $cert })
     } catch {
-        return (500, @{ error = $_.Exception.Message })
+        return (500, @{ error = (Get-ErrorMessage $_) })
     }
 }
 
@@ -201,7 +209,7 @@ function Handle-AuthRequest ($cn) {
         return (200, @{ status = "success"; response = "Status: 200, Data: $statusLine" })
     } catch {
         Write-Host "[API] /auth fallito per CN=$cn : $_" -ForegroundColor Red
-        return (500, @{ status = "error"; message = $_.Exception.Message })
+        return (500, @{ status = "error"; message = (Get-ErrorMessage $_) })
     }
 }
 
