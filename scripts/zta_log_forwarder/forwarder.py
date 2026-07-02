@@ -31,6 +31,25 @@ hec_envoy = HEClient(
 )
 
 
+# SIDs for automated L3/L4 blocking
+AUTO_BLOCK_SIDS = {
+    # Sonda PEP
+    3000002,  # Possible SYN flood DDoS
+    3000004,  # Internal lateral movement
+    3000006,  # TCP SYN port scan targeting PEP
+    # Sonda Risorsa
+    4000001,  # Direct MongoDB access attempt (PEP bypass)
+    4000002,  # MongoDB TCP connection flood
+    4000003,  # Internal MongoDB port sweep
+}
+
+ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
+SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
+NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
+MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
+MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
+
+
 class LogCorrelator:
     """Correlates and merges OPA ALLOW logs with subsequent Lua WAF DENY logs in memory
 
@@ -102,12 +121,6 @@ class LogCorrelator:
 
 log_correlator = LogCorrelator(hec_envoy)
 
-ENVOY_LOG_PATH = Path("/var/log/envoy/access.log")
-SNORT_LOG_PATH = Path("/var/log/snort/alert_json.txt")
-NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
-MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
-MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
-
 
 def tail_log_file(path: Path, stop_event: threading.Event, line_handler, post_batch_handler=None, sleep_interval=2.0) -> None:
     """Generic helper to tail a log file, calling line_handler for each line and optionally post_batch_handler."""
@@ -158,13 +171,12 @@ def tail_envoy_logs(stop_event: threading.Event) -> None:
 
 
 def auto_block_ip(ip: str) -> None:
-    path = "/etc/certs/ca/blocklist.txt"
+    path = "/app/blocklist/blocklist.txt"
     try:
         if not os.path.exists(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 pass
-            os.chmod(path, 0o644)
         with open(path, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
             ips = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
@@ -177,6 +189,8 @@ def auto_block_ip(ip: str) -> None:
         logger.error("Failed to auto-block IP %s: %s", ip, e)
 
 
+
+
 def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> None:
     """Background thread that tails a Snort 3 alert_json log file."""
     def handle_line(line: str) -> None:
@@ -186,9 +200,9 @@ def tail_snort_logs(path: Path, sensor: str, stop_event: threading.Event) -> Non
             fields["sensor"] = sensor
             hec_envoy.send_event(fields, index="zta_snort", sourcetype="snort:alert_json")
 
-            priority = fields.get("priority", 0)
             src_addr = fields.get("src_addr", "0.0.0.0")
-            if priority in (1, 2) and src_addr not in ("0.0.0.0", "127.0.0.1", "localhost", "host.docker.internal"):
+            sid = int(fields.get("sid", 0))
+            if sid in AUTO_BLOCK_SIDS and src_addr not in ("0.0.0.0", "127.0.0.1", "localhost", "host.docker.internal"):
                 auto_block_ip(src_addr)
         except json.JSONDecodeError:
             logger.warning("Skipping invalid JSON from Snort [%s] log", sensor)

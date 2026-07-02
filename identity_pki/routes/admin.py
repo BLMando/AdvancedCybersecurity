@@ -69,8 +69,7 @@ def api_revoke_certificate():
 
 
 def _get_blocklist_path():
-    service = current_app.config["pki_service"]
-    return os.path.join(service.cert_dir, "blocklist.txt")
+    return "/app/blocklist/blocklist.txt"
 
 
 def _read_blocklist() -> list[str]:
@@ -87,6 +86,7 @@ def _read_blocklist() -> list[str]:
 
 def _write_blocklist(ips: list[str]) -> None:
     path = _get_blocklist_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX)
