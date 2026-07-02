@@ -1,84 +1,147 @@
-# tpm_proxy.ps1 - TCP loopback proxy to Envoy
+# tpm_proxy.ps1 - Proxy session management
+
 function Start-ProxySession ($cn, $ttlSeconds) {
-    if ($script:Sessions.ContainsKey("default")) {
-        Stop-ProxySession "default" | Out-Null
+    $cert = Get-ZtaCertificateWithFallback $cn
+    if (-not $cert) {
+        throw "Certificato non trovato né in Windows Store né su disco per CN=$cn"
     }
 
-    $cert = Get-ZtaCertificate $cn
-    if (-not $cert) { throw "Certificate not found for CN=$cn" }
-
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 27019)
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, 0)
     $listener.Start()
+    $localPort = $listener.LocalEndpoint.Port
+    $cts = [System.Threading.CancellationTokenSource]::new()
+    $sessionToken = [Guid]::NewGuid().ToString()
 
-    $session = @{
+    $sessionState = @{
         CN = $cn
-        Port = 27019
+        Port = $localPort
         Listener = $listener
-        Active = $true
+        CTS = $cts
         ExpiresAt = (Get-Date).AddSeconds($ttlSeconds)
+        ExpiryTimer = $null
     }
-    $script:Sessions["default"] = $session
+    $script:Sessions.TryAdd($sessionToken, $sessionState) | Out-Null
+    $expiryTimer = [System.Threading.Timer]::new(
+        [System.Threading.TimerCallback]{ param($state) Stop-ProxySession $state | Out-Null },
+        $sessionToken,
+        [TimeSpan]::FromSeconds($ttlSeconds),
+        [System.Threading.Timeout]::InfiniteTimeSpan
+    )
+    $sessionState.ExpiryTimer = $expiryTimer
 
-    # Run connection accept loop in a background thread
-    $thread = [System.Threading.Thread]::new({
-        param($s, $c)
+    $adKey = "ZTA_PROXY_$sessionToken"
+    $adData = @{ Listener = $listener; CTS = $cts }
+    [AppDomain]::CurrentDomain.SetData($adKey, $adData)
+
+    $bgPs = [System.Management.Automation.PowerShell]::Create()
+    $null = $bgPs.AddScript({
+        param($cn, $sessionToken, $adKey, $envoyHost, $envoyPort, $certObj, $envoyCertPath)
+
+        $adData = [AppDomain]::CurrentDomain.GetData($adKey)
+        $listener = $adData.Listener
+        $cts = $adData.CTS
+        $localPort = $listener.LocalEndpoint.Port
+
+        Write-Host "[*] Proxy TCP avviato su localhost:$localPort per CN=$cn (Sessione: $sessionToken)" -ForegroundColor Green
         try {
-            while ($s.Active) {
-                if (-not $s.Listener.Pending()) {
-                    [System.Threading.Thread]::Sleep(100)
-                    continue
-                }
-                $local = $s.Listener.AcceptTcpClient()
-                
-                # Pipe client in background task
-                [System.Threading.Tasks.Task]::Run({
-                    $localClient = $local
-                    try {
-                        $envoy = [System.Net.Sockets.TcpClient]::new("localhost", 10000)
-                        $ssl = [System.Net.Security.SslStream]::new(
-                            $envoy.GetStream(),
-                            $false,
-                            { param($snd, $certificate, $chain, $errors) return $true }
-                        )
-                        $certsCollection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new($c)
-                        $ssl.AuthenticateAsClient("localhost", $certsCollection, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+            while (-not $cts.Token.IsCancellationRequested) {
+                $acceptTask = $listener.AcceptTcpClientAsync()
+                $acceptTask.Wait($cts.Token)
+                if ($acceptTask.IsCanceled) { break }
+                $localClient = $acceptTask.Result
+                $capturedClient = $localClient
 
-                        $localStream = $localClient.GetStream()
-                        $t1 = $localStream.CopyToAsync($ssl)
-                        $t2 = $ssl.CopyToAsync($localStream)
+                $connPs = [System.Management.Automation.PowerShell]::Create()
+                $null = $connPs.AddScript({
+                    param($localSock, $cn, $cert, $envoyHost, $envoyPort, $pinnedEnvoyCertPath)
+                    $logFile = Join-Path $env:TEMP "zta_proxy_debug.log"
+                    $envoyClient = $null
+                    $sslStream = $null
+                    try {
+                        "    [Proxy] Nuova connessione locale per CN=$cn. Tentativo mTLS verso Envoy (${envoyHost}:${envoyPort})..." | Out-File -FilePath $logFile -Append -Encoding utf8
+
+                        $envoyClient = [System.Net.Sockets.TcpClient]::new($envoyHost, $envoyPort)
+                        "    [Proxy] TCP connesso a Envoy" | Out-File -FilePath $logFile -Append -Encoding utf8
+
+                        $validationCallback = [System.Net.Security.RemoteCertificateValidationCallback] {
+                            param($sender, $certificate, $chain, $sslPolicyErrors)
+                            if ($certificate -eq $null -or -not (Test-Path $pinnedEnvoyCertPath)) {
+                                return $false
+                            }
+                            try {
+                                $presentedCert = if ($certificate -is [System.Security.Cryptography.X509Certificates.X509Certificate2]) {
+                                    $certificate
+                                } else {
+                                    [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate)
+                                }
+                                $pinnedCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pinnedEnvoyCertPath)
+                                return $presentedCert.Thumbprint -eq $pinnedCert.Thumbprint
+                            } catch {
+                                return $false
+                            }
+                        }
+
+                        $sslStream = [System.Net.Security.SslStream]::new(
+                            $envoyClient.GetStream(),
+                            $false,
+                            $validationCallback
+                        )
+
+                        if ($cert -eq $null) {
+                            "    [Proxy] ERRORE: cert e' null!" | Out-File -FilePath $logFile -Append -Encoding utf8
+                            throw "Certificato client e' null"
+                        }
+
+                        $certsCollection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new($cert)
+                        "    [Proxy] Collezione cert creata" | Out-File -FilePath $logFile -Append -Encoding utf8
+
+                        $sslStream.AuthenticateAsClient(
+                            $envoyHost,
+                            $certsCollection,
+                            [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
+                            $false
+                        )
+
+                        "    [Proxy] Handshake mTLS completato con Envoy!" | Out-File -FilePath $logFile -Append -Encoding utf8
+
+                        $localStream = $localSock.GetStream()
+                        $t1 = $localStream.CopyToAsync($sslStream)
+                        $t2 = $sslStream.CopyToAsync($localStream)
+
                         [System.Threading.Tasks.Task]::WaitAll(@($t1, $t2))
                     } catch {
+                        "    [Proxy ERROR] Errore nel tunnel mTLS per CN=${cn}: $_" | Out-File -FilePath $logFile -Append -Encoding utf8
                     } finally {
-                        if ($envoy) { $envoy.Close() }
-                        if ($localClient) { $localClient.Close() }
+                        if ($localSock) { $localSock.Close() }
+                        if ($sslStream) { $sslStream.Close() }
+                        if ($envoyClient) { $envoyClient.Close() }
                     }
-                })
+                }).AddArgument($capturedClient).AddArgument($cn).AddArgument($certObj).AddArgument($envoyHost).AddArgument($envoyPort).AddArgument($envoyCertPath) | Out-Null
+                $connPs.BeginInvoke() | Out-Null
             }
-        } catch {}
-    })
-    $thread.Start($session, $cert)
-
-    # Expiry task
-    [System.Threading.Tasks.Task]::Run({
-        [System.Threading.Thread]::Sleep([int]($ttlSeconds * 1000))
-        if ($script:Sessions["default"] -eq $session) {
-            Stop-ProxySession "default" | Out-Null
-            Write-Host "[Proxy] Session expired for CN=$cn" -ForegroundColor Yellow
+        } catch {
+            Write-Host "[*] Proxy loop terminato per $cn : $_" -ForegroundColor Yellow
+        } finally {
+            $listener.Stop()
+            [AppDomain]::CurrentDomain.SetData($adKey, $null)
+            Write-Host "[*] Proxy TCP su localhost:$localPort fermato." -ForegroundColor Yellow
         }
-    })
+    }).AddArgument($cn).AddArgument($sessionToken).AddArgument($adKey).AddArgument($EnvoyHost).AddArgument($EnvoyPort).AddArgument($cert).AddArgument($ENVOY_CERT_PATH) | Out-Null
+    $bgPs.BeginInvoke() | Out-Null
 
     return @{
-        port = 27019
-        session_token = "default"
+        port = $localPort
+        session_token = $sessionToken
     }
 }
 
-function Stop-ProxySession ($token) {
-    if ($script:Sessions.ContainsKey("default")) {
-        $s = $script:Sessions["default"]
-        $s.Active = $false
-        $s.Listener.Stop()
-        $script:Sessions.Remove("default")
+function Stop-ProxySession ($sessionToken) {
+    if ($script:Sessions.ContainsKey($sessionToken)) {
+        $state = $script:Sessions[$sessionToken]
+        if ($state.ExpiryTimer) { $state.ExpiryTimer.Dispose() }
+        $state.CTS.Cancel()
+        $state.Listener.Stop()
+        $script:Sessions.TryRemove($sessionToken, [ref]$null) | Out-Null
         return $true
     }
     return $false
