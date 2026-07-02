@@ -3,7 +3,8 @@ import hashlib
 import os
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,7 @@ def det_uuid(namespace: str, key: str) -> str:
     return str(uuid.uuid5(ns, key))
 
 
-def parse_date(val: Any | None):
+def parse_date(val: Any):
     if not val or pd.isna(val):
         return None
     return pd.to_datetime(val).to_pydatetime().replace(tzinfo=UTC)

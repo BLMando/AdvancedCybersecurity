@@ -35,16 +35,16 @@ set -e
     fi
 
     echo "Checking if '${MONGO_DB}' database needs initialization..."
-    COLLECTIONS_COUNT=$(mongosh "mongodb://${MONGO_USER}:${MONGO_PASS}@127.0.0.1:27017/${MONGO_DB}?authSource=admin&directConnection=true" --tls --tlsCAFile /etc/certs/ca/ca.crt --tlsCertificateKeyFile /etc/certs/server/mongo.pem --tlsAllowInvalidCertificates --quiet --eval 'db.getCollectionNames().length' < /dev/null 2>/dev/null || echo "0")
+    PATIENTS_COUNT=$(mongosh "mongodb://${MONGO_USER}:${MONGO_PASS}@127.0.0.1:27017/${MONGO_DB}?authSource=admin&directConnection=true" --tls --tlsCAFile /etc/certs/ca/ca.crt --tlsCertificateKeyFile /etc/certs/server/mongo.pem --tlsAllowInvalidCertificates --quiet --eval 'try { db.patients.countDocuments() } catch(e) { 0 }' < /dev/null 2>/dev/null || echo "0")
     
-    if [ "$COLLECTIONS_COUNT" = "0" ] || [ -z "$COLLECTIONS_COUNT" ]; then
-        echo "Database is empty. Running initialization..."
+    if [ "$PATIENTS_COUNT" = "0" ] || [ -z "$PATIENTS_COUNT" ] || [ "$PATIENTS_COUNT" = "null" ]; then
+        echo "Database is empty or missing patient records. Running initialization..."
                 
         python3 /app/mongo/init-healthcare.py
         python3 /app/mongo/seed-db.py --csv /app/mongo/dataset/healthcare_dataset.csv
         echo "Database initialization and seeding complete!"
     else
-        echo "Database already initialized (found $COLLECTIONS_COUNT collections)."
+        echo "Database already initialized (found $PATIENTS_COUNT patient records)."
     fi
 ) &
 disown
