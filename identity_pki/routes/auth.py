@@ -2,17 +2,18 @@
 
 import os
 import random
-import uuid
 import smtplib
-from email.mime.text import MIMEText
+import uuid
+from datetime import UTC, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone, timedelta
-from flask import Blueprint, request, jsonify, current_app
+from email.mime.text import MIMEText
+
+from flask import Blueprint, current_app, jsonify, request
 
 from ..auth import (
     AD_USERS,
-    PENDING_OTPS,
     ENROLLMENT_SESSIONS,
+    PENDING_OTPS,
     PRIMARY_SESSIONS,
 )
 from .utils import error_response
@@ -68,11 +69,7 @@ def send_otp_email(recipient_email: str, otp: str, user_cn: str) -> bool:
 def api_auth_users():
     """Get simulated AD users for frontend login dropdown."""
     users = {
-        email: {
-            "cn": info["cn"],
-            "role": info["role"],
-            "department": info["department"]
-        }
+        email: {"cn": info["cn"], "role": info["role"], "department": info["department"]}
         for email, info in AD_USERS.items()
     }
     return jsonify(users)
@@ -98,19 +95,16 @@ def api_auth_login():
     PENDING_OTPS[email] = {
         "otp": otp,
         "user_info": user_info,
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5)
+        "expires_at": datetime.now(UTC) + timedelta(minutes=5),
     }
 
     # Send OTP via email
     email_sent = send_otp_email(email, otp, user_info["cn"])
 
     current_app.logger.info(f"AD Login Success for {email}. OTP Generated (email_sent={email_sent})")
-    return jsonify({
-        "status": "otp_required",
-        "message": f"OTP code sent to {email}",
-        "email": email,
-        "email_sent": email_sent
-    })
+    return jsonify(
+        {"status": "otp_required", "message": f"OTP code sent to {email}", "email": email, "email_sent": email_sent}
+    )
 
 
 @auth_bp.post("/api/auth/verify-otp")
@@ -127,7 +121,7 @@ def api_auth_verify_otp():
     if not pending:
         return error_response("No pending authentication session found", 400)
 
-    if datetime.now(timezone.utc) > pending["expires_at"]:
+    if datetime.now(UTC) > pending["expires_at"]:
         PENDING_OTPS.pop(email, None)
         return error_response("OTP has expired", 401)
 
@@ -141,29 +135,28 @@ def api_auth_verify_otp():
         "cn": user_cn,
         "role": pending["user_info"]["role"],
         "department": pending["user_info"]["department"],
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10)
+        "expires_at": datetime.now(UTC) + timedelta(minutes=10),
     }
 
     # Establish/Refresh Primary Auth Session (valid for 12 hours)
-    now = datetime.now(timezone.utc)
-    PRIMARY_SESSIONS[user_cn] = {
-        "login_time": now,
-        "last_mfa_time": now
-    }
+    now = datetime.now(UTC)
+    PRIMARY_SESSIONS[user_cn] = {"login_time": now, "last_mfa_time": now}
 
     # Clean up pending
     PENDING_OTPS.pop(email, None)
 
     current_app.logger.info(f"MFA Verified for {email}. Enrollment session token issued (redacted)")
-    return jsonify({
-        "status": "success",
-        "enrollment_session_token": token,
-        "user_info": {
-            "cn": ENROLLMENT_SESSIONS[token]["cn"],
-            "role": ENROLLMENT_SESSIONS[token]["role"],
-            "department": ENROLLMENT_SESSIONS[token]["department"]
+    return jsonify(
+        {
+            "status": "success",
+            "enrollment_session_token": token,
+            "user_info": {
+                "cn": ENROLLMENT_SESSIONS[token]["cn"],
+                "role": ENROLLMENT_SESSIONS[token]["role"],
+                "department": ENROLLMENT_SESSIONS[token]["department"],
+            },
         }
-    })
+    )
 
 
 @auth_bp.post("/api/auth/step-up")
@@ -187,7 +180,7 @@ def api_auth_step_up():
     if not pending:
         return error_response("No pending authentication session found", 400)
 
-    if datetime.now(timezone.utc) > pending["expires_at"]:
+    if datetime.now(UTC) > pending["expires_at"]:
         PENDING_OTPS.pop(email, None)
         return error_response("OTP has expired", 401)
 
@@ -196,20 +189,16 @@ def api_auth_step_up():
 
     # Success: Refresh/Establish primary session with updated last_mfa_time
     user_cn = user_info["cn"]
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     orig_session = PRIMARY_SESSIONS.get(user_cn, {})
     login_time = orig_session.get("login_time", now)
-    
-    PRIMARY_SESSIONS[user_cn] = {
-        "login_time": login_time,
-        "last_mfa_time": now
-    }
-    
+
+    PRIMARY_SESSIONS[user_cn] = {"login_time": login_time, "last_mfa_time": now}
+
     PENDING_OTPS.pop(email, None)
-    
+
     current_app.logger.info(f"Step-up Authentication successful for {user_cn} ({email})")
-    return jsonify({
-        "status": "success",
-        "message": "Step-up Authentication successful. Session MFA timestamp refreshed."
-    })
+    return jsonify(
+        {"status": "success", "message": "Step-up Authentication successful. Session MFA timestamp refreshed."}
+    )

@@ -1,10 +1,11 @@
-import os
-import sys
-import hashlib
 import fcntl
+import hashlib
+import os
 import re
-from flask import Blueprint, render_template, jsonify, send_from_directory, request, current_app
+import sys
+
 from cryptography.hazmat.primitives import serialization
+from flask import Blueprint, current_app, jsonify, render_template, request, send_from_directory
 
 from .utils import error_response
 
@@ -26,15 +27,15 @@ def index():
     """Serve the landing page."""
     service = current_app.config["pki_service"]
     ca_fingerprint = hashlib.sha256(service.ca_cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-    
+
     ca_info = {
         "subject": service.ca_cert.subject.rfc4514_string(),
         "fingerprint_sha256": ca_fingerprint,
-        "data_dir": service.cert_dir
+        "data_dir": service.cert_dir,
     }
-    
+
     roles = {k: {"label": v["display_name"]} for k, v in ZTA_ROLES.items()}
-    
+
     return render_template("index.html", ca=ca_info, roles=roles)
 
 
@@ -76,7 +77,7 @@ def _read_blocklist() -> list[str]:
     path = _get_blocklist_path()
     if not os.path.exists(path):
         return []
-    with open(path, "r") as f:
+    with open(path) as f:
         try:
             fcntl.flock(f, fcntl.LOCK_SH)
             return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]

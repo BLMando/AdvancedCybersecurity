@@ -1,8 +1,7 @@
 import hashlib
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -27,7 +26,7 @@ class PKICAMixin:
 
         logger.info("Generating new root CA for lab environment")
         self.ca_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-        
+
         ZTA_CA_CN = os.getenv("ZTA_CA_CN", "AdvancedCybersecurity-CA")
         ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
 
@@ -41,7 +40,7 @@ class PKICAMixin:
             ]
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self.ca_cert = (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -81,7 +80,7 @@ class PKICAMixin:
         self.ca_cert_path.write_bytes(self.ca_cert.public_bytes(serialization.Encoding.PEM))
         self._ca_record = CARecord(created=now)
 
-    def _get_ca_password(self) -> Optional[bytes]:
+    def _get_ca_password(self) -> bytes | None:
         password = os.getenv("ZTA_CA_KEY_PASSWORD")
         return password.encode("utf-8") if password else None
 

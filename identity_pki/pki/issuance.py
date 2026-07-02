@@ -5,9 +5,9 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class PKIIssuanceMixin:
-    def _get_identity_from_certificate(self, user_cn: str) -> tuple[str, str, Optional[Any]]:
+    def _get_identity_from_certificate(self, user_cn: str) -> tuple[str, str, Any | None]:
         role = "unknown"
         dept = "unknown"
         pub_key = None
@@ -56,7 +56,7 @@ class PKIIssuanceMixin:
         if self._find_certificate_path(user_cn):
             raise ValueError(f"Certificate for {user_cn} already exists")
 
-    def _find_certificate_path(self, user_cn: str) -> Optional[Path]:
+    def _find_certificate_path(self, user_cn: str) -> Path | None:
         candidate_paths = [
             self.issued_dir / user_cn / "certificate.crt",
             self.client_dir / f"{user_cn}.crt",
@@ -67,7 +67,9 @@ class PKIIssuanceMixin:
                 return path
         return None
 
-    def _build_subject(self, user_cn: str, role: Optional[str], dept: Optional[str], mac: Optional[str], cpu: Optional[str]) -> x509.Name:
+    def _build_subject(
+        self, user_cn: str, role: str | None, dept: str | None, mac: str | None, cpu: str | None
+    ) -> x509.Name:
         subject_attrs = [x509.NameAttribute(NameOID.COMMON_NAME, user_cn)]
         if role:
             subject_attrs.append(x509.NameAttribute(NameOID.TITLE, role))
@@ -79,7 +81,7 @@ class PKIIssuanceMixin:
             subject_attrs.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"CPU:{cpu}"))
         return x509.Name(subject_attrs)
 
-    def _build_san_entries(self, user_cn: str, mac: Optional[str], cpu: Optional[str]) -> list:
+    def _build_san_entries(self, user_cn: str, mac: str | None, cpu: str | None) -> list:
         entries = [x509.DNSName(f"{user_cn}.internal")]
         if mac:
             entries.append(x509.DNSName(f"MAC-{mac}"))
@@ -88,7 +90,7 @@ class PKIIssuanceMixin:
         return entries
 
     def _build_end_entity_certificate(self, subject: x509.Name, public_key, san_entries: list) -> x509.Certificate:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return (
             x509.CertificateBuilder()
             .subject_name(subject)
@@ -121,11 +123,15 @@ class PKIIssuanceMixin:
             .sign(self.ca_key, hashes.SHA256())
         )
 
-    def _issue_certificate(self, subject: x509.Name, public_key, user_cn: str, mac: Optional[str], cpu: Optional[str]) -> x509.Certificate:
+    def _issue_certificate(
+        self, subject: x509.Name, public_key, user_cn: str, mac: str | None, cpu: str | None
+    ) -> x509.Certificate:
         san_entries = self._build_san_entries(user_cn, mac, cpu)
         return self._build_end_entity_certificate(subject, public_key, san_entries)
 
-    def _write_bundle(self, user_cn: str, certificate: x509.Certificate, metadata: dict, private_key=None) -> CertificateBundle:
+    def _write_bundle(
+        self, user_cn: str, certificate: x509.Certificate, metadata: dict, private_key=None
+    ) -> CertificateBundle:
         issued_dir = self.issued_dir / user_cn
         issued_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,8 +178,15 @@ class PKIIssuanceMixin:
     def _json_dump(self, metadata: dict) -> str:
         return json.dumps(metadata, indent=2, sort_keys=True)
 
-    def issue_certificate(self, user: str, role: Optional[str] = None, department: Optional[str] = None,
-                          hardware_mode: str = "manual", mac: Optional[str] = None, cpu: Optional[str] = None) -> CertificateBundle:
+    def issue_certificate(
+        self,
+        user: str,
+        role: str | None = None,
+        department: str | None = None,
+        hardware_mode: str = "manual",
+        mac: str | None = None,
+        cpu: str | None = None,
+    ) -> CertificateBundle:
         user_cn = self._validate_cn(user)
         self._ensure_unique_cn(user_cn)
 
@@ -191,14 +204,20 @@ class PKIIssuanceMixin:
             "department": department,
             "hardware": {"mac": mac, "cpu": cpu},
             "enrollment_method": hardware_mode,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         return self._write_bundle(user_cn, certificate, metadata, private_key=private_key)
 
-    def sign_csr(self, csr_pem: str, user: Optional[str] = None, role: Optional[str] = None,
-                 department: Optional[str] = None, hardware_mac: Optional[str] = None,
-                 hardware_cpu: Optional[str] = None) -> CertificateBundle:
+    def sign_csr(
+        self,
+        csr_pem: str,
+        user: str | None = None,
+        role: str | None = None,
+        department: str | None = None,
+        hardware_mac: str | None = None,
+        hardware_cpu: str | None = None,
+    ) -> CertificateBundle:
         csr = x509.load_pem_x509_csr(csr_pem.encode("utf-8"))
         if not csr.is_signature_valid:
             raise ValueError("CSR signature is invalid")
@@ -223,12 +242,22 @@ class PKIIssuanceMixin:
             "department": department,
             "hardware": {"mac": hardware_mac, "cpu": hardware_cpu},
             "enrollment_method": "csr",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         return self._write_bundle(user_cn, certificate, metadata)
 
-    def issue_hardware_bound_certificate(self, csr_pem=None, challenge_id=None, signature_b64=None, public_key_pem=None, is_hardware_csr=False, proof_string=None, user=None, **kwargs):
+    def issue_hardware_bound_certificate(
+        self,
+        csr_pem=None,
+        challenge_id=None,
+        signature_b64=None,
+        public_key_pem=None,
+        is_hardware_csr=False,
+        proof_string=None,
+        user=None,
+        **kwargs,
+    ):
         user_cn = user or "unknown"
         if proof_string:
             user_cn = self._extract_cn_from_proof(proof_string) or user_cn
@@ -314,7 +343,7 @@ class PKIIssuanceMixin:
             "department": dept if dept != "unknown" else None,
             "hardware": {"mac": kwargs.get("mac"), "cpu": kwargs.get("cpu")},
             "enrollment_method": "hardware_proof",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         bundle = self._write_bundle(clean_user, certificate, metadata)

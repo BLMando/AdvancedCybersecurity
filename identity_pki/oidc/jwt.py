@@ -1,8 +1,10 @@
 """OIDC JWT issuance and signing."""
 
 import datetime
+
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+
 from .keys import _private_key
 from .utils import b64url_encode_bytes, b64url_encode_json
 
@@ -19,7 +21,7 @@ def issue_jwt(user: str, role: str, cert_sha256_hex: str, step_up: bool = False)
     cert_bytes = bytes.fromhex(cert_sha256_hex)
     x5t_s256 = b64url_encode_bytes(cert_bytes)
 
-    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    now = int(datetime.datetime.now(datetime.UTC).timestamp())
     payload = {
         "iss": "https://identity-pki:8080",
         "aud": "mongo",
@@ -39,7 +41,7 @@ def issue_jwt(user: str, role: str, cert_sha256_hex: str, step_up: bool = False)
     header_b64 = b64url_encode_json(header)
     payload_b64 = b64url_encode_json(payload)
 
-    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signing_input = f"{header_b64}.{payload_b64}".encode()
 
     signature = _private_key.sign(
         signing_input,

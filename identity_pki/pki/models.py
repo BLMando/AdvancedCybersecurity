@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -20,8 +19,8 @@ class CARecord:
 @dataclass(frozen=True)
 class CertificatePaths:
     certificate: Path
-    private_key: Optional[Path] = None
-    metadata: Optional[Path] = None
+    private_key: Path | None = None
+    metadata: Path | None = None
 
 
 @dataclass(frozen=True)

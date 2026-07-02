@@ -1,9 +1,8 @@
-import os
-import json
 import base64
+import json
 import logging
-from typing import Optional, Any
-from datetime import datetime, timezone
+import os
+
 from .pki import PKIService
 
 # Simulated Active Directory / HR database for ZTA Identity Verification
@@ -12,43 +11,44 @@ AD_USERS = {
         "cn": "test.admin",
         "role": "admin",
         "department": "IT",
-        "password": "password123"
+        "password": "password123",
     },
     "zta.healthcare+doctor@outlook.com": {
         "cn": "test.doctor",
         "role": "doctor",
         "department": "Cardiology",
-        "password": "password123"
+        "password": "password123",
     },
     "zta.healthcare+auditor@outlook.com": {
         "cn": "test.auditor",
         "role": "auditor",
         "department": "Audit",
-        "password": "password123"
+        "password": "password123",
     },
     "zta.healthcare+receptionist@outlook.com": {
         "cn": "test.receptionist",
         "role": "receptionist",
         "department": "Reception",
-        "password": "password123"
+        "password": "password123",
     },
-     "zta.healthcare+billing@outlook.com": {
+    "zta.healthcare+billing@outlook.com": {
         "cn": "test.billing",
         "role": "billing_staff",
         "department": "Cardiology",
-        "password": "password123"
-    }
+        "password": "password123",
+    },
 }
 
-PENDING_OTPS = {}          # email -> {"otp": "123456", "expires_at": datetime, "user_info": dict}
-ENROLLMENT_SESSIONS = {}   # token -> {"cn": cn, "role": role, "department": department, "expires_at": datetime}
-PRIMARY_SESSIONS = {}      # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+PENDING_OTPS = {}  # email -> {"otp": "123456", "expires_at": datetime, "user_info": dict}
+ENROLLMENT_SESSIONS = {}  # token -> {"cn": cn, "role": role, "department": department, "expires_at": datetime}
+PRIMARY_SESSIONS = {}  # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+
 
 def get_rls_view_name(role: str, collection_name: str) -> str:
     """Map a raw collection name to the corresponding RLS view for the role."""
     if role == "admin":
         return collection_name
-        
+
     rls_views = {
         "doctor": {
             "patients": "v_patients_doctor",
@@ -73,12 +73,12 @@ def get_rls_view_name(role: str, collection_name: str) -> str:
             "patients": "v_patients_reception",
             "providers": "v_providers_all",
             "admissions": "v_admissions_reception",
-        }
+        },
     }
     return rls_views.get(role, {}).get(collection_name, collection_name)
 
 
-def extract_role_from_jwt(jwt_token: Optional[str], logger: logging.Logger) -> str:
+def extract_role_from_jwt(jwt_token: str | None, logger: logging.Logger) -> str:
     """Parse JWT claims to extract the user's role."""
     if not jwt_token:
         return "unknown"
@@ -98,7 +98,9 @@ def extract_role_from_jwt(jwt_token: Optional[str], logger: logging.Logger) -> s
     return "unknown"
 
 
-def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt_token: Optional[str], logger: logging.Logger) -> tuple[str, bool, str]:
+def resolve_user_metadata(
+    service: PKIService, user_cn: str, cert_path: str, jwt_token: str | None, logger: logging.Logger
+) -> tuple[str, bool, str]:
     """Resolve the user's role, hardware mode, and device details from metadata and JWT."""
     role = extract_role_from_jwt(jwt_token, logger)
     hardware_mode = False
@@ -124,6 +126,7 @@ def resolve_user_metadata(service: PKIService, user_cn: str, cert_path: str, jwt
     if role == "unknown":
         try:
             from cryptography import x509
+
             with open(cert_path, "rb") as f:
                 cert = x509.load_pem_x509_certificate(f.read())
                 titles = cert.subject.get_attributes_for_oid(x509.NameOID.TITLE)

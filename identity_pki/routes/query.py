@@ -1,10 +1,10 @@
 """Data querying operations targeting MongoDB through Envoy sidecars."""
 
+import json
 import os
 import sys
-import json
-from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify, current_app
+
+from flask import Blueprint, current_app, jsonify, request
 from pymongo.errors import OperationFailure
 
 from ..auth import (
@@ -38,6 +38,7 @@ def health():
 def api_query():
     """Execute a MongoDB query via Envoy presenting the user's client certificate."""
     import uuid
+
     request_id = str(uuid.uuid4())
     response = None
     payload = request.get_json(silent=True) or {}
@@ -47,9 +48,9 @@ def api_query():
     limit = int(payload.get("limit", 10))
     jwt_token = payload.get("jwt_token")
     mongo_action = payload.get("action", "find")
-    record_id = payload.get("record_id")          # Single-document _id for delete/update
+    record_id = payload.get("record_id")  # Single-document _id for delete/update
     update_fields = payload.get("update_fields")  # Dict of specific fields to $set on update
-    patient_id = payload.get("patient_id")        # patient_id to satisfy OPA WAF checks
+    patient_id = payload.get("patient_id")  # patient_id to satisfy OPA WAF checks
 
     if not user_cn or not collection_name:
         return error_response("User CN and collection name are mandatory.", 400)
@@ -61,10 +62,7 @@ def api_query():
         return error_response("Identity revoked or suspended by administrator.", 401)
 
     if not jwt_token:
-        return error_response(
-            "OIDC authentication mandatory. Legacy authentication (SCRAM/Password) is disabled.",
-            401
-        )
+        return error_response("OIDC authentication mandatory. Legacy authentication (SCRAM/Password) is disabled.", 401)
 
     try:
         query_filter = json.loads(query_filter_str) if query_filter_str else {}
@@ -75,6 +73,7 @@ def api_query():
     if record_id and mongo_action in ("delete", "update"):
         from bson import ObjectId
         from bson.errors import InvalidId
+
         try:
             query_filter = {"_id": ObjectId(record_id)}
         except InvalidId:
@@ -106,7 +105,7 @@ def api_query():
             f"To use this web console, register the user in Lab mode (/api/certificates) "
             f"so the server can host the key temporarily, or execute queries via "
             f"the hardware client CLI from your host computer.",
-            403
+            403,
         )
 
     combined_pem_path = None
@@ -117,7 +116,9 @@ def api_query():
             return error_response(f"Error preparing combined PEM: {e}", 500)
 
     # Resolve role and hardware_mode
-    role, hardware_mode, device_info = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, current_app.logger)
+    role, hardware_mode, device_info = _resolve_user_metadata(
+        service, user_cn, cert_path, jwt_token, current_app.logger
+    )
 
     # Translate collection to RLS view
     view_name = collection_name
@@ -147,13 +148,14 @@ def api_query():
             "limit": limit,
             "user": user_cn,
             "role": role,
-            "payload": jwt_token
+            "payload": jwt_token,
         }
 
         # Serialize utilizing json_util to support BSON types (like ObjectIDs/dates)
         payload_data = json_util.dumps(query_payload)
 
         import logging
+
         logging.getLogger("werkzeug").info(f"[DEBUG] Envoy payload: {payload_data[:500]}...")
 
         headers = {
@@ -161,7 +163,7 @@ def api_query():
             "x-zta-user": user_cn,
             "x-zta-role": role,
             "Authorization": f"Bearer {jwt_token}",
-            "x-request-id": request_id
+            "x-request-id": request_id,
         }
 
         if local_proxy_port:
@@ -170,12 +172,7 @@ def api_query():
         else:
             url = "https://envoy:10000/query"
             response = requests.post(
-                url,
-                data=payload_data,
-                headers=headers,
-                cert=combined_pem_path,
-                verify=ca_path,
-                timeout=10
+                url, data=payload_data, headers=headers, cert=combined_pem_path, verify=ca_path, timeout=10
             )
 
         if response.status_code != 200:
@@ -187,7 +184,7 @@ def api_query():
                 err_type = res_data.get("error_type", "query_failed")
             except Exception:
                 pass
-            
+
             if not err_msg:
                 # Fallback to checking Envoy/OPA response headers
                 decision = response.headers.get("x-zta-decision")
@@ -206,7 +203,12 @@ def api_query():
                         elif block_reason == "ROLE_SEGREGATION_DENIED":
                             err_msg = "Segregation of Duties violation: Access to this resource is blocked for organizational reasons."
                         elif block_reason == "INSPECTION_VIOLATION":
-                            if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
+                            if (
+                                role == "doctor"
+                                and collection_name == "clinical_records"
+                                and mongo_action == "update"
+                                and not query_filter.get("patient_id")
+                            ):
                                 err_msg = "Doctors are required to specify the patient_id filter when updating clinical records."
                             else:
                                 err_msg = "Non-compliant request: L7 security checks blocked the query."
@@ -217,50 +219,63 @@ def api_query():
                         else:
                             err_msg = f"Access denied: Zero Trust Decision (Reason: {block_reason})."
                     else:
-                        if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
+                        if (
+                            role == "doctor"
+                            and collection_name == "clinical_records"
+                            and mongo_action == "update"
+                            and not query_filter.get("patient_id")
+                        ):
                             err_msg = "OPA/RBAC Access Denied: Doctors are required to filter by patient_id when updating clinical records."
                         else:
                             err_msg = f"OPA/RBAC Access Denied: Zero Trust policy decision (User '{user_cn}', Role '{role}', Action '{mongo_action}', Collection '{collection_name}')."
                 else:
                     err_msg = response.text or f"HTTP {response.status_code}"
-            
+
             # Remove "Mongo HTTP Proxy error: " prefix for client blocks to keep UI clean and user-friendly
-            display_msg = err_msg if err_type in {"waf_blocked", "policy_denied", "authorization_denied"} else f"Mongo HTTP Proxy error: {err_msg}"
-            
-            return jsonify({
-                "status": "error",
-                "error_type": err_type,
-                "message": display_msg,
-                "role": role,
-                "translated_collection": view_name
-            }), response.status_code
+            display_msg = (
+                err_msg
+                if err_type in {"waf_blocked", "policy_denied", "authorization_denied"}
+                else f"Mongo HTTP Proxy error: {err_msg}"
+            )
+
+            return jsonify(
+                {
+                    "status": "error",
+                    "error_type": err_type,
+                    "message": display_msg,
+                    "role": role,
+                    "translated_collection": view_name,
+                }
+            ), response.status_code
 
         res_data = response.json()
         count = res_data.get("count", 0)
         results_json = res_data.get("results", [])
         message = res_data.get("message", "Success")
 
-        return jsonify({
-            "status": "success",
-            "role": role,
-            "translated_collection": target_collection,
-            "count": count,
-            "results": results_json,
-            "message": message
-        })
+        return jsonify(
+            {
+                "status": "success",
+                "role": role,
+                "translated_collection": target_collection,
+                "count": count,
+                "results": results_json,
+                "message": message,
+            }
+        )
 
     except OperationFailure as e:
         err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
-        return jsonify({
-            "status": "error",
-            "error_type": "authorization_denied",
-            "message": f"OPA/RBAC Access Denied: {err_msg}",
-            "role": role,
-            "translated_collection": view_name
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "error_type": "authorization_denied",
+                "message": f"OPA/RBAC Access Denied: {err_msg}",
+                "role": role,
+                "translated_collection": view_name,
+            }
+        ), 403
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "error_type": "connection_failed",
-            "message": f"Connection failed: {e}"
-        }), 500
+        return jsonify(
+            {"status": "error", "error_type": "connection_failed", "message": f"Connection failed: {e}"}
+        ), 500

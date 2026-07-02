@@ -7,12 +7,12 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-
 SPLUNK_VERIFY_TLS = os.environ.get("SPLUNK_VERIFY_TLS", "false").lower() in ("true", "1", "yes")
 
 
 def _ssl_ctx():
     import ssl
+
     ctx = ssl.create_default_context()
     if not SPLUNK_VERIFY_TLS:
         ctx.check_hostname = False
@@ -26,6 +26,7 @@ def _url(host: str, port: int, path: str) -> str:
 
 # Splunk Authentication
 
+
 def splunk_login(host: str, port: int, username: str, password: str) -> str:
     """Authenticate to Splunk and return a session key."""
     url = _url(host, port, "/services/auth/login")
@@ -38,14 +39,19 @@ def splunk_login(host: str, port: int, username: str, password: str) -> str:
         if match:
             return match.group(1)
         sys.exit(1)
-    except urllib.error.HTTPError as e:
+    except urllib.error.HTTPError:
         sys.exit(1)
-    except Exception as e:
+    except Exception:
         raise
 
 
-def splunk_request(session_key: str, method: str, url: str, data: bytes | None = None,
-                   content_type: str = "application/x-www-form-urlencoded") -> tuple[int, str]:
+def splunk_request(
+    session_key: str,
+    method: str,
+    url: str,
+    data: bytes | None = None,
+    content_type: str = "application/x-www-form-urlencoded",
+) -> tuple[int, str]:
     headers = {
         "Authorization": f"Splunk {session_key}",
     }
@@ -61,6 +67,7 @@ def splunk_request(session_key: str, method: str, url: str, data: bytes | None =
 
 
 # Setup Functions
+
 
 def wait_for_splunk(host: str, port: int, retries: int = 60, delay: int = 5) -> None:
     print(f"Waiting for Splunk at {host}:{port}...")
@@ -90,12 +97,13 @@ def create_index(session_key: str, host: str, port: int, index_name: str) -> Non
         print(f"Index {index_name} exists")
         return
 
-    data = urllib.parse.urlencode({
-        "name": index_name,
-        "datatype": "event",
-    }).encode()
-    status, _ = splunk_request(session_key, "POST",
-                                  _url(host, port, "/services/data/indexes"), data)
+    data = urllib.parse.urlencode(
+        {
+            "name": index_name,
+            "datatype": "event",
+        }
+    ).encode()
+    status, _ = splunk_request(session_key, "POST", _url(host, port, "/services/data/indexes"), data)
     if status in (200, 201):
         print(f"Index {index_name} created")
     elif status == 409:
@@ -104,8 +112,9 @@ def create_index(session_key: str, host: str, port: int, index_name: str) -> Non
         print(f"Index {index_name} error {status}")
 
 
-def import_dashboard(session_key: str, host: str, port: int,
-                     dashboard_path: str, dashboard_name: str = "zta_overview") -> None:
+def import_dashboard(
+    session_key: str, host: str, port: int, dashboard_path: str, dashboard_name: str = "zta_overview"
+) -> None:
     dashboard_file = Path(dashboard_path)
     if not dashboard_file.exists():
         print(f"Dashboard {dashboard_path} missing")
@@ -125,10 +134,12 @@ def import_dashboard(session_key: str, host: str, port: int,
             print(f"Dashboard {dashboard_name} update error {status2}")
     else:
         # Dashboard does not exist, create it
-        create_data = urllib.parse.urlencode({
-            "name": dashboard_name,
-            "eai:data": dashboard_xml,
-        }).encode()
+        create_data = urllib.parse.urlencode(
+            {
+                "name": dashboard_name,
+                "eai:data": dashboard_xml,
+            }
+        ).encode()
         views_url = _url(host, port, "/servicesNS/admin/search/data/ui/views")
         status3, _ = splunk_request(session_key, "POST", views_url, create_data)
         if status3 in (200, 201):
@@ -137,7 +148,8 @@ def import_dashboard(session_key: str, host: str, port: int,
             print(f"Dashboard {dashboard_name} import error {status3}")
 
 
-# Main 
+# Main
+
 
 def main():
     SPLUNK_HOST = "splunk"

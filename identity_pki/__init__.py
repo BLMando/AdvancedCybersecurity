@@ -1,3 +1,3 @@
 """PKI & identity module for the ZTA healthcare demo."""
 
-from .pki import PKIService
+from .pki import PKIService as PKIService

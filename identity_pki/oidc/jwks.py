@@ -1,11 +1,12 @@
 """OIDC JWKS (JSON Web Key Set) generation."""
 
-from typing import Any, Dict, List
+from typing import Any
+
 from .keys import _private_key
 from .utils import b64url_encode_int
 
 
-def get_jwks() -> Dict[str, List[Dict[str, Any]]]:
+def get_jwks() -> dict[str, list[dict[str, Any]]]:
     """Return JWKS for verification."""
     numbers = _private_key.public_key().public_numbers()
 

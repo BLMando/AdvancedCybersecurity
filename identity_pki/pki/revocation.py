@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -18,7 +18,9 @@ class PKIRevocationMixin:
                 if filename.endswith(".crt"):
                     user_cn = filename[:-4]
                     status = "revoked" if (self.revoked_dir / f"{user_cn}.rev").exists() else "active"
-                    key_exists = (self.client_dir / f"{user_cn}.key").exists() or (self.issued_dir / user_cn / "private_key.pem").exists()
+                    key_exists = (self.client_dir / f"{user_cn}.key").exists() or (
+                        self.issued_dir / user_cn / "private_key.pem"
+                    ).exists()
                     role = "unknown"
                     metadata_path = self.issued_dir / user_cn / "metadata.json"
                     if metadata_path.exists():
@@ -28,19 +30,14 @@ class PKIRevocationMixin:
                                 role = meta.get("role", "unknown")
                         except Exception:
                             pass
-                    certs.append({
-                        "user": user_cn,
-                        "status": status,
-                        "role": role,
-                        "is_hardware": not key_exists
-                    })
+                    certs.append({"user": user_cn, "status": status, "role": role, "is_hardware": not key_exists})
         return certs
 
     def generate_crl(self):
         builder = x509.CertificateRevocationListBuilder()
         builder = builder.issuer_name(self.ca_cert.subject)
-        builder = builder.last_update(datetime.now(timezone.utc))
-        builder = builder.next_update(datetime.now(timezone.utc) + timedelta(days=7))
+        builder = builder.last_update(datetime.now(UTC))
+        builder = builder.next_update(datetime.now(UTC) + timedelta(days=7))
 
         if self.revoked_dir.exists():
             for filename in os.listdir(self.revoked_dir):
@@ -53,8 +50,8 @@ class PKIRevocationMixin:
                             serial_number = cert.serial_number
 
                             rev_content = (self.revoked_dir / filename).read_text()
-                            rev_date = datetime.now(timezone.utc)
-                            match = re.search(r'Revoked at (.*)', rev_content)
+                            rev_date = datetime.now(UTC)
+                            match = re.search(r"Revoked at (.*)", rev_content)
                             if match:
                                 try:
                                     rev_date = datetime.fromisoformat(match.group(1).strip())
@@ -79,7 +76,7 @@ class PKIRevocationMixin:
     def revoke_certificate(self, user_cn):
         clean_user = self._validate_cn(user_cn)
         revocation_file = self.revoked_dir / f"{clean_user}.rev"
-        revocation_file.write_text(f"Revoked at {datetime.now(timezone.utc)}")
+        revocation_file.write_text(f"Revoked at {datetime.now(UTC)}")
         logger.warning("Certificate for %s has been revoked", clean_user)
         self.generate_crl()
         return True

@@ -1,7 +1,7 @@
 import ipaddress
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -26,13 +26,15 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new Envoy server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
-        x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
-    ])
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
+        ]
+    )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -42,12 +44,14 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("envoy"),
-                x509.DNSName("identity-pki"),
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("envoy"),
+                    x509.DNSName("identity-pki"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
@@ -80,13 +84,15 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
     ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
-        x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
-    ])
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
+            x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
+        ]
+    )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -96,11 +102,13 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("mongo"),
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("mongo"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
@@ -136,13 +144,15 @@ def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, 
     logger.info("Generating new Splunk server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
-        x509.NameAttribute(NameOID.COMMON_NAME, "splunk"),
-    ])
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "splunk"),
+        ]
+    )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -152,11 +162,13 @@ def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, 
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("splunk"),
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("splunk"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
@@ -173,8 +185,8 @@ def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, 
 
     key_path.write_bytes(key_pem)
     cert_path.write_bytes(cert_pem)
-    
+
     pem_path = server_dir / "splunk.pem"
     pem_path.write_bytes(cert_pem + key_pem)
-    
+
     logger.info("Splunk server certificates generated successfully")

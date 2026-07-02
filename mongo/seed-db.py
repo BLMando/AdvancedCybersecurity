@@ -1,11 +1,12 @@
+import argparse
+import hashlib
 import os
 import sys
 import uuid
-import argparse
-import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 import pandas as pd
 
 try:
@@ -22,25 +23,29 @@ MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASS}@localhost:27017/{MONGO_DB}?aut
 
 # CLI args
 parser = argparse.ArgumentParser(description="Seed ZTA Healthcare DB from CSV")
-parser.add_argument("--uri",   default=MONGO_URI)
-parser.add_argument("--csv",   default="mongo/dataset/healthcare_dataset.csv")
+parser.add_argument("--uri", default=MONGO_URI)
+parser.add_argument("--csv", default="mongo/dataset/healthcare_dataset.csv")
 parser.add_argument("--limit", type=int, default=10, help="Max rows to import")
 args = parser.parse_args()
+
 
 # Helpers
 def det_uuid(namespace: str, key: str) -> str:
     ns = uuid.UUID(hashlib.md5(namespace.encode()).hexdigest())
     return str(uuid.uuid5(ns, key))
 
-def parse_date(val: Optional[Any]):
+
+def parse_date(val: Any | None):
     if not val or pd.isna(val):
         return None
-    return pd.to_datetime(val).to_pydatetime().replace(tzinfo=timezone.utc)
+    return pd.to_datetime(val).to_pydatetime().replace(tzinfo=UTC)
+
 
 def norm_name(raw: Any) -> str:
     return str(raw).strip().title()
 
-NOW = datetime.now(timezone.utc)
+
+NOW = datetime.now(UTC)
 
 # Load CSV
 csv_path = Path(args.csv)
@@ -63,7 +68,7 @@ print(f"  {total_rows:,} rows loaded")
 # Connect
 print(f"Connecting to {args.uri} …", flush=True)
 CA_PATH = "/etc/certs/ca/ca.crt"
-CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
+CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem"  # server cert & key
 
 client = MongoClient(
     args.uri,
@@ -71,7 +76,7 @@ client = MongoClient(
     tlsCertificateKeyFile=CLIENT_PEM_PATH,
     tlsCAFile=CA_PATH,
     tlsAllowInvalidCertificates=True,
-    serverSelectionTimeoutMS=5000
+    serverSelectionTimeoutMS=5000,
 )
 try:
     client.admin.command("ping")
@@ -91,19 +96,15 @@ hospitals = df["Hospital"].dropna().unique()
 
 for name in doctors:
     pid = det_uuid("doctor", name)
-    provider_ops.append(UpdateOne(
-        {"_id": pid},
-        {"$setOnInsert": {"_id": pid, "type": "doctor", "name": name}},
-        upsert=True
-    ))
+    provider_ops.append(
+        UpdateOne({"_id": pid}, {"$setOnInsert": {"_id": pid, "type": "doctor", "name": name}}, upsert=True)
+    )
 
 for name in hospitals:
     pid = det_uuid("hospital", name)
-    provider_ops.append(UpdateOne(
-        {"_id": pid},
-        {"$setOnInsert": {"_id": pid, "type": "hospital", "name": name}},
-        upsert=True
-    ))
+    provider_ops.append(
+        UpdateOne({"_id": pid}, {"$setOnInsert": {"_id": pid, "type": "hospital", "name": name}}, upsert=True)
+    )
 
 if provider_ops:
     db.providers.bulk_write(provider_ops, ordered=False)
@@ -118,18 +119,22 @@ unique_patients = df.drop_duplicates(subset=["Name"]).copy()
 for _, row in unique_patients.iterrows():
     pid = det_uuid("patient", row["Name"])
     patient_id_map[row["Name"]] = pid
-    patient_ops.append(UpdateOne(
-        {"_id": pid},
-        {"$setOnInsert": {
-            "_id":        pid,
-            "full_name":  row["Name"],
-            "age":        int(row["Age"]),
-            "gender":     row["Gender"],
-            "blood_type": row["Blood Type"],
-            "created_at": NOW,
-        }},
-        upsert=True
-    ))
+    patient_ops.append(
+        UpdateOne(
+            {"_id": pid},
+            {
+                "$setOnInsert": {
+                    "_id": pid,
+                    "full_name": row["Name"],
+                    "age": int(row["Age"]),
+                    "gender": row["Gender"],
+                    "blood_type": row["Blood Type"],
+                    "created_at": NOW,
+                }
+            },
+            upsert=True,
+        )
+    )
 
 if patient_ops:
     db.patients.bulk_write(patient_ops, ordered=False)
@@ -142,8 +147,8 @@ clinical_ops = []
 billing_ops = []
 
 for row_num, (_, row) in enumerate(df.iterrows(), start=1):
-    patient_id = det_uuid("patient",  row["Name"])
-    doctor_id = det_uuid("doctor",   row["Doctor"])
+    patient_id = det_uuid("patient", row["Name"])
+    doctor_id = det_uuid("doctor", row["Doctor"])
     hospital_id = det_uuid("hospital", row["Hospital"])
 
     # Natural key for admission: patient + date of admission
@@ -154,63 +159,74 @@ for row_num, (_, row) in enumerate(df.iterrows(), start=1):
     discharge = parse_date(row.get("Discharge Date"))
     status = "discharged" if discharge else "active"
 
-    admission_ops.append(UpdateOne(
-        {"_id": adm_id},
-        {"$setOnInsert": {
-            "_id":               adm_id,
-            "patient_id":        patient_id,
-            "doctor_id":         doctor_id,
-            "hospital_id":       hospital_id,
-            "admission_type":    row["Admission Type"],
-            "date_of_admission": parse_date(row["Date of Admission"]),
-            "discharge_date":    discharge,
-            "room_number":       int(row["Room Number"]),
-            "status":            status,
-            "created_at":        NOW,
-            "updated_at":        NOW,
-        }},
-        upsert=True
-    ))
+    admission_ops.append(
+        UpdateOne(
+            {"_id": adm_id},
+            {
+                "$setOnInsert": {
+                    "_id": adm_id,
+                    "patient_id": patient_id,
+                    "doctor_id": doctor_id,
+                    "hospital_id": hospital_id,
+                    "admission_type": row["Admission Type"],
+                    "date_of_admission": parse_date(row["Date of Admission"]),
+                    "discharge_date": discharge,
+                    "room_number": int(row["Room Number"]),
+                    "status": status,
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                }
+            },
+            upsert=True,
+        )
+    )
 
     # 4. CLINICAL_RECORDS
     clin_key = f"{adm_key}|clinical"
     clin_id = det_uuid("clinical", clin_key)
 
-    clinical_ops.append(UpdateOne(
-        {"_id": clin_id},
-        {"$setOnInsert": {
-            "_id":               clin_id,
-            "patient_id":        patient_id,
-            "admission_id":      adm_id,
-            "medical_condition": row["Medical Condition"],
-            "medication":        row["Medication"],
-            "test_results":      row["Test Results"],
-            "recorded_at":       parse_date(row["Date of Admission"]),
-            "updated_at":        NOW,
-        }},
-        upsert=True
-    ))
+    clinical_ops.append(
+        UpdateOne(
+            {"_id": clin_id},
+            {
+                "$setOnInsert": {
+                    "_id": clin_id,
+                    "patient_id": patient_id,
+                    "admission_id": adm_id,
+                    "medical_condition": row["Medical Condition"],
+                    "medication": row["Medication"],
+                    "test_results": row["Test Results"],
+                    "recorded_at": parse_date(row["Date of Admission"]),
+                    "updated_at": NOW,
+                }
+            },
+            upsert=True,
+        )
+    )
 
-    # 5. BILLING 
+    # 5. BILLING
     bill_key = f"{adm_key}|billing"
     bill_id = det_uuid("billing", bill_key)
-    amount = float(row["Billing Amount"]) if pd.notna(
-        row["Billing Amount"]) else 0.0
+    amount = float(row["Billing Amount"]) if pd.notna(row["Billing Amount"]) else 0.0
 
-    billing_ops.append(UpdateOne(
-        {"_id": bill_id},
-        {"$setOnInsert": {
-            "_id":                bill_id,
-            "patient_id":         patient_id,
-            "admission_id":       adm_id,
-            "insurance_provider": row["Insurance Provider"],
-            "billing_amount":     amount,
-            "payment_status":     "paid" if discharge else "pending",
-            "created_at":         NOW,
-            "updated_at":         NOW,
-        }},
-        upsert=True
-    ))
+    billing_ops.append(
+        UpdateOne(
+            {"_id": bill_id},
+            {
+                "$setOnInsert": {
+                    "_id": bill_id,
+                    "patient_id": patient_id,
+                    "admission_id": adm_id,
+                    "insurance_provider": row["Insurance Provider"],
+                    "billing_amount": amount,
+                    "payment_status": "paid" if discharge else "pending",
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                }
+            },
+            upsert=True,
+        )
+    )
 
     if row_num % 5000 == 0:
         print(f"   {row_num:,} / {total_rows:,} rows processed …", flush=True)
@@ -223,16 +239,14 @@ def bulk(collection: Any, ops, label: str) -> None:
         return
     try:
         result = collection.bulk_write(ops, ordered=False)
-        print(
-            f"   {label}: {result.upserted_count:,} new, {result.matched_count:,} existing")
+        print(f"   {label}: {result.upserted_count:,} new, {result.matched_count:,} existing")
     except BulkWriteError as e:
-        print(
-            f"   {label}: partial write — {e.details['nInserted']} inserted, errors: {len(e.details['writeErrors'])}")
+        print(f"   {label}: partial write — {e.details['nInserted']} inserted, errors: {len(e.details['writeErrors'])}")
 
 
-bulk(db.admissions,       admission_ops, "admissions       ")
-bulk(db.clinical_records, clinical_ops,  "clinical_records ")
-bulk(db.billing,          billing_ops,   "billing          ")
+bulk(db.admissions, admission_ops, "admissions       ")
+bulk(db.clinical_records, clinical_ops, "clinical_records ")
+bulk(db.billing, billing_ops, "billing          ")
 
 # Summary
 print("\n *** Seed complete — collection counts *** ")
