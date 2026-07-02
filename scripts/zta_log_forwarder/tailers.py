@@ -38,6 +38,9 @@ AUTO_BLOCK_SIDS = {
 
 def auto_block_ip(ip: str) -> None:
     path = "/app/blocklist/blocklist.txt"
+    if ip.startswith("127.") or ip.startswith("172.19."):
+        logger.info("[SOAR] IP %s is part of internal infrastructure, skipping auto-block", ip)
+        return
     try:
         if not os.path.exists(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
