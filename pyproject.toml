@@ -12,3 +12,62 @@ dependencies = [
     "requests>=2.33.1",
     "python-dotenv>=1.0.1",
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+exclude = [
+    ".git",
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# E/W: pycodestyle
+# F: Pyflakes
+# I: isort (import sorting)
+# N: pep8-naming
+# UP: pyupgrade (upgrade syntax to newer python version)
+# B: bugbear (find common bugs/design flaws)
+# A: builtins (warn about shadowing built-in names)
+# C4: comprehensions (optimizations for comprehensions)
+# T20: print statements (warn on print)
+# S: flake8-bandit (security warnings)
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "T20", "S"]
+
+
+ignore = [
+    "E501", # Ignore line-length violations (let ruff format handle it)
+    "S101", # Allow assert statements (needed for unit tests)
+    "S104", # Allow binding to all interfaces 0.0.0.0 (needed for docker container APIs)
+    "N806", # Allow UPPERCASE local variables (config constants)
+    "S110", # Allow silent exception pass blocks
+    "S311", # Allow standard random generators for OTP generation
+]
+
+per-file-ignores = { "splunk/splunk_setup.py" = [
+    "T201",
+    "S310",
+], "mongo/init-healthcare.py" = [
+    "T201",
+], "mongo/seed-db.py" = [
+    "T201",
+    "S324",
+], "identity_pki/tests/*.py" = [
+    "T201",
+    "E402",
+    "S105",
+], "identity_pki/routes/pki.py" = [
+    "T201",
+    "S310",
+], "scripts/zta_log_forwarder/heclient.py" = [
+    "S310",
+], "scripts/zta_log_forwarder/tailers.py" = [
+    "S108",
+] }
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+

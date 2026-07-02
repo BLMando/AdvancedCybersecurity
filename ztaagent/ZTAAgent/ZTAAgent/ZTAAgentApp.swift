@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct ZTAAgentApp: App {
     init() {
-        // Avvia il server locale per Python
+        // Start the local server for Python
         LocalAPIServer.shared.start()
     }
     

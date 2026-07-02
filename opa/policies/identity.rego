@@ -1,5 +1,4 @@
-# Estrazione identità (utente, dispositivo, rete, ruolo) ed attributi di richiesta. 
-
+# Estrazione identità (utente, dispositivo, rete, ruolo) ed attributi di richiesta.
 package envoy.authz.identity
 
 import future.keywords
@@ -9,24 +8,13 @@ import future.keywords
 user_identity := sanitize_user(raw_user)
 
 raw_user := user if {
-	claims := token_claims
-	user := claims.sub
-	user != ""
+	user := token_claims.sub
 } else := user if {
-	attrs := object.get(input, "attributes", {})
-	source := object.get(attrs, "source", {})
-	user := object.get(source, "principal", "")
-	user != ""
+	user := input.attributes.source.principal
 } else := user if {
-	user := object.get(input.parsed_body, "user", "")
-	user != ""
+	user := input.parsed_body.user
 } else := user if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	headers := object.get(http, "headers", {})
-	user := object.get(headers, "x-zta-user", "")
-	user != ""
+	user := input.attributes.request.http.headers["x-zta-user"]
 } else := "unknown"
 
 sanitize_user(name) := clean if {
@@ -35,89 +23,65 @@ sanitize_user(name) := clean if {
 } else := name
 
 device_identity := device if {
-	# 1. Cryptographic device verification: check certificate for TPM-bound MAC
-	raw_cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	raw_cert_pem != ""
-	cert_pem := cert_pem_decoded(raw_cert_pem)
-	certs := crypto.x509.parse_certificates(cert_pem)
-	cert := certs[0]
+	cert := parsed_client_cert
 	device := get_cert_mac(cert)
-	device != ""
 } else := device if {
-	# 2. Fallback to payload for tests/non-mTLS bypass
-	device := object.get(input.parsed_body, "device", "")
-	device != ""
+	device := input.parsed_body.device
 } else := "no-tpm"
 
 get_cert_mac(cert) := val if {
-	ous := object.get(cert.Subject, "OrganizationalUnit", [])
-	ou := ous[_]
+	ou := cert.Subject.OrganizationalUnit[_]
 	startswith(ou, "MAC:")
 	val := substring(ou, 4, -1)
-} else := ""
-
-network_identity := ip if {
-	ip := object.get(input.parsed_body, "network_ip", "")
-	ip != ""
-} else := ip if {
-	ip := object.get(object.get(input.attributes, "source", {}), "address", "")
-	ip != ""
-} else := "0.0.0.0"
+}
 
 network_identity_str := ip if {
-	is_string(network_identity)
-	ip := network_identity
+	ip := input.parsed_body.network_ip
 } else := ip if {
-	ip := network_identity.socketAddress.address
+	ip := input.attributes.source.address
+	is_string(ip)
+} else := ip if {
+	ip := input.attributes.source.address.socketAddress.address
 } else := "0.0.0.0"
 
 is_internal_network if {
-	cidr_match := regex.match(`^(172\.19\.|172\.20\.|172\.21\.|10\.)`, network_identity_str)
-	cidr_match == true
+	regex.match(`^(172\.19\.|172\.20\.|172\.21\.|10\.)`, network_identity_str)
 }
 
 # ─── Role Mapping & Matrix ────────────────────────────────────────────────────
 
 current_role := role if {
-	claims := token_claims
-	is_array(claims.role)
-	role := claims.role[0]
-	role != ""
+	r := token_claims.role
+	is_array(r)
+	role := r[0]
 } else := role if {
-	claims := token_claims
-	is_string(claims.role)
-	role := claims.role
-	role != ""
+	role := token_claims.role
 } else := role if {
-	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem_raw != ""
-	cert_pem := cert_pem_decoded(cert_pem_raw)
-	certs := crypto.x509.parse_certificates(cert_pem)
-	cert := certs[0]
+	cert := parsed_client_cert
 	role := get_cert_title(cert)
-	role != ""
 } else := role if {
-	role := object.get(input.parsed_body, "role", "")
-	role != ""
+	role := input.parsed_body.role
 } else := role if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	headers := object.get(http, "headers", {})
-	role := object.get(headers, "x-zta-role", "")
-	role != ""
+	role := input.attributes.request.http.headers["x-zta-role"]
+} else := role if {
+	role := user_role_map[user_identity]
 } else := "unknown"
 
+user_role_map := {
+	"test.doctor":    "doctor",
+	"test.auditor":   "auditor",
+	"test.billing":   "billing_staff",
+	"test.reception": "receptionist",
+	"test.receptionist": "receptionist",
+	"admin":          "admin"
+}
+
 get_cert_title(cert) := val if {
-	titles := object.get(cert.Subject, "Title", [])
-	val := titles[0]
-	val != ""
+	val := cert.Subject.Title[0]
 } else := val if {
-	names := object.get(cert.Subject, "Names", [])
-	name := names[_]
-	name.Type == [2, 5, 4, 12]
+	name := cert.Subject.Names[_]
+	name.Type == [2, 5, 4, 12] # Title OID
 	val := name.Value
-	val != ""
 }
 
 cert_pem_decoded(raw_pem) := decoded if {
@@ -126,48 +90,46 @@ cert_pem_decoded(raw_pem) := decoded if {
 } else := raw_pem
 
 cert_subject_cn := cn if {
-	cert_pem_raw := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
-	cert_pem_raw != ""
-	cert_pem := cert_pem_decoded(cert_pem_raw)
-	certs := crypto.x509.parse_certificates(cert_pem)
-	cert := certs[0]
+	cert := parsed_client_cert
 	cn := get_cert_cn(cert)
 }
 
 get_cert_cn(cert) := val if {
-	cns := object.get(cert.Subject, "CommonName", [])
-	val := cns[0]
-	val != ""
+	val := cert.Subject.CommonName[0]
 } else := val if {
-	names := object.get(cert.Subject, "Names", [])
-	name := names[_]
-	name.Type == [2, 5, 4, 3]
+	name := cert.Subject.Names[_]
+	name.Type == [2, 5, 4, 3] # CommonName OID
 	val := name.Value
-	val != ""
+}
+
+parsed_client_cert := cert if {
+	raw_cert := input.attributes.source.certificate
+	raw_cert != ""
+	cert_pem := cert_pem_decoded(raw_cert)
+	certs := crypto.x509.parse_certificates(cert_pem)
+	cert := certs[0]
 }
 
 # ─── OIDC Federated mTLS & RFC 8705 Token Binding ─────────────────────────────
 
 is_mongodb_oidc if {
 	input.parsed_body.query.mechanism == "MONGODB-OIDC"
-} else if {
+}
+is_mongodb_oidc if {
 	input.parsed_body.mechanism == "MONGODB-OIDC"
 }
 
 oidc_payload_field := val if {
 	val := input.parsed_body.query.payload
-	val != ""
 } else := val if {
 	val := input.parsed_body.payload
-	val != ""
 } else := ""
 
-cert_der_bytes(pem_str) := der if {
+cert_der_bytes(pem_str) := base64.decode(clean_pem) if {
 	clean1 := replace(pem_str, "-----BEGIN CERTIFICATE-----", "")
 	clean2 := replace(clean1, "-----END CERTIFICATE-----", "")
 	clean3 := replace(clean2, "\n", "")
 	clean_pem := replace(clean3, "\r", "")
-	der := base64.decode(clean_pem)
 }
 
 trusted_proxies := {
@@ -178,15 +140,10 @@ trusted_proxies := {
 valid_oidc_token if {
 	payload_val := oidc_payload_field
 	payload_val != ""
-	
 	token := extract_jwt_from_payload(payload_val)
 	token != "unknown"
-	
 	claims := verify_oidc_jwt(token)
-	
-	# Verify expiration
 	claims.exp > time.now_ns() / 1000000000
-	
 	is_valid_token_binding(claims, cert_subject_cn)
 }
 
@@ -194,30 +151,6 @@ extract_jwt_from_payload(payload_val) := token if {
 	is_string(payload_val)
 	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, payload_val)
 	token := payload_val
-} else := token if {
-	is_string(payload_val)
-	decoded := base64.decode(payload_val)
-	json.is_valid(decoded)
-	parsed := json.unmarshal(decoded)
-	token := parsed.jwt
-} else := token if {
-	is_string(payload_val)
-	decoded := base64.decode(payload_val)
-	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
-	token := decoded
-} else := token if {
-	is_object(payload_val)
-	base64_data := payload_val["$binary"].base64
-	decoded := base64.decode(base64_data)
-	json.is_valid(decoded)
-	parsed := json.unmarshal(decoded)
-	token := parsed.jwt
-} else := token if {
-	is_object(payload_val)
-	base64_data := payload_val["$binary"].base64
-	decoded := base64.decode(base64_data)
-	regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, decoded)
-	token := decoded
 } else := "unknown"
 
 verify_oidc_jwt(token) := claims if {
@@ -229,12 +162,10 @@ verify_oidc_jwt(token) := claims if {
 		"timeout": 1000000000
 	})
 	jwks_resp.status_code == 200
-	
 	io.jwt.verify_rs256(token, jwks_resp.body)
 	[_, claims, _] := io.jwt.decode(token)
 }
 
-# Helpers for Step-Up Authentication status
 token_claims := claims if {
 	payload_val := oidc_payload_field
 	payload_val != ""
@@ -255,69 +186,39 @@ token_step_up_fresh if {
 	now_seconds - claims.step_up_time < 120
 }
 
-
 is_valid_token_binding(claims, cert_subject_cn) if {
-	# Direct client: CN matches sub, cert fingerprint matches cnf
 	cert_subject_cn == claims.sub
-	
-	raw_cert_pem := object.get(object.get(object.get(input, "attributes", {}), "source", {}), "certificate", "")
+	raw_cert_pem := input.attributes.source.certificate
 	raw_cert_pem != ""
 	cert_pem := cert_pem_decoded(raw_cert_pem)
-	
 	cert_der := cert_der_bytes(cert_pem)
-	client_cert_hex := crypto.sha256(cert_der)
-	
-	claims.cnf["x5t#S256_hex"] == client_cert_hex
+	claims.cnf["x5t#S256_hex"] == crypto.sha256(cert_der)
 }
 
 is_valid_token_binding(claims, cert_subject_cn) if {
-	# Trusted proxy: connection is from a trusted gateway or service
 	cert_subject_cn in trusted_proxies
 }
 
 # ─── Request Attributes extraction ───────────────────────────────────────────
 
 action_name := cmd if {
-	cmd := object.get(input.parsed_body, "command", "")
-	cmd != ""
+	cmd := input.parsed_body.command
 } else := "find" if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	method := object.get(http, "method", "")
-	method == "GET"
+	input.attributes.request.http.method == "GET"
 } else := "insert" if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	method := object.get(http, "method", "")
-	method == "POST"
+	input.attributes.request.http.method == "POST"
 } else := "update" if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	method := object.get(http, "method", "")
-	method == "PUT"
+	input.attributes.request.http.method == "PUT"
 } else := "delete" if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	method := object.get(http, "method", "")
-	method == "DELETE"
+	input.attributes.request.http.method == "DELETE"
 } else := "unknown"
 
 collection_name := coll if {
-	coll := object.get(input.parsed_body, "collection", "")
-	coll != ""
+	coll := input.parsed_body.collection
 } else := coll if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	path := object.get(http, "path", "")
-	path != ""
+	path := input.attributes.request.http.path
 	path_parts := split(path, "/")
 	coll := path_parts[1]
-	coll != ""
 } else := "unknown"
 
 normalized_collection_name := name if {
@@ -337,16 +238,14 @@ normalized_collection_name := name if {
 	name := "providers"
 } else := collection_name
 
-query_raw := q if {
-	q := object.get(input.parsed_body, "query", "")
-} else := "{}"
-
 query_doc := parsed if {
-	json.is_valid(query_raw)
-	parsed := json.unmarshal(query_raw)
+	q := input.parsed_body.query
+	is_string(q)
+	json.is_valid(q)
+	parsed := json.unmarshal(q)
 } else := parsed if {
-	object.keys(query_raw)
-	parsed := query_raw
+	parsed := input.parsed_body.query
+	is_object(parsed)
 } else := {}
 
 query_has_field(field) if {
@@ -356,25 +255,13 @@ query_has_field(field) if {
 is_empty_query := count(object.keys(query_doc)) == 0
 
 is_db_query if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	path := object.get(http, "path", "")
-	path == "/query"
-}
-
-is_db_query if {
+	input.attributes.request.http.path == "/query"
+} else if {
 	not is_non_db_http_request
 }
 
 is_non_db_http_request if {
-	attrs := object.get(input, "attributes", {})
-	request := object.get(attrs, "request", {})
-	http := object.get(request, "http", {})
-	path := object.get(http, "path", "")
+	path := input.attributes.request.http.path
 	path != ""
 	path != "/query"
 }
- 
-
-

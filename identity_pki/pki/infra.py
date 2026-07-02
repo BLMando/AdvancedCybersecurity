@@ -1,6 +1,7 @@
 import ipaddress
 import logging
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -25,13 +26,15 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new Envoy server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
-        x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
-    ])
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "envoy"),
+        ]
+    )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -41,14 +44,18 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("envoy"),
-                x509.DNSName("identity-pki"),
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("envoy"),
+                    x509.DNSName("identity-pki"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
@@ -60,7 +67,7 @@ def ensure_envoy_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         )
     )
     cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    logger.info("✓ Envoy server certificates generated successfully")
+    logger.info("Envoy server certificates generated successfully")
 
 
 def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, validity_days: int = 365) -> None:
@@ -76,13 +83,16 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     logger.info("Generating new MongoDB server certificates")
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Lab"),
-        x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
-    ])
+    ZTA_ORGANIZATION = os.getenv("ZTA_ORGANIZATION", "AdvancedCybersecurity-ORG")
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, ZTA_ORGANIZATION),
+            x509.NameAttribute(NameOID.COMMON_NAME, "mongo"),
+        ]
+    )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -92,13 +102,77 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=validity_days))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("mongo"),
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("mongo"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+
+    key_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
+    combined_pem = key_pem + cert_pem
+
+    combined_pem = key_pem + cert_pem
+    mongo_pem_path.write_bytes(combined_pem)
+
+    logger.info("MongoDB server certificates generated successfully (mongo.pem)")
+
+
+def ensure_splunk_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, validity_days: int = 365) -> None:
+    server_dir = cert_dir_path.parent / "server"
+    server_dir.mkdir(parents=True, exist_ok=True)
+
+    cert_path = server_dir / "splunk.crt"
+    key_path = server_dir / "splunk.key"
+
+    if cert_path.exists() and key_path.exists():
+        logger.info("Splunk server certificates already exist")
+        return
+
+    logger.info("Generating new Splunk server certificates")
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    subject = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "IT"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AdvancedCybersecurity-Clients"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "splunk"),
+        ]
+    )
+
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(ca_cert.subject)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + timedelta(days=validity_days))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("splunk"),
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
+            critical=False,
+        )
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
 
@@ -109,7 +183,10 @@ def ensure_mongo_certs(cert_dir_path: Path, ca_cert: x509.Certificate, ca_key, v
     )
     cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
 
-    combined_pem = key_pem + cert_pem
-    mongo_pem_path.write_bytes(combined_pem)
+    key_path.write_bytes(key_pem)
+    cert_path.write_bytes(cert_pem)
 
-    logger.info("✓ MongoDB server certificates generated successfully (mongo.pem)")
+    pem_path = server_dir / "splunk.pem"
+    pem_path.write_bytes(cert_pem + key_pem)
+
+    logger.info("Splunk server certificates generated successfully")

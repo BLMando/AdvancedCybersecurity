@@ -663,8 +663,8 @@ test_mongo_failures_raises_risk_and_denies if {
 # NOTE: L'ispezione del payload (NoSQL Injection, DoS patterns) è ora gestita
 # esclusivamente dal filtro Lua L7 WAF inline in Envoy, posizionato dopo
 # ext_authz (OPA). OPA non valuta più is_malicious; la responsabilità è:
-#   - OPA  → identità, RBAC, rischio, step-up, segregation of duties
-#   - Lua  → ispezione contenuto query (pattern matching raw sul body)
+#   - OPA  -> identità, RBAC, rischio, step-up, segregation of duties
+#   - Lua  -> ispezione contenuto query (pattern matching raw sul body)
 # I test relativi a $where, $function, sleep() sono stati rimossi da qui.
 
 
@@ -673,21 +673,21 @@ test_mongo_failures_raises_risk_and_denies if {
 mock_http_send_high_risk(req) := {
 	"status_code": 200,
 	"body": {
-		"risk_boost": 100
+		"results": [{"anomaly_risk": "100"}]
 	}
 }
 
 mock_http_send_medium_risk(req) := {
 	"status_code": 200,
 	"body": {
-		"risk_boost": 60
+		"results": [{"anomaly_risk": "60"}]
 	}
 }
 
 mock_http_send_safe(req) := {
 	"status_code": 200,
 	"body": {
-		"risk_boost": 0
+		"results": [{"anomaly_risk": "0"}]
 	}
 }
 

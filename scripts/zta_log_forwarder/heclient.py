@@ -22,11 +22,13 @@ class HEClient:
 
     def send_event(self, event: dict, index: str = "main", sourcetype: str = "_json") -> bool:
         with self._lock:
-            self._buffer.append({
-                "event": event,
-                "index": index,
-                "sourcetype": sourcetype,
-            })
+            self._buffer.append(
+                {
+                    "event": event,
+                    "index": index,
+                    "sourcetype": sourcetype,
+                }
+            )
             if len(self._buffer) >= self.batch_size or (time.time() - self._last_flush) >= self._flush_interval:
                 return self.flush()
         return True
@@ -54,6 +56,7 @@ class HEClient:
                     method="POST",
                 )
                 import ssl as _ssl
+
                 ctx = _ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = _ssl.CERT_NONE
@@ -69,13 +72,13 @@ class HEClient:
             except urllib.error.HTTPError as e:
                 logger.error("HEC HTTP %d: %s", e.code, e.read().decode())
                 if attempt < self.max_retries:
-                    backoff = 2 ** attempt
+                    backoff = 2**attempt
                     logger.info("Retrying in %ds...", backoff)
                     time.sleep(backoff)
             except Exception as e:
                 logger.error("HEC send error: %s", e)
                 if attempt < self.max_retries:
-                    backoff = 2 ** attempt
+                    backoff = 2**attempt
                     time.sleep(backoff)
         logger.error("Failed to send batch after %d attempts", self.max_retries)
         return False

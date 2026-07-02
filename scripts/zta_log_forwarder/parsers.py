@@ -1,5 +1,5 @@
-import re
 import logging
+import re
 
 logger = logging.getLogger("parsers")
 
@@ -83,24 +83,24 @@ def parse_nftables_line(line: str) -> dict | None:
             # Estrae log prefix
             prefix_match = re.search(r'log prefix "([^"]+)"', line)
             prefix = prefix_match.group(1).strip(": ") if prefix_match else "NFT_COUNTER"
-            
+
             # Estrae azione finale
             action = "DROP" if "drop" in line.lower() else "ACCEPT" if "accept" in line.lower() else "UNKNOWN"
-            
+
             # Estrae packets e bytes
-            packets_match = re.search(r'counter packets (\d+)', line)
+            packets_match = re.search(r"counter packets (\d+)", line)
             packets = int(packets_match.group(1)) if packets_match else 0
-            
-            bytes_match = re.search(r'bytes (\d+)', line)
+
+            bytes_match = re.search(r"bytes (\d+)", line)
             bytes_val = int(bytes_match.group(1)) if bytes_match else 0
-            
+
             # Estrae protocollo
             proto = "tcp" if "tcp" in line else "udp" if "udp" in line else "icmp" if "icmp" in line else "ip"
-            
+
             # Estrae porta destinazione
-            dport_match = re.search(r'dport (\d+)', line)
+            dport_match = re.search(r"dport (\d+)", line)
             dst_port = int(dport_match.group(1)) if dport_match else 0
-            
+
             return {
                 "prefix": prefix,
                 "action": action,
@@ -108,11 +108,11 @@ def parse_nftables_line(line: str) -> dict | None:
                 "bytes": bytes_val,
                 "proto": proto,
                 "dst_port": dst_port,
-                "raw_rule": line.strip()
+                "raw_rule": line.strip(),
             }
         except Exception as e:
             logger.warning("Error parsing counter line: %s, error: %s", line, e)
-            
+
     return None
 
 
@@ -137,10 +137,10 @@ def extract_opa_decision_fields(log_entry: dict) -> dict:
         allowed = result.get("main", {}).get("allowed", False)
 
     resp_headers = (
-        result.get("response_headers_to_add") or 
-        result.get("main", {}).get("response_headers_to_add") or 
-        result.get("response_headers") or 
-        {}
+        result.get("response_headers_to_add")
+        or result.get("main", {}).get("response_headers_to_add")
+        or result.get("response_headers")
+        or {}
     )
 
     headers = request.get("headers", {}) or {}
@@ -151,17 +151,18 @@ def extract_opa_decision_fields(log_entry: dict) -> dict:
 
     # Extract query filter from incoming request body parsed by Envoy/OPA
     import json
+
     parsed_body = inp.get("parsed_body") or {}
     query_filter = parsed_body.get("query") or parsed_body.get("filter") or {}
     query_filter_str = json.dumps(query_filter)
 
     # Extract human-readable username from incoming Flask header or fallback
     user = (
-        headers.get("x-zta-user") or 
-        headers.get("X-ZTA-User") or 
-        resp_headers.get("x-zta-user") or 
-        parsed_body.get("user") or 
-        "unknown"
+        headers.get("x-zta-user")
+        or headers.get("X-ZTA-User")
+        or resp_headers.get("x-zta-user")
+        or parsed_body.get("user")
+        or "unknown"
     )
 
     # Resolve fallbacks for other ZTA context fields
@@ -171,41 +172,22 @@ def extract_opa_decision_fields(log_entry: dict) -> dict:
             "test.doctor": "doctor",
             "test.auditor": "auditor",
             "test.billing": "billing_staff",
-            "test.reception": "receptionist",
             "test.receptionist": "receptionist",
-            "admin": "admin"
+            "admin": "admin",
         }
         role = user_role_map.get(user, "unknown")
-    
+
     command = (
-        resp_headers.get("x-zta-command") or 
-        resp_headers.get("x-zta-action") or 
-        parsed_body.get("command") or 
-        "unknown"
+        resp_headers.get("x-zta-command") or resp_headers.get("x-zta-action") or parsed_body.get("command") or "unknown"
     )
-    
-    collection = (
-        resp_headers.get("x-zta-collection") or 
-        parsed_body.get("collection") or 
-        "unknown"
-    )
-    
-    risk_score = (
-        resp_headers.get("x-zta-risk-score") or 
-        resp_headers.get("x-zta-eff-risk") or 
-        "0"
-    )
-    
-    device = (
-        resp_headers.get("x-zta-device") or 
-        parsed_body.get("device") or 
-        "unknown"
-    )
-    
-    block_reason = (
-        resp_headers.get("x-zta-block-reason") or 
-        "none"
-    )
+
+    collection = resp_headers.get("x-zta-collection") or parsed_body.get("collection") or "unknown"
+
+    risk_score = resp_headers.get("x-zta-risk-score") or resp_headers.get("x-zta-eff-risk") or "0"
+
+    device = resp_headers.get("x-zta-device") or parsed_body.get("device") or "unknown"
+
+    block_reason = resp_headers.get("x-zta-block-reason") or "none"
 
     return {
         "request_id": request_id,

@@ -1,8 +1,11 @@
-import os
-import sys
+import fcntl
 import hashlib
-from flask import Blueprint, render_template, jsonify, send_from_directory, request, current_app
+import os
+import re
+import sys
+
 from cryptography.hazmat.primitives import serialization
+from flask import Blueprint, current_app, jsonify, render_template, request, send_from_directory
 
 from .utils import error_response
 
@@ -24,22 +27,16 @@ def index():
     """Serve the landing page."""
     service = current_app.config["pki_service"]
     ca_fingerprint = hashlib.sha256(service.ca_cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-    
+
     ca_info = {
         "subject": service.ca_cert.subject.rfc4514_string(),
         "fingerprint_sha256": ca_fingerprint,
-        "data_dir": service.cert_dir
+        "data_dir": service.cert_dir,
     }
-    
+
     roles = {k: {"label": v["display_name"]} for k, v in ZTA_ROLES.items()}
-    
+
     return render_template("index.html", ca=ca_info, roles=roles)
-
-
-@admin_bp.get("/admin")
-def admin_dashboard():
-    """Serve the admin dashboard."""
-    return render_template("admin.html")
 
 
 @admin_bp.get("/api/admin/certificates")
@@ -70,3 +67,76 @@ def api_revoke_certificate():
     except ValueError as exc:
         return error_response(str(exc), 400)
     return jsonify({"status": "success", "message": f"User {user_cn} revoked"})
+
+
+def _get_blocklist_path():
+    return "/app/blocklist/blocklist.txt"
+
+
+def _read_blocklist() -> list[str]:
+    path = _get_blocklist_path()
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _write_blocklist(ips: list[str]) -> None:
+    path = _get_blocklist_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            for ip in ips:
+                f.write(f"{ip}\n")
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+@admin_bp.get("/api/admin/blocklist")
+def api_get_blocklist():
+    """Get the active firewall blocklist."""
+    try:
+        return jsonify(_read_blocklist())
+    except Exception as e:
+        return error_response(f"Failed to read blocklist: {e}", 500)
+
+
+@admin_bp.post("/api/admin/blocklist/add")
+def api_add_to_blocklist():
+    """Add an IP address to the blocklist."""
+    payload = request.get_json(silent=True) or {}
+    ip = payload.get("ip", "").strip()
+    if not ip or not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip):
+        return error_response("Invalid IP address format", 400)
+    try:
+        ips = _read_blocklist()
+        if ip not in ips:
+            ips.append(ip)
+            _write_blocklist(ips)
+            current_app.logger.info("IP %s added to blocklist", ip)
+        return jsonify({"status": "success", "message": f"IP {ip} blocked"})
+    except Exception as e:
+        return error_response(f"Failed to update blocklist: {e}", 500)
+
+
+@admin_bp.post("/api/admin/blocklist/remove")
+def api_remove_from_blocklist():
+    """Remove an IP address from the blocklist."""
+    payload = request.get_json(silent=True) or {}
+    ip = payload.get("ip", "").strip()
+    if not ip:
+        return error_response("IP address required", 400)
+    try:
+        ips = _read_blocklist()
+        if ip in ips:
+            ips.remove(ip)
+            _write_blocklist(ips)
+            current_app.logger.info("IP %s removed from blocklist", ip)
+        return jsonify({"status": "success", "message": f"IP {ip} unblocked"})
+    except Exception as e:
+        return error_response(f"Failed to update blocklist: {e}", 500)

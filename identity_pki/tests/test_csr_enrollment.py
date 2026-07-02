@@ -10,8 +10,10 @@ Tests:
 
 import json
 import sys
+
 if sys.platform == "win32":
     import io
+
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 import tempfile
@@ -25,6 +27,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+
 from identity_pki.pki import PKIService
 
 
@@ -101,7 +104,7 @@ def test_csr_enrollment():
         assert any("CPU-" in s for s in san_dns), "Missing CPU in SAN"
 
         # Check Extensions
-        print(f"    Extensions:")
+        print("    Extensions:")
         for ext in cert.extensions:
             print(f"      - {ext.oid._name if hasattr(ext.oid, '_name') else ext.oid}: critical={ext.critical}")
 
@@ -119,7 +122,7 @@ def test_csr_enrollment():
         print(f"    Hardware MAC: {metadata['hardware']['mac']}")
         print(f"    Hardware CPU: {metadata['hardware']['cpu']}")
         print(f"    Enrollment method: {metadata.get('enrollment_method', 'unknown')}")
-        assert metadata['enrollment_method'] == 'csr', "Expected CSR enrollment"
+        assert metadata["enrollment_method"] == "csr", "Expected CSR enrollment"
 
         # Step 5: Test uniqueness check
         print("\n[6] Testing CN uniqueness enforcement...")

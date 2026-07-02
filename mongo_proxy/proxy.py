@@ -1,43 +1,46 @@
-import os
 import json
 import logging
+import os
 import ssl
-from flask import Flask, request, jsonify
-from pymongo import MongoClient
-from pymongo.errors import OperationFailure
-from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+from datetime import UTC
+
 from bson import json_util
+from flask import Flask, jsonify, request
+from pymongo import MongoClient
+from pymongo.auth_oidc import OIDCCallback, OIDCCallbackResult
+from pymongo.errors import OperationFailure
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("mongo_proxy")
 
 app = Flask(__name__)
 
-MONGO_DB_NAME = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
+MONGO_DB = os.getenv("MONGO_DATABASE", "zta_db")
 CA_PATH = "/etc/certs/ca/ca.crt"
-CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem" # server cert & key
+CLIENT_PEM_PATH = "/etc/certs/server/mongo.pem"  # server cert & key
+
 
 class StaticTokenCallback(OIDCCallback):
     def __init__(self, token):
         self.token = token
+
     def fetch(self, context):
         return OIDCCallbackResult(access_token=self.token)
+
 
 def build_client(jwt_token, user_cn):
     # Connect to MongoDB via OIDC
     callback_instance = StaticTokenCallback(jwt_token)
     return MongoClient(
-        f"mongodb://mongo:27017/{MONGO_DB_NAME}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
-        authMechanismProperties={
-            "OIDC_CALLBACK": callback_instance,
-            "authzId": f"oidc/{user_cn}"
-        },
+        f"mongodb://mongo:27017/{MONGO_DB}?authSource=$external&authMechanism=MONGODB-OIDC&directConnection=true",
+        authMechanismProperties={"OIDC_CALLBACK": callback_instance, "authzId": f"oidc/{user_cn}"},
         tls=True,
         tlsCertificateKeyFile=CLIENT_PEM_PATH,
         tlsCAFile=CA_PATH,
         tlsAllowInvalidCertificates=True,
-        serverSelectionTimeoutMS=4000
+        serverSelectionTimeoutMS=4000,
     )
+
 
 @app.route("/query", methods=["POST"])
 def handle_query():
@@ -62,8 +65,8 @@ def handle_query():
 
     try:
         client = build_client(jwt_token, user_cn)
-        db = client[MONGO_DB_NAME]
-        
+        db = client[MONGO_DB]
+
         results_json = []
         count = 0
         message = "Success"
@@ -89,17 +92,19 @@ def handle_query():
                 # Sanitize: strip leading $ from keys to prevent operator injection
                 safe_fields = {k: v for k, v in update_fields.items() if not k.startswith("$")}
                 if collection_name != "providers":
-                    from datetime import datetime, timezone
-                    set_payload = {**safe_fields, "updated_at": datetime.now(timezone.utc)}
+                    from datetime import datetime
+
+                    set_payload = {**safe_fields, "updated_at": datetime.now(UTC)}
                 else:
                     set_payload = safe_fields
             else:
                 if collection_name != "providers":
-                    from datetime import datetime, timezone
-                    set_payload = {"updated_at": datetime.now(timezone.utc)}
+                    from datetime import datetime
+
+                    set_payload = {"updated_at": datetime.now(UTC)}
                 else:
                     set_payload = {}
-            
+
             if set_payload:
                 update_op = {"$set": set_payload}
                 res = db[collection_name].update_many(query_filter, update_op)
@@ -122,37 +127,27 @@ def handle_query():
             return jsonify({"status": "error", "message": f"Unsupported action: {action}"}), 400
 
         client.close()
-        return jsonify({
-            "status": "success",
-            "count": count,
-            "results": results_json,
-            "message": message
-        })
+        return jsonify({"status": "success", "count": count, "results": results_json, "message": message})
 
     except OperationFailure as e:
         err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
         logger.error("MongoDB Operation Failure: %s", err_msg)
-        return jsonify({
-            "status": "error",
-            "error_type": "authorization_denied",
-            "message": f"MongoDB Access Denied: {err_msg}"
-        }), 403
+        return jsonify(
+            {"status": "error", "error_type": "authorization_denied", "message": f"MongoDB Access Denied: {err_msg}"}
+        ), 403
     except Exception as e:
         logger.exception("Error executing Mongo operation")
-        return jsonify({
-            "status": "error",
-            "error_type": "connection_failed",
-            "message": f"Connection failed: {e}"
-        }), 500
+        return jsonify(
+            {"status": "error", "error_type": "connection_failed", "message": f"Connection failed: {e}"}
+        ), 500
+
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PROXY_PORT", "5001"))
-    
     # Configure mTLS for the Flask HTTPS server
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(certfile=CLIENT_PEM_PATH)
     context.load_verify_locations(cafile=CA_PATH)
     context.verify_mode = ssl.CERT_REQUIRED
-    
-    logger.info("Starting Custom MongoDB HTTP Proxy under mTLS on port %d", port)
-    app.run(host="0.0.0.0", port=port, ssl_context=context)
+
+    logger.info("Starting Custom MongoDB HTTP Proxy under mTLS on port %d", 5001)
+    app.run(host="0.0.0.0", port=5001, ssl_context=context)

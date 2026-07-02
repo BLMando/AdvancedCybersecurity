@@ -1,23 +1,19 @@
 """Data querying operations targeting MongoDB through Envoy sidecars."""
 
+import json
 import os
 import sys
-import json
-from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify, current_app
+
+from flask import Blueprint, current_app, jsonify, request
 from pymongo.errors import OperationFailure
 
 from ..auth import (
-    check_action_permissions as _check_action_permissions,
     get_rls_view_name as _get_rls_view_name,
     resolve_user_metadata as _resolve_user_metadata,
 )
 from ..database import (
-    build_mongo_client as _build_mongo_client,
-    execute_mongo_operation as _execute_mongo_operation,
     prepare_combined_pem as _prepare_combined_pem,
 )
-from ..audit import send_audit_event_impl as _send_audit_event_impl
 from .utils import error_response
 
 # Load ZTA roles
@@ -42,6 +38,7 @@ def health():
 def api_query():
     """Execute a MongoDB query via Envoy presenting the user's client certificate."""
     import uuid
+
     request_id = str(uuid.uuid4())
     response = None
     payload = request.get_json(silent=True) or {}
@@ -51,34 +48,32 @@ def api_query():
     limit = int(payload.get("limit", 10))
     jwt_token = payload.get("jwt_token")
     mongo_action = payload.get("action", "find")
-    record_id = payload.get("record_id")          # Single-document _id for delete/update
+    record_id = payload.get("record_id")  # Single-document _id for delete/update
     update_fields = payload.get("update_fields")  # Dict of specific fields to $set on update
-    patient_id = payload.get("patient_id")        # patient_id to satisfy OPA WAF checks
+    patient_id = payload.get("patient_id")  # patient_id to satisfy OPA WAF checks
 
     if not user_cn or not collection_name:
-        return error_response("Il CN dell'utente e il nome della collezione sono obbligatori.", 400)
+        return error_response("User CN and collection name are mandatory.", 400)
 
     service = current_app.config["pki_service"]
 
     # Check if user is revoked
     if os.path.exists(os.path.join(service.revoked_dir, f"{user_cn}.rev")):
-        return error_response("Identità revocata o sospesa dall'amministratore.", 401)
+        return error_response("Identity revoked or suspended by administrator.", 401)
 
     if not jwt_token:
-        return error_response(
-            "Autenticazione OIDC obbligatoria. L'autenticazione legacy (SCRAM/Password) è disabilitata.",
-            401
-        )
+        return error_response("OIDC authentication mandatory. Legacy authentication (SCRAM/Password) is disabled.", 401)
 
     try:
         query_filter = json.loads(query_filter_str) if query_filter_str else {}
     except json.JSONDecodeError as e:
-        return error_response(f"Filtro JSON non valido: {e}", 400)
+        return error_response(f"Invalid JSON filter: {e}", 400)
 
     # If a specific record_id is given, override the filter for single-doc operations
     if record_id and mongo_action in ("delete", "update"):
         from bson import ObjectId
         from bson.errors import InvalidId
+
         try:
             query_filter = {"_id": ObjectId(record_id)}
         except InvalidId:
@@ -101,95 +96,35 @@ def api_query():
         key_path = os.path.join(service.cert_dir, "issued", user_cn, "private_key.pem")
 
     if not os.path.exists(cert_path) and not jwt_token:
-        return error_response(f"Credenziali non trovate per l'utente '{user_cn}'. Si prega di registrare prima l'utente.", 404)
+        return error_response(f"Credentials not found for user '{user_cn}'. Please register the user first.", 404)
 
     if not jwt_token and not local_proxy_port and not os.path.exists(key_path):
         return error_response(
-            f"L'utente '{user_cn}' è registrato in modalità Hardware Bound (TPM/Secure Enclave). "
-            f"La chiave privata risiede in sicurezza sul client e non è disponibile sul server. "
-            f"Per usare questa console web, registra l'utente in modalità Lab (/api/certificates) "
-            f"in modo che il server possa ospitare la chiave temporaneamente, oppure esegui le query tramite "
-            f"la CLI del client hardware dal tuo computer host.",
-            403
+            f"User '{user_cn}' is registered in Hardware Bound mode (TPM/Secure Enclave). "
+            f"The private key resides securely on the client and is not available on the server. "
+            f"To use this web console, register the user in Lab mode (/api/certificates) "
+            f"so the server can host the key temporarily, or execute queries via "
+            f"the hardware client CLI from your host computer.",
+            403,
         )
-
-    def _send_audit_event(*args, **kwargs):
-        pass
 
     combined_pem_path = None
     if not local_proxy_port:
         try:
             combined_pem_path = _prepare_combined_pem(service, user_cn, cert_path, key_path, jwt_token)
         except Exception as e:
-            return error_response(f"Errore nella preparazione del PEM combinato: {e}", 500)
+            return error_response(f"Error preparing combined PEM: {e}", 500)
 
     # Resolve role and hardware_mode
-    role, hardware_mode, device_info = _resolve_user_metadata(service, user_cn, cert_path, jwt_token, current_app.logger)
+    role, hardware_mode, device_info = _resolve_user_metadata(
+        service, user_cn, cert_path, jwt_token, current_app.logger
+    )
 
     # Translate collection to RLS view
     view_name = collection_name
     if role != "admin":
-        role_config = ZTA_ROLES.get(role, {})
-        allowed = role_config.get("allowed_collections", [])
-        if collection_name not in allowed:
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type="authorization_denied",
-                message=f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad accedere alla collezione '{collection_name}'.",
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
-            )
-            return jsonify({
-                "status": "error",
-                "error_type": "authorization_denied",
-                "message": f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad accedere alla collezione '{collection_name}'.",
-                "role": role,
-                "translated_collection": view_name
-            }), 403
-
-        # Action-level permission check
-        if not _check_action_permissions(role, collection_name, mongo_action):
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type="authorization_denied",
-                message=f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad eseguire '{mongo_action}' sulla collezione '{collection_name}'.",
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
-            )
-            return jsonify({
-                "status": "error",
-                "error_type": "authorization_denied",
-                "message": f"Accesso negato (OPA/RBAC): Il ruolo '{role}' non è autorizzato ad eseguire '{mongo_action}' sulla collezione '{collection_name}'.",
-                "role": role,
-                "translated_collection": view_name
-            }), 403
-
-        # Enforce that update operations on clinical_records contain patient_id in the query filter
-        if collection_name == "clinical_records" and mongo_action == "update":
-            if not query_filter.get("patient_id"):
-                return jsonify({
-                    "status": "error",
-                    "error_type": "authorization_denied",
-                    "message": "Accesso negato (OPA/RBAC): Documento non conforme (manca il filtro patient_id obbligatorio).",
-                    "role": role,
-                    "translated_collection": view_name
-                }), 403
-
         view_name = _get_rls_view_name(role, collection_name)
 
-    mongo_db_name = os.environ.get("MONGO_INITDB_DATABASE", "zta_db")
     ca_path = os.path.join(service.cert_dir, "ca.crt")
 
     try:
@@ -213,13 +148,14 @@ def api_query():
             "limit": limit,
             "user": user_cn,
             "role": role,
-            "payload": jwt_token
+            "payload": jwt_token,
         }
 
         # Serialize utilizing json_util to support BSON types (like ObjectIDs/dates)
         payload_data = json_util.dumps(query_payload)
 
         import logging
+
         logging.getLogger("werkzeug").info(f"[DEBUG] Envoy payload: {payload_data[:500]}...")
 
         headers = {
@@ -227,7 +163,7 @@ def api_query():
             "x-zta-user": user_cn,
             "x-zta-role": role,
             "Authorization": f"Bearer {jwt_token}",
-            "x-request-id": request_id
+            "x-request-id": request_id,
         }
 
         if local_proxy_port:
@@ -236,12 +172,7 @@ def api_query():
         else:
             url = "https://envoy:10000/query"
             response = requests.post(
-                url,
-                data=payload_data,
-                headers=headers,
-                cert=combined_pem_path,
-                verify=ca_path,
-                timeout=10
+                url, data=payload_data, headers=headers, cert=combined_pem_path, verify=ca_path, timeout=10
             )
 
         if response.status_code != 200:
@@ -253,7 +184,7 @@ def api_query():
                 err_type = res_data.get("error_type", "query_failed")
             except Exception:
                 pass
-            
+
             if not err_msg:
                 # Fallback to checking Envoy/OPA response headers
                 decision = response.headers.get("x-zta-decision")
@@ -262,111 +193,89 @@ def api_query():
                     block_reason = response.headers.get("x-zta-block-reason")
                     if block_reason and block_reason != "none":
                         if block_reason == "RISK_THRESHOLD_EXCEEDED":
-                            err_msg = "Accesso negato: il livello di rischio calcolato supera la soglia consentita."
+                            err_msg = "Access denied: the calculated risk level exceeds the permitted threshold."
                         elif block_reason == "STEP_UP_REQUIRED":
-                            err_msg = "Autenticazione secondaria (Step-up) richiesta. Effettua la verifica Touch ID / Windows Hello per procedere."
+                            err_msg = "Secondary (Step-up) authentication required. Please perform Touch ID / Windows Hello verification to proceed."
                         elif block_reason == "STEP_UP_STALE":
-                            err_msg = "Sessione biometrica scaduta. Si prega di rieffettuare la verifica sul dispositivo."
+                            err_msg = "Biometric session expired. Please re-authenticate on your device."
                         elif block_reason == "RBAC_DENIED":
-                            err_msg = f"Il tuo ruolo ({role}) non dispone dei permessi necessari per questa operazione."
+                            err_msg = f"Insufficient permissions. Role '{role}' does not have access to collection '{collection_name}' for operation '{mongo_action}'."
                         elif block_reason == "ROLE_SEGREGATION_DENIED":
-                            err_msg = "Violazione della separazione dei compiti (Segregation of Duties): l'accesso a questa risorsa è bloccato per motivi organizzativi."
+                            err_msg = "Segregation of Duties violation: Access to this resource is blocked for organizational reasons."
                         elif block_reason == "INSPECTION_VIOLATION":
-                            if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
-                                err_msg = "I medici sono tenuti a specificare il filtro patient_id durante l'aggiornamento delle cartelle cliniche."
+                            if (
+                                role == "doctor"
+                                and collection_name == "clinical_records"
+                                and mongo_action == "update"
+                                and not query_filter.get("patient_id")
+                            ):
+                                err_msg = "Doctors are required to specify the patient_id filter when updating clinical records."
                             else:
-                                err_msg = "Richiesta non conforme: controlli di sicurezza L7 hanno bloccato la query."
+                                err_msg = "Non-compliant request: L7 security checks blocked the query."
                         elif block_reason == "OIDC_TOKEN_INVALID":
-                            err_msg = "Sessione di autenticazione non valida o scaduta. Effettua nuovamente il login hardware."
+                            err_msg = "Invalid or expired authentication session. Please perform hardware login again."
                         elif block_reason == "UNAUTHENTICATED":
-                            err_msg = "Utente non identificato o certificato non registrato."
+                            err_msg = "Unidentified user or unregistered certificate."
                         else:
-                            err_msg = f"Accesso negato: Decisione Zero Trust (Motivo: {block_reason})."
+                            err_msg = f"Access denied: Zero Trust Decision (Reason: {block_reason})."
                     else:
-                        if role == "doctor" and collection_name == "clinical_records" and mongo_action == "update" and not query_filter.get("patient_id"):
+                        if (
+                            role == "doctor"
+                            and collection_name == "clinical_records"
+                            and mongo_action == "update"
+                            and not query_filter.get("patient_id")
+                        ):
                             err_msg = "OPA/RBAC Access Denied: Doctors are required to filter by patient_id when updating clinical records."
                         else:
                             err_msg = f"OPA/RBAC Access Denied: Zero Trust policy decision (User '{user_cn}', Role '{role}', Action '{mongo_action}', Collection '{collection_name}')."
                 else:
                     err_msg = response.text or f"HTTP {response.status_code}"
-            
+
             # Remove "Mongo HTTP Proxy error: " prefix for client blocks to keep UI clean and user-friendly
-            display_msg = err_msg if err_type in {"waf_blocked", "policy_denied", "authorization_denied"} else f"Mongo HTTP Proxy error: {err_msg}"
-            
-            _send_audit_event(
-                user=user_cn,
-                role=role,
-                collection=collection_name,
-                action=mongo_action,
-                translated_view=view_name,
-                query_filter=query_filter_str,
-                decision="DENY",
-                error_type=err_type,
-                message=display_msg,
-                jwt_auth=bool(jwt_token),
-                hardware_mode=hardware_mode
+            display_msg = (
+                err_msg
+                if err_type in {"waf_blocked", "policy_denied", "authorization_denied"}
+                else f"Mongo HTTP Proxy error: {err_msg}"
             )
-            return jsonify({
-                "status": "error",
-                "error_type": err_type,
-                "message": display_msg,
-                "role": role,
-                "translated_collection": view_name
-            }), response.status_code
+
+            return jsonify(
+                {
+                    "status": "error",
+                    "error_type": err_type,
+                    "message": display_msg,
+                    "role": role,
+                    "translated_collection": view_name,
+                }
+            ), response.status_code
 
         res_data = response.json()
         count = res_data.get("count", 0)
         results_json = res_data.get("results", [])
         message = res_data.get("message", "Success")
 
-        _send_audit_event(
-            user=user_cn,
-            role=role,
-            collection=collection_name,
-            action=mongo_action,
-            translated_view=target_collection,
-            query_filter=query_filter_str,
-            decision="ALLOW",
-            count=count,
-            message=message,
-            jwt_auth=bool(jwt_token),
-            hardware_mode=hardware_mode
+        return jsonify(
+            {
+                "status": "success",
+                "role": role,
+                "translated_collection": target_collection,
+                "count": count,
+                "results": results_json,
+                "message": message,
+            }
         )
-
-        return jsonify({
-            "status": "success",
-            "role": role,
-            "translated_collection": target_collection,
-            "count": count,
-            "results": results_json,
-            "message": message
-        })
 
     except OperationFailure as e:
         err_msg = e.details.get("errmsg", str(e)) if e.details else str(e)
-        _send_audit_event(
-            user=user_cn,
-            role=role,
-            collection=collection_name,
-            action=mongo_action,
-            translated_view=view_name,
-            query_filter=query_filter_str,
-            decision="DENY",
-            error_type="authorization_denied",
-            message=f"OPA/RBAC Access Denied: {err_msg}",
-            jwt_auth=bool(jwt_token),
-            hardware_mode=hardware_mode
-        )
-        return jsonify({
-            "status": "error",
-            "error_type": "authorization_denied",
-            "message": f"OPA/RBAC Access Denied: {err_msg}",
-            "role": role,
-            "translated_collection": view_name
-        }), 403
+        return jsonify(
+            {
+                "status": "error",
+                "error_type": "authorization_denied",
+                "message": f"OPA/RBAC Access Denied: {err_msg}",
+                "role": role,
+                "translated_collection": view_name,
+            }
+        ), 403
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "error_type": "connection_failed",
-            "message": f"Connection failed: {e}"
-        }), 500
+        return jsonify(
+            {"status": "error", "error_type": "connection_failed", "message": f"Connection failed: {e}"}
+        ), 500

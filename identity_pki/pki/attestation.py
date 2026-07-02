@@ -1,14 +1,12 @@
 import base64
-import hashlib
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 from identity_pki.pki.models import AttestationChallenge
 
@@ -19,17 +17,13 @@ class PKIAttestationMixin:
     def create_challenge(self):
         challenge_id = str(uuid.uuid4())
         nonce = os.urandom(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.challenge_ttl_minutes)
+        expires_at = datetime.now(UTC) + timedelta(minutes=self.challenge_ttl_minutes)
 
-        challenge = AttestationChallenge(
-            challenge_id=challenge_id,
-            nonce=nonce,
-            expires_at=expires_at
-        )
+        challenge = AttestationChallenge(challenge_id=challenge_id, nonce=nonce, expires_at=expires_at)
         self.challenges[challenge_id] = challenge
         return challenge_id, base64.b64encode(nonce).decode()
 
-    def verify_proof(self, challenge_id, signature_b64, public_key_pem=None, proof_string=None) -> Optional[dict]:
+    def verify_proof(self, challenge_id, signature_b64, public_key_pem=None, proof_string=None) -> dict | None:
         logger.debug("Verifying proof for challenge %s", challenge_id)
 
         try:
@@ -38,7 +32,7 @@ class PKIAttestationMixin:
             logger.warning("Challenge %s not found (expired or never issued)", challenge_id)
             return None
 
-        if challenge.used or datetime.now(timezone.utc) > challenge.expires_at:
+        if challenge.used or datetime.now(UTC) > challenge.expires_at:
             logger.warning("Challenge %s invalid or expired", challenge_id)
             return None
 
@@ -79,11 +73,7 @@ class PKIAttestationMixin:
 
                 logger.info("Hardware proof verified for %s", user_cn)
                 self.challenges[challenge_id].used = True
-                return {
-                    "user": user_cn,
-                    "role": role,
-                    "department": dept
-                }
+                return {"user": user_cn, "role": role, "department": dept}
 
             raw_sig = signature
             try:
@@ -131,21 +121,20 @@ class PKIAttestationMixin:
                 return serialization.load_pem_public_key(pub_key_bytes)
             except Exception as e:
                 if "BEGIN RSA" in str(public_key_pem):
-                    if hasattr(serialization, 'load_pem_rsa_public_key'):
+                    if hasattr(serialization, "load_pem_rsa_public_key"):
                         return serialization.load_pem_rsa_public_key(pub_key_bytes)
                 raise e
         except Exception as e:
             logger.warning("Failed to load public key: %s", e)
             return None
 
-    def _find_user_by_public_key(self, public_key_pem: str) -> Optional[str]:
+    def _find_user_by_public_key(self, public_key_pem: str) -> str | None:
         try:
             target_key = self._load_public_key(public_key_pem)
             if not target_key:
                 return None
             target_bytes = target_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
             )
 
             for user_dir in self.issued_dir.iterdir():
@@ -157,7 +146,7 @@ class PKIAttestationMixin:
                             cert_pub = cert.public_key()
                             cert_pub_bytes = cert_pub.public_bytes(
                                 encoding=serialization.Encoding.PEM,
-                                format=serialization.PublicFormat.SubjectPublicKeyInfo
+                                format=serialization.PublicFormat.SubjectPublicKeyInfo,
                             )
                             if cert_pub_bytes == target_bytes:
                                 logger.info("Found matching user for public key: %s", user_dir.name)
@@ -168,7 +157,7 @@ class PKIAttestationMixin:
             logger.warning("Error searching user by public key: %s", e)
         return None
 
-    def _extract_cn_from_proof(self, proof_string: str) -> Optional[str]:
+    def _extract_cn_from_proof(self, proof_string: str) -> str | None:
         for part in proof_string.split("|"):
             if part.startswith("CN="):
                 return part.split("=", 1)[1].strip()

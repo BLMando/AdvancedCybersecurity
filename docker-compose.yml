@@ -1,6 +1,6 @@
 services:
 
-  # ── Identity & PKI (Certificate Management) ─────
+  # Identity & PKI (Certificate Management)
   identity-pki:
     build:
       context: ./identity_pki
@@ -8,16 +8,21 @@ services:
     container_name: identity-pki
     restart: on-failure
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${IDENTITY_APP_PORT}:8080"
     environment:
-      IDENTITY_APP_HOST: 0.0.0.0
-      IDENTITY_APP_PORT: 8080
+      IDENTITY_APP_DEBUG: false
       ZTA_PKI_DATA_DIR: /data/certs
-      ZTA_PKI_ORGANIZATION: ${ZTA_PKI_ORGANIZATION}
-      ZTA_PKI_CA_CN: ${ZTA_PKI_CA_CN}
+      ZTA_CA_VALIDITY_DAYS: 3650
+      ZTA_CERT_VALIDITY_DAYS: 365
+      ZTA_CHALLENGE_TTL_MINUTES: 5
+      ZTA_CA_CN: ${ZTA_CA_CN}
+      ZTA_CA_KEY_PASSWORD: ${ZTA_CA_KEY_PASSWORD}
+      ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      SMTP_EMAIL: ${SMTP_EMAIL}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
     volumes:
       - ./volumes/certs/ca:/data/certs
       - ./volumes/certs/server:/data/server
@@ -25,12 +30,13 @@ services:
       - ./shared:/app/shared:ro
       - ./identity_pki/templates:/app/identity_pki/templates
       - ./identity_pki/static:/app/identity_pki/static
+      - ./volumes/blocklist:/app/blocklist:rw
     networks:
       - backend-net
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # ── MongoDB ────────────────────────────────────────
+  # MongoDB
   mongo:
     build:
       context: ./mongo
@@ -38,20 +44,22 @@ services:
     container_name: mongo
     restart: unless-stopped
     ports:
-      - "127.0.0.1:27017:27017"
+      - "127.0.0.1:${MONGO_PORT}:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DATABASE: ${MONGO_DATABASE}
     volumes:
       - mongdata:/data/db
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
+      - ./mongo:/app/mongo:ro
       - mongo-logs:/var/log/mongodb
     networks:
       - backend-net
 
-  # ── Custom MongoDB Proxy ────────────────────────────
+  # Custom MongoDB Proxy
   mongo-proxy:
     build:
       context: ./mongo_proxy
@@ -62,25 +70,27 @@ services:
       mongo:
         condition: service_started
     ports:
-      - "127.0.0.1:5001:5001"
+      - "127.0.0.1:${MONGO_PROXY_PORT}:5001"
     environment:
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MONGO_DATABASE: ${MONGO_DATABASE}
     volumes:
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
     networks:
       - backend-net
 
-  # ── Envoy Log Init (Correzione Permessi Volume) ────
+  # Envoy Log Init (Fix Volume Permissions)
   envoy-log-init:
     image: alpine:latest
     container_name: envoy-log-init
-    user: "root"
+    user: root
     volumes:
       - envoy-logs:/var/log/envoy
     command: chown -R 101:101 /var/log/envoy
+    networks:
+      - backend-net
 
-  # ── Envoy Proxy (PEP) ─────────────────────────────
+  # Envoy Proxy (PEP)
   envoy:
     build:
       context: ./envoy
@@ -97,9 +107,8 @@ services:
       opa:
         condition: service_started
     ports:
-      - "10000:10000"
-      # - "10001:10001" # Commentato poiché il listener HTTP di test in envoy.yaml è disabilitato
-      - "127.0.0.1:9901:9901"
+      - "${ENVOY_PROXY_PORT}:10000"
+      - "127.0.0.1:${ENVOY_ADMIN_PORT}:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ./envoy/lua:/etc/envoy/lua:ro
@@ -110,12 +119,12 @@ services:
       - frontend-net
       - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'"]
+      test: [ "CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'" ]
       interval: 5s
       timeout: 2s
       retries: 5
 
-  # ── ZTA Log Forwarder (Sidecar) ─────────────────
+  # ZTA Log Forwarder (Sidecar)
   zta-log-forwarder:
     build:
       context: ./scripts/zta_log_forwarder
@@ -123,14 +132,12 @@ services:
     container_name: zta-log-forwarder
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:${LOG_FORWARDER_PORT}:5000"
     environment:
-      SPLUNK_HOST: splunk
-      SPLUNK_HEC_PORT: "8088"
-      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
-      SPLUNK_MGMT_PORT: "8089"
-      SPLUNK_USERNAME: admin
+      SPLUNK_USERNAME: ${SPLUNK_USERNAME}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
+      SPLUNK_VERIFY_TLS: ${SPLUNK_VERIFY_TLS}
+      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
@@ -138,12 +145,13 @@ services:
       - snort-resource-logs:/var/log/snort-resource:ro
       - nftables-logs:/var/log/nftables:ro
       - mongo-logs:/var/log/mongodb:ro
+      - ./volumes/blocklist:/app/blocklist:rw
     depends_on:
       - splunk
     networks:
       - backend-net
 
-  # ── OPA (PDP) ──────────────────────────────────────
+  # OPA (PDP)
   opa:
     platform: linux/amd64
     build:
@@ -155,8 +163,8 @@ services:
       - zta-log-forwarder
       - identity-pki
     ports:
-      - "127.0.0.1:8181:8181"
-      - "127.0.0.1:9002:9002"
+      - "127.0.0.1:${OPA_API_PORT}:8181"
+      - "127.0.0.1:${OPA_GRPC_PORT}:9002"
     volumes:
       - ./opa/policies:/policies:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
@@ -176,9 +184,7 @@ services:
     networks:
       - backend-net
 
-  # ── Snort 3 — Sonda PEP (sidecar di Envoy) ──────────
-  # Condivide il namespace di rete con Envoy.
-  # Ispeziona il traffico post-firewall, pre-autorizzazione.
+  # Snort 3 — PEP Probe (post-firewall, pre-authorization)
   snort-pep:
     image: ciscotalos/snort3:latest
     container_name: snort-pep
@@ -192,6 +198,9 @@ services:
     depends_on:
       envoy:
         condition: service_healthy
+    environment:
+      - SNORT_HOME_NET=172.19.0.0/16
+      - SNORT_EXTERNAL_NET=172.20.0.0/16 !172.19.0.0/16
     volumes:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules/pep.rules:/etc/snort/rules/local.rules:ro
@@ -200,16 +209,13 @@ services:
       - |
         echo "[snort-pep] Starting PEP NIDS (Envoy namespace)..."
         mkdir -p /var/log/snort
-        
-        # In sidecar mode, sniffa sull'interfaccia eth0 di Envoy (frontend-net)
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
+        # Ascolto mirato su eth0 e eth1 con afpacket e disabilitazione checksum per Docker
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0:eth1 -k none -l /var/log/snort 2>&1; then
           echo "[snort-pep] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── Snort 3 — Sonda Risorsa (sidecar di MongoDB) ────
-  # Condivide il namespace di rete con MongoDB.
-  # Ispeziona il traffico autenticato e autorizzato.
+  # Snort 3 — Resource Probe (inspects authenticated and authorized traffic)
   snort-resource:
     image: ciscotalos/snort3:latest
     container_name: snort-resource
@@ -227,20 +233,20 @@ services:
       - ./snort/snort.lua:/etc/snort/snort.lua:ro
       - ./snort/rules/resource.rules:/etc/snort/rules/local.rules:ro
       - snort-resource-logs:/var/log/snort
+    environment:
+      - SNORT_HOME_NET=172.19.0.0/16
+      - SNORT_EXTERNAL_NET=!172.19.0.0/16
     command:
       - |
         echo "[snort-resource] Starting Resource NIDS (MongoDB namespace)..."
         mkdir -p /var/log/snort
-        
-        # In sidecar mode, sniffa sull'interfaccia eth0 di MongoDB
-        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i "eth0" -l /var/log/snort 2>&1; then
+        # Ascolto su eth0 (backend interface) con disabilitazione checksum per Docker
+        if ! /home/snorty/snort3/bin/snort -c /etc/snort/snort.lua --include-path /home/snorty/snort3/etc/snort --daq afpacket --daq-var snaplen=65535 -i eth0 -k none -l /var/log/snort 2>&1; then
           echo "[snort-resource] ERROR: Snort failed to start"
         fi
         tail -f /dev/null
 
-  # ── NFTables (L3/L4 Firewall — sidecar di Envoy) ────
-  # Condivide il namespace di rete con Envoy.
-  # Applica regole netfilter al traffic in ingresso verso il PEP.
+  # NFTables (L3/L4 Firewall — applies netfilter rules to incoming traffic towards the PEP)
   nftables:
     image: alpine:latest
     container_name: nftables
@@ -257,19 +263,20 @@ services:
     volumes:
       - ./nftables/nftables.conf:/etc/nftables.conf:ro
       - nftables-logs:/var/log/nftables
+      - ./volumes/blocklist:/etc/blocklist:ro
     healthcheck:
-      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
+      test: [ "CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1" ]
       interval: 10s
       timeout: 2s
       retries: 3
     command:
       - |
-        apk add --no-cache nftables
-        
-        # Crea directory log
+        apk add --no-cache nftables inotify-tools
+
+        # Create log directory
         mkdir -p /var/log/nftables
-        
-        # Applica regole nftables nel namespace di Envoy
+
+        # Apply nftables rules in Envoy namespace
         if [ "$${APPLY_NFT_RULES:-0}" = "1" ]; then
           tr -d '\r' < /etc/nftables.conf > /tmp/nftables.conf
           if nft -f /tmp/nftables.conf; then
@@ -281,39 +288,79 @@ services:
         else
           echo "[nftables] Safe mode: rules NOT applied (set APPLY_NFT_RULES=1)"
         fi
-        
-        # Cattura log da nft counter (polling periodico)
+
+        # Capture logs from nft counter (periodic polling)
         echo "[nftables] Starting counter log capture..."
         while true; do
           nft list ruleset 2>/dev/null | grep -E "counter packets [1-9]" >> /var/log/nftables/nft.log
           sleep 30
         done &
-        
+
+        # Background sync loop using inotify events for blocklist.txt
+        echo "[nftables] Starting blocklist sync daemon..."
+        BLOCKLIST_DIR="/etc/blocklist"
+        BLOCKLIST_FILE="$$BLOCKLIST_DIR/blocklist.txt"
+ 
+        sync_blocklist() {
+          IPs=$$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$$BLOCKLIST_FILE" 2>/dev/null | tr -d '\r')
+          nft flush set inet zero_trust_fw blocklist 2>/dev/null
+          if [ -n "$$IPs" ]; then
+            ELEMENTS=$$(echo "$$IPs" | paste -sd, -)
+            echo "[nftables] Syncing blocklist elements: $$ELEMENTS"
+            nft add element inet zero_trust_fw blocklist "{ $$ELEMENTS }" 2>/dev/null
+          fi
+        }
+ 
+        # Initial sync
+        sync_blocklist
+ 
+        # Watch for changes and sync instantly (guarded by MD5 check to avoid infinite loops)
+        LAST_HASH=""
+        if [ -f "$$BLOCKLIST_FILE" ]; then
+          LAST_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
+        fi
+ 
+        inotifywait -q -m -e close_write,moved_to "$$BLOCKLIST_DIR" | while read -r directory events filename; do
+          if [ "$$filename" = "blocklist.txt" ]; then
+            CURRENT_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
+            if [ "$$CURRENT_HASH" != "$$LAST_HASH" ]; then
+              sync_blocklist
+              LAST_HASH="$$CURRENT_HASH"
+            fi
+          fi
+        done &
+
         echo "[nftables] Sidecar ready (Envoy namespace)"
         tail -f /dev/null
 
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
-    # removed platform: linux/amd64 to use native arm64 on Apple Silicon
-    # nome utente: admin
+    platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
       - SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com
-      - SPLUNK_PASSWORD=SplunkPassword123!
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD}
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
     ports:
-      - "8000:8000"
-      - "8088:8088"
-      - "8089:8089"
-      - "9997:9997"
+      - "${SPLUNK_WEB_PORT}:8000"
+      - "${SPLUNK_HEC_PORT}:8088"
+      - "${SPLUNK_MGMT_PORT}:8089"
+      - "${SPLUNK_RECEIVER_PORT}:9997"
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
+      - ./splunk/splunk_setup.py:/app/splunk_setup.py:ro
+      - ./splunk/default/data/ui/views:/app/default/data/ui/views:ro
+      - ./volumes/certs/ca:/etc/certs/ca:ro
+      - ./volumes/certs/server:/etc/certs/server:ro
+      - ./splunk:/opt/splunk/etc/apps/zta
     networks:
       - backend-net
     restart: always
+    entrypoint: >
+      /bin/bash -c " (python3 /app/splunk_setup.py || true) & exec /sbin/entrypoint.sh start-service "
 
 volumes:
   splunk-var:
@@ -328,7 +375,16 @@ volumes:
 networks:
   frontend-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
   backend-net:
     driver: bridge
-
-# Networks defined above
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

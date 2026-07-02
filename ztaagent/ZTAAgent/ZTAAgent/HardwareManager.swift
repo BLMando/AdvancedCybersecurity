@@ -46,7 +46,7 @@ class HardwareManager {
     
     func getHardwareInfo() -> [String: String] {
         var info = ["mac": "unknown", "cpu": "unknown"]
-        print("[DEBUG] Recupero info hardware...")
+        print("Retrieving hardware info...")
         
         // 1. Get Hardware UUID
         let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
@@ -54,11 +54,11 @@ class HardwareManager {
             if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(platformExpert, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0) {
                 let uuid = (serialNumberAsCFString.takeRetainedValue() as? String) ?? "unknown"
                 info["mac"] = uuid
-                print("[DEBUG] UUID trovato: \(uuid)")
+                print("UUID found: \(uuid)")
             }
             IOObjectRelease(platformExpert)
         } else {
-            print("[!] Impossibile trovare IOPlatformExpertDevice")
+            print("Unable to find IOPlatformExpertDevice")
         }
         
         // 2. Get CPU Model
@@ -69,7 +69,7 @@ class HardwareManager {
             sysctlbyname("machdep.cpu.brand_string", &brand, &size, nil, 0)
             let cpu = String(cString: brand)
             info["cpu"] = cpu
-            print("[DEBUG] CPU trovata: \(cpu)")
+            print("CPU found: \(cpu)")
         }
         
         return info
@@ -93,7 +93,7 @@ class HardwareManager {
                    kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
                    kSecAttrKeySizeInBits as String: 256
                ] as CFDictionary, nil) {
-                print("[✓] Chiave file-based trovata per \(cn), riutilizzo.")
+                print("File-based key found for \(cn), reusing.")
                 return privateKey
             }
         }
@@ -106,7 +106,7 @@ class HardwareManager {
         var existingItem: CFTypeRef?
         if SecItemCopyMatching(existsQuery as CFDictionary, &existingItem) == errSecSuccess,
            let existing = existingItem as! SecKey? {
-            print("[✓] Chiave SE già esistente per \(cn), riutilizzo.")
+            print("SE key already exists for \(cn), reusing.")
             return existing
         }
         
@@ -135,7 +135,7 @@ class HardwareManager {
         }
         
         let err = error?.takeRetainedValue()
-        print("[!] SecKeyCreateRandomKey (SecureEnclave) fallito: \(String(describing: err)). Provo fallback in Software Keychain...")
+        print("SecKeyCreateRandomKey (SecureEnclave) failed: \(String(describing: err)). Trying fallback in Software Keychain...")
         
         // Fallback to Software Keychain EC Key
         let softAccess = SecAccessControlCreateWithFlags(
@@ -158,18 +158,18 @@ class HardwareManager {
         
         var softError: Unmanaged<CFError>?
         if let privateKey = SecKeyCreateRandomKey(softAttributes as CFDictionary, &softError) {
-            print("[✓] Chiave Software Keychain creata con successo come fallback.")
+            print("Software Keychain key successfully created as fallback.")
             return privateKey
         }
         
         let sErr = softError?.takeRetainedValue()
-        print("[!] SecKeyCreateRandomKey (Software Keychain) fallito: \(String(describing: sErr)). Provo fallback in File System...")
+        print("SecKeyCreateRandomKey (Software Keychain) failed: \(String(describing: sErr)). Trying fallback in File System...")
         
         do {
             let privateKey = P256.Signing.PrivateKey()
             let keyData = privateKey.x963Representation
             try keyData.write(to: keyFile)
-            print("[✓] Chiave file-based creata con successo tramite CryptoKit in \(keyFile.path).")
+            print("File-based key successfully created via CryptoKit at \(keyFile.path).")
             
             guard let secKey = SecKeyCreateWithData(keyData as CFData, [
                 kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
@@ -180,7 +180,7 @@ class HardwareManager {
             }
             return secKey
         } catch {
-            print("[!] Generazione chiave file-based tramite CryptoKit fallita: \(error)")
+            print("File-based key generation via CryptoKit failed: \(error)")
             throw HardwareError.keyGenerationFailed(error)
         }
     }
@@ -269,9 +269,30 @@ class HardwareManager {
     }
     
     func saveCertificate(cn: String, certData: Data) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassCertificate,
+            kSecReturnRef as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var items: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess, let items = items {
+            let certificates = (CFGetTypeID(items) == CFArrayGetTypeID()) ? (items as! [SecCertificate]) : [items as! SecCertificate]
+            for cert in certificates {
+                let summary = (SecCertificateCopySubjectSummary(cert) as String?) ?? ""
+                if summary == cn {
+                    let deleteQuery: [String: Any] = [
+                        kSecClass as String: kSecClassCertificate,
+                        kSecValueRef as String: cert
+                    ]
+                    SecItemDelete(deleteQuery as CFDictionary)
+                    print("Deleted old certificate for \(cn) from Keychain before importing new one.")
+                }
+            }
+        }
+
         let certFile = ztaDir.appendingPathComponent("\(cn).crt")
         try certData.write(to: certFile)
-        print("[✓] Certificato per \(cn) salvato nel file system in \(certFile.path).")
+        print("Certificate for \(cn) saved to file system at \(certFile.path).")
         let tmpFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("zta_cert_\(cn).cer")
         
@@ -294,12 +315,12 @@ class HardwareManager {
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         
         if process.terminationStatus == 0 {
-            print("[✓] Certificato per \(cn) importato nel Keychain e collegato alla chiave SE.")
+            print("Certificate for \(cn) imported into Keychain and linked to SE key.")
         } else {
             if output.contains("already exists") || output.contains("duplicate") {
-                print("[✓] Certificato per \(cn) già presente nel Keychain (duplicato ignorato).")
+                print("Certificate for \(cn) already present in Keychain (duplicate ignored).")
             } else {
-                print("[!] Errore 'security import' per \(cn) (status \(process.terminationStatus)): \(output)")
+                print("Error 'security import' for \(cn) (status \(process.terminationStatus)): \(output)")
             }
         }
     }
@@ -308,9 +329,9 @@ class HardwareManager {
         let keyFile = ztaDir.appendingPathComponent("\(cn).key")
         let certFile = ztaDir.appendingPathComponent("\(cn).crt")
         
-        print("[DEBUG] getIdentity checking CN: \(cn)")
-        print("[DEBUG] keyFile: \(keyFile.path) exists: \(FileManager.default.fileExists(atPath: keyFile.path))")
-        print("[DEBUG] certFile: \(certFile.path) exists: \(FileManager.default.fileExists(atPath: certFile.path))")
+        print("getIdentity checking CN: \(cn)")
+        print("keyFile: \(keyFile.path) exists: \(FileManager.default.fileExists(atPath: keyFile.path))")
+        print("certFile: \(certFile.path) exists: \(FileManager.default.fileExists(atPath: certFile.path))")
         
         if FileManager.default.fileExists(atPath: keyFile.path) &&
            FileManager.default.fileExists(atPath: certFile.path) {
@@ -319,7 +340,7 @@ class HardwareManager {
                 let certData = try Data(contentsOf: certFile)
                 
                 guard let cert = SecCertificateCreateWithData(nil, certData as CFData) else {
-                    print("[DEBUG] SecCertificateCreateWithData failed for \(cn)")
+                    print("SecCertificateCreateWithData failed for \(cn)")
                     return nil
                 }
                 
@@ -331,19 +352,19 @@ class HardwareManager {
                 ] as CFDictionary, &error)
                 
                 guard let key = privateKey else {
-                    print("[DEBUG] SecKeyCreateWithData failed for \(cn): \(String(describing: error?.takeRetainedValue()))")
+                    print("SecKeyCreateWithData failed for \(cn): \(String(describing: error?.takeRetainedValue()))")
                     return nil
                 }
                 
                 guard let identity = SecIdentityCreate(nil, cert, key) else {
-                    print("[DEBUG] SecIdentityCreate failed for \(cn)")
+                    print("SecIdentityCreate failed for \(cn)")
                     return nil
                 }
                 
-                print("[✓] Identità file-based caricata con successo per \(cn)!")
+                print("File-based identity successfully loaded for \(cn)!")
                 return identity
             } catch {
-                print("[DEBUG] Error loading file-based identity for \(cn): \(error)")
+                print("Error loading file-based identity for \(cn): \(error)")
             }
         }
         
@@ -391,14 +412,14 @@ class HardwareManager {
         
         if keyStatus == errSecSuccess, let privateKey = keyItem as! SecKey?,
            let identity = SecIdentityCreate(nil, cert, privateKey) {
-            print("[✓] Identità mTLS da Keychain creata con successo combinando Certificato e SecKey per \(cn)!")
+            print("mTLS identity from Keychain successfully created by combining Certificate and SecKey for \(cn)!")
             return identity
         }
         
         var identity: SecIdentity?
         let idStatus = SecIdentityCreateWithCertificate(nil, cert, &identity)
         if idStatus == errSecSuccess {
-            print("[✓] Identità mTLS da Keychain creata con successo per \(cn) (SecIdentityCreateWithCertificate)!")
+            print("mTLS identity from Keychain successfully created for \(cn) (SecIdentityCreateWithCertificate)!")
             return identity
         }
         

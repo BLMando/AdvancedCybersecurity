@@ -1,24 +1,25 @@
----------------------------------------------------------------------------
--- Snort 3 Configuration — Zero Trust Architecture NIDS
--- Basato sul template ufficiale Talos
----------------------------------------------------------------------------
 
----------------------------------------------------------------------------
--- 1. configure defaults
----------------------------------------------------------------------------
+-- Recupera le variabili d'ambiente di Docker
+local env_home = os.getenv("SNORT_HOME_NET")
+local env_external = os.getenv("SNORT_EXTERNAL_NET")
 
--- HOME_NET and EXTERNAL_NET must be set now
--- setup the network addresses you are protecting
-HOME_NET = [[ 172.16.0.0/12 10.0.0.0/8 192.168.0.0/16 ]]
+-- Se le variabili sono definite in Docker usa quelle, altrimenti usa i fallback hardcoded
+if env_home and env_home ~= "" then
+    HOME_NET = [[ ]] .. env_home .. [[ ]]
+else
+    HOME_NET = [[ 172.19.0.0/16 ]]
+end
 
--- set up the external network addresses.
-EXTERNAL_NET = '!$HOME_NET'
+if env_external and env_external ~= "" then
+    EXTERNAL_NET = [[ ]] .. env_external .. [[ ]]
+else
+    EXTERNAL_NET = [[ 172.20.0.0/16 !172.19.0.0/16 ]]
+end
 
 include 'snort_defaults.lua'
 
----------------------------------------------------------------------------
+
 -- 2. configure inspection
----------------------------------------------------------------------------
 
 stream = { }
 stream_ip = { }
@@ -75,9 +76,8 @@ js_norm = default_js_norm
 
 appid = { }
 
----------------------------------------------------------------------------
+
 -- 3. configure bindings
----------------------------------------------------------------------------
 
 wizard = default_wizard
 
@@ -126,10 +126,7 @@ binder =
     { use = { type = 'wizard' } }
 }
 
-
----------------------------------------------------------------------------
 -- 4. configure detection
----------------------------------------------------------------------------
 
 references = default_references
 classifications = default_classifications
@@ -146,27 +143,22 @@ ips =
             HTTP_SERVERS = HOME_NET,
         },
         ports = {
-            HTTP_PORTS = '80 443 8000 8080 10001',
+            HTTP_PORTS = '80 443 8000 8080 10000',
             SSH_PORTS = '22',
         },
     },
 }
 
-
----------------------------------------------------------------------------
 -- 5. configure outputs
----------------------------------------------------------------------------
 
 -- JSON Alert output per inoltro log a Splunk HEC
 alert_json = {
     file = true,
-    limit = 500,
+    limit = 10000,
     fields = 'timestamp msg src_addr src_port dst_addr dst_port proto action gid sid rev priority',
 }
 
----------------------------------------------------------------------------
 -- 6. configure tweaks
----------------------------------------------------------------------------
 
 if ( tweaks ~= nil ) then
     include(tweaks .. '.lua')

@@ -11,7 +11,7 @@ class LocalAPIServer {
             listener = try NWListener(using: .tcp, on: port)
             
             listener?.stateUpdateHandler = { state in
-                print("[*] API Server State: \(state)")
+                print("API Server State: \(state)")
             }
             
             listener?.newConnectionHandler = { connection in
@@ -19,9 +19,9 @@ class LocalAPIServer {
             }
             
             listener?.start(queue: .main)
-            print("[*] ZTA Agent API listening on localhost:9090")
+            print("ZTA Agent API listening on localhost:9090")
         } catch {
-            print("[!] Failed to start API Server: \(error)")
+            print("Failed to start API Server: \(error)")
         }
     }
     
@@ -91,11 +91,14 @@ class LocalAPIServer {
         
         Task {
             do {
-                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
-                let cn = json?["common_name"] ?? "unknown"
-                let role = json?["role"] ?? "doctor"
-                let dept = json?["department"] ?? "Cardiologia"
-                let sessionToken = json?["enrollment_session_token"] ?? ""
+                guard let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String],
+                      let cn = json["common_name"],
+                      let role = json["role"],
+                      let dept = json["department"],
+                      let sessionToken = json["enrollment_session_token"] else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing required fields\"}", status: "400 Bad Request", connection: connection)
+                    return
+                }
                 
                 let result = try await PKIClient.shared.enroll(cn: cn, role: role, department: dept, enrollmentSessionToken: sessionToken)
                 let responseDict = ["status": "success", "message": result]
@@ -104,7 +107,7 @@ class LocalAPIServer {
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } catch {
-                print("[!] Error during enrollment: \(error)")
+                print("Error during enrollment: \(error)")
                 self.sendResponse(body: "{\"status\": \"error\", \"message\": \"\(error.localizedDescription)\"}", status: "500 Error", connection: connection)
             }
         }
@@ -119,14 +122,17 @@ class LocalAPIServer {
         
         Task {
             do {
-                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
-                let cn = json?["common_name"] ?? "paolo.roselli"
-                guard let dataB64 = json?["data_b64"], let rawData = Data(base64Encoded: dataB64) else {
+                guard let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String],
+                      let cn = json["common_name"] else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing common_name\"}", status: "400 Bad Request", connection: connection)
+                    return
+                }
+                guard let dataB64 = json["data_b64"], let rawData = Data(base64Encoded: dataB64) else {
                     self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing data_b64\"}", status: "400 Bad Request", connection: connection)
                     return
                 }
                 
-                print("[*] Richiesta Firma Hardware per: \(cn)")
+                print("Hardware Signature Request for: \(cn)")
                 let signature = try await HardwareManager.shared.sign(data: rawData, cn: cn, context: PKIClient.shared.activeLAContext)
                 let pubKey = try await HardwareManager.shared.getPublicKeyDER(for: cn)
                 let pubKeyPEM = "-----BEGIN PUBLIC KEY-----\n\(pubKey.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n-----END PUBLIC KEY-----"
@@ -147,8 +153,8 @@ class LocalAPIServer {
         }
     }
     
-    /// POST /cert — Restituisce il certificato PEM dal Keychain per un dato CN.
-    /// La chiave privata rimane nel Secure Enclave e NON viene esportata.
+    /// POST /cert — Returns the PEM certificate from the Keychain for a given CN.
+    /// The private key remains in the Secure Enclave and is NOT exported.
     private func handleCert(request: String, connection: NWConnection) {
         let components = request.components(separatedBy: "\r\n\r\n")
         guard components.count > 1, let bodyData = components[1].data(using: .utf8) else {
@@ -162,9 +168,9 @@ class LocalAPIServer {
             return
         }
 
-        print("[*] Richiesta certificato PEM per: \(cn)")
+        print("PEM certificate request for: \(cn)")
 
-        // Cerca il certificato nel Keychain per subject summary == cn
+        // Search for the certificate in the Keychain by subject summary == cn
         let query: [String: Any] = [
             kSecClass as String: kSecClassCertificate,
             kSecReturnRef as String: true,
@@ -192,7 +198,7 @@ class LocalAPIServer {
         }
 
         if let cert = targetCert {
-            // Esporta il DER e converti in PEM
+            // Export DER and convert to PEM
             let derData = SecCertificateCopyData(cert) as Data
             let b64 = derData.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed])
             let pem = "-----BEGIN CERTIFICATE-----\n\(b64)\n-----END CERTIFICATE-----\n"
@@ -200,16 +206,16 @@ class LocalAPIServer {
             let responseDict: [String: Any] = [
                 "cert_pem": pem,
                 "common_name": cn,
-                "key_available": false,  // La chiave è nel Secure Enclave, non esportabile
+                "key_available": false,  // The key is in the Secure Enclave, not exportable
                 "source": "keychain"
             ]
             if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                let responseString = String(data: responseData, encoding: .utf8) {
-                print("[✓] Certificato PEM esportato per \(cn)")
+                print("PEM certificate exported for \(cn)")
                 self.sendResponse(body: responseString, connection: connection)
             }
         } else {
-            // Fallback file-based
+            // File-based fallback
             let certFile = HardwareManager.shared.ztaDir.appendingPathComponent("\(cn).crt")
             if FileManager.default.fileExists(atPath: certFile.path),
                let certData = try? Data(contentsOf: certFile) {
@@ -223,7 +229,7 @@ class LocalAPIServer {
                 ]
                 if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
                    let responseString = String(data: responseData, encoding: .utf8) {
-                    print("[✓] Certificato PEM caricato da file per \(cn) (fallback)")
+                    print("PEM certificate loaded from file for \(cn) (fallback)")
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } else {
@@ -245,10 +251,13 @@ class LocalAPIServer {
         
         Task {
             do {
-                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String]
-                let cn = json?["common_name"] ?? "paolo.roselli"
+                guard let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: String],
+                      let cn = json["common_name"] else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing common_name\"}", status: "400 Bad Request", connection: connection)
+                    return
+                }
                 
-                print("[*] Richiesta Auth mTLS per: \(cn)")
+                print("mTLS Auth Request for: \(cn)")
                 let result = try await PKIClient.shared.testAuthentication(cn: cn)
                 let responseDict = ["status": "success", "response": result]
                 if let responseData = try? JSONSerialization.data(withJSONObject: responseDict),
@@ -270,11 +279,14 @@ class LocalAPIServer {
         
         Task {
             do {
-                let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
-                let cn = json?["common_name"] as? String ?? json?["user"] as? String ?? "paolo.roselli"
-                let stepUp = (json?["step_up"] as? Bool ?? false) || (json?["step_up"] as? String == "true")
+                guard let json = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+                      let cn = (json["common_name"] as? String) ?? (json["user"] as? String) else {
+                    self.sendResponse(body: "{\"status\": \"error\", \"message\": \"Missing common_name or user\"}", status: "400 Bad Request", connection: connection)
+                    return
+                }
+                let stepUp = (json["step_up"] as? Bool ?? false) || (json["step_up"] as? String == "true")
                 
-                print("[*] Generazione token OIDC con biometric sblocco per: \(cn), stepUp: \(stepUp)")
+                print("OIDC token generation with biometric unlock for: \(cn), stepUp: \(stepUp)")
                 let token = try await PKIClient.shared.getOidcToken(cn: cn, stepUp: stepUp)
                 
                 let responseDict = [
@@ -288,7 +300,7 @@ class LocalAPIServer {
                     self.sendResponse(body: responseString, connection: connection)
                 }
             } catch {
-                print("[!] Error generating OIDC token: \(error)")
+                print("Error generating OIDC token: \(error)")
                 let nsErr = error as NSError
                 if nsErr.domain == "com.zta" {
                     let desc = nsErr.userInfo[NSLocalizedDescriptionKey] as? String ?? ""
@@ -327,7 +339,7 @@ class LocalAPIServer {
                 
                 let ttlSeconds = (json["ttl_seconds"] as? Double) ?? 900.0
                 
-                print("[*] Avvio sessione proxy richiesta per: \(cn)")
+                print("Starting proxy session requested for: \(cn)")
                 let (port, token) = try await MongoProxyManager.shared.startSession(cn: cn, ttl: ttlSeconds)
                 
                 let responseDict: [String: Any] = [
@@ -361,7 +373,7 @@ class LocalAPIServer {
                 return
             }
             
-            print("[*] Fermo sessione proxy con token: \(token)")
+            print("Stopping proxy session with token: \(token)")
             MongoProxyManager.shared.stopSession(token: token)
             self.sendResponse(body: "{\"status\": \"success\", \"message\": \"Session stopped\"}", connection: connection)
         }
