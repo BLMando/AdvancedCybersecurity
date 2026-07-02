@@ -1340,10 +1340,11 @@
           setTimeout(() => {
             document.getElementById(`edit-row-${idx}`).style.display = "none";
           }, 1200);
-        }
+
+        } 
       } catch (err) {
         msgEl.className = "edit-status-msg error";
-        msgEl.textContent = `{err.message}`;
+        msgEl.textContent = `Error: ${err.message}`;
       }
     }
 
