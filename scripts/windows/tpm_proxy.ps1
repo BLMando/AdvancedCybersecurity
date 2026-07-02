@@ -108,7 +108,9 @@ function Start-ProxySession ($cn, $ttlSeconds) {
                         $t1 = $localStream.CopyToAsync($sslStream)
                         $t2 = $sslStream.CopyToAsync($localStream)
 
-                        [System.Threading.Tasks.Task]::WaitAll(@($t1, $t2))
+                        while (-not $t1.IsCompleted -and -not $t2.IsCompleted) {
+                            [System.Threading.Thread]::Sleep(50)
+                        }
                     } catch {
                         "    [Proxy ERROR] Errore nel tunnel mTLS per CN=${cn}: $_" | Out-File -FilePath $logFile -Append -Encoding utf8
                     } finally {

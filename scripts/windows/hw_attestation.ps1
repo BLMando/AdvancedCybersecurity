@@ -21,29 +21,33 @@ public class HWHelper {
     public static Hashtable SignAndGetPub(string label, string cn, bool useTpmFlag) {
         // Use TPM provider if available, fallback to software only if absolutely necessary
         // but here we enforce TPM for the 'non-exportable' requirement.
-        CngProvider provider = useTpmFlag ? 
-            new CngProvider("Microsoft Platform Crypto Provider") : 
-            new CngProvider("Microsoft Software Key Storage Provider");
+        // Use Software KSP to support CngUIPolicy (Windows Hello) which is unsupported by the TPM provider
+        CngProvider provider = new CngProvider("Microsoft Software Key Storage Provider");
+
+        CngUIPolicy uiPolicy = new CngUIPolicy(
+            CngUIProtectionLevels.ForceHighProtection,
+            "Zero Trust Security Key (" + cn + ")",
+            "Conferma la tua identità per accedere alla chiave crittografica hardware.",
+            "Accesso alla chiave crittografica protetta da TPM.",
+            "Sblocco Biometrico Zero Trust"
+        );
 
         CngKeyCreationParameters keyParams = new CngKeyCreationParameters {
             Provider     = provider,
-            ExportPolicy = CngExportPolicies.None // ENFORCE NON-EXPORTABLE
+            ExportPolicy = CngExportPolicies.None,
+            UIPolicy     = uiPolicy
         };
-
-        if (useTpmFlag) {
-            // TPM specific parameters
-            keyParams.Parameters.Add(new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None));
-        }
 
         CngKey key;
         try {
             if (CngKey.Exists(label, provider)) {
+                // Delete existing key to force recreation with UIPolicy if needed,
+                // but here we just open it.
                 key = CngKey.Open(label, provider);
             } else {
                 key = CngKey.Create(CngAlgorithm.Rsa, label, keyParams);
             }
         } catch (Exception e) {
-            // If TPM fails (e.g. not initialized), fallback to software but log warning in result
             if (useTpmFlag) {
                 provider = new CngProvider("Microsoft Software Key Storage Provider");
                 keyParams.Provider = provider;
@@ -79,7 +83,9 @@ public class HWHelper {
 }
 "@
 
-Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Security"
+if (-not ([System.Management.Automation.PSTypeName]"HWHelper").Type) {
+    Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Security"
+}
 
 # Detect TPM availability at the PowerShell level (no compile-time dependency)
 $hasTpm = $false

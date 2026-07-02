@@ -28,7 +28,7 @@ function Invoke-PkiChallenge {
     return $challengeResp.challenge_id
 }
 
-function Invoke-PkiEnrollment ($cn, $role, $dept, $challengeId, $proofString, $sigB64, $pubKeyPem, $mac, $cpu, $sessionToken) {
+function Invoke-PkiEnrollment ($cn, $role, $dept, $challengeId, $proofString, $sigB64, $pubKeyPem, $mac, $cpu, $sessionToken, $isHardware) {
     $enrollUrl = "https://localhost:8080/api/csr"
     $enrollPayload = @{
         user = $cn
@@ -38,7 +38,7 @@ function Invoke-PkiEnrollment ($cn, $role, $dept, $challengeId, $proofString, $s
         proof_string = $proofString
         attestation_sig_b64 = $sigB64
         public_key_pem = $pubKeyPem
-        is_hardware_csr = $false
+        is_hardware_csr = $isHardware
         mac = $mac
         cpu = $cpu
         enrollment_session_token = $sessionToken
@@ -72,13 +72,9 @@ function Import-CertificateToStore ($certPem, $cn) {
     $store.Close()
 
     $thumb = $certObj.Thumbprint
-    Write-Host "[API] Associazione chiave privata con certutil (non bloccante)..." -ForegroundColor Gray
-    $job = Start-Job -ScriptBlock { param($t) & certutil.exe -silent -user -repairstore My $t | Out-Null } -ArgumentList $thumb
-    $completed = $job | Wait-Job -Timeout 10
-    if ($null -eq $completed) {
-        Write-Host "[API WARN] certutil repairstore ha richiesto troppo tempo (timeout 10s) ed e' stato interrotto." -ForegroundColor Yellow
-    }
-    $job | Remove-Job -Force
+    Write-Host "[API] Associazione chiave privata con certutil..." -ForegroundColor Gray
+    $certutilOut = & certutil.exe -user -repairstore My $thumb
+    $certutilOut | ForEach-Object { Write-Host "    [certutil] $_" -ForegroundColor Gray }
 
     $certOutPath = Join-Path $CERT_DIR "$cn.crt"
     [System.IO.File]::WriteAllText($certOutPath, $certPem)

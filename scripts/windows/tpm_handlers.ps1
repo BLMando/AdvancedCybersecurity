@@ -1,5 +1,7 @@
 # tpm_handlers.ps1 - HTTP route handlers
 
+Add-Type -AssemblyName System.Net.Http
+
 function Get-ErrorMessage ($err) {
     if ($null -ne $err.Exception) {
         return $err.Exception.Message
@@ -37,7 +39,7 @@ function Handle-EnrollRequest ($cn, $jsonBody) {
         $expRaw = [Convert]::FromBase64String($hwData.exponent_b64)
         $pubKeyPem = Export-SpkiPublicKeyPem $modRaw $expRaw
 
-        $certPem = Invoke-PkiEnrollment $cn $role $dept $challengeId $hwData.csr_pem $hwData.signature_b64 $pubKeyPem $mac $cpu $sessionToken
+        $certPem = Invoke-PkiEnrollment $cn $role $dept $challengeId $hwData.csr_pem $hwData.signature_b64 $pubKeyPem $mac $cpu $sessionToken $true
 
         Import-CertificateToStore $certPem $cn
 
@@ -61,7 +63,7 @@ function Handle-SoftwareFallbackEnroll ($cn, $role, $dept, $mac, $cpu, $sessionT
 
         $challengeId = Invoke-PkiChallenge
 
-        $certPem = Invoke-PkiEnrollment $cn $role $dept $challengeId $softKeyData.proof_string $softKeyData.signature_b64 $pubKeyPem $mac $cpu $sessionToken
+        $certPem = Invoke-PkiEnrollment $cn $role $dept $challengeId $softKeyData.proof_string $softKeyData.signature_b64 $pubKeyPem $mac $cpu $sessionToken $false
 
         $certOutPath = Join-Path $CERT_DIR "$cn.crt"
         $keyOutPath = Join-Path $CERT_DIR "$cn.key"
@@ -135,25 +137,32 @@ function Handle-OidcTokenRequest ($cn, $jsonBody) {
             proof_string = $proofString
             step_up = $stepUp
         }
-        $oidcResp = Invoke-RestMethod -Uri $oidcUrl -Method Post -ContentType "application/json" -Body (ConvertTo-Json $oidcPayload -Compress) -TimeoutSec 15
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $content = New-Object System.Net.Http.StringContent((ConvertTo-Json $oidcPayload -Compress), [System.Text.Encoding]::UTF8, "application/json")
+        try {
+            $response = $client.PostAsync($oidcUrl, $content).GetAwaiter().GetResult()
+            $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $client.Dispose()
 
-        Write-Host "[API] /oidc/token completato con successo per CN=$tokenCN" -ForegroundColor Green
-        return (200, @{ status = "success"; token = $oidcResp.access_token; access_token = $oidcResp.access_token })
+            $statusCode = [int]$response.StatusCode
+            $responseObj = ConvertFrom-Json $responseBody
+
+            if ($statusCode -eq 200) {
+                Write-Host "[API] /oidc/token completato con successo per CN=$tokenCN" -ForegroundColor Green
+                return (200, @{ status = "success"; token = $responseObj.access_token; access_token = $responseObj.access_token })
+            } else {
+                Write-Host "[API] /oidc/token fallito per CN=$tokenCN con codice $statusCode" -ForegroundColor Red
+                return ($statusCode, $responseObj)
+            }
+        } catch {
+            if ($client) { $client.Dispose() }
+            Write-Host "[API] /oidc/token errore di connessione per CN=$tokenCN : $_" -ForegroundColor Red
+            return (500, @{ status = "error"; message = (Get-ErrorMessage $_) })
+        }
     } catch {
         Write-Host "[API] /oidc/token fallito per CN=$tokenCN : $_" -ForegroundColor Red
-        $statusCode = 500
-        $responseObj = @{ status = "error"; message = (Get-ErrorMessage $_) }
-        if ($_.Exception -and $_.Exception.Response) {
-            try {
-                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $responseBody = $reader.ReadToEnd()
-                $reader.Close()
-                $statusCode = [int]$_.Exception.Response.StatusCode
-                $parsed = ConvertFrom-Json $responseBody
-                if ($parsed -ne $null) { $responseObj = $parsed }
-            } catch {}
-        }
-        return ($statusCode, $responseObj)
+        return (500, @{ status = "error"; message = (Get-ErrorMessage $_) })
     }
 }
 

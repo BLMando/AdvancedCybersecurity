@@ -162,7 +162,8 @@ verify_oidc_jwt(token) := claims if {
 		"timeout": 1000000000
 	})
 	jwks_resp.status_code == 200
-	io.jwt.verify_rs256(token, jwks_resp.body)
+	jwks_str := json.marshal(jwks_resp.body)
+	io.jwt.verify_rs256(token, jwks_str)
 	[_, claims, _] := io.jwt.decode(token)
 }
 
