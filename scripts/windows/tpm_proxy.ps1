@@ -20,7 +20,7 @@ function Start-ProxySession ($cn, $ttlSeconds) {
         ExpiresAt = (Get-Date).AddSeconds($ttlSeconds)
         ExpiryTimer = $null
     }
-    $script:Sessions[$sessionToken] = $sessionState
+    $script:Sessions.TryAdd($sessionToken, $sessionState) | Out-Null
     $expiryTimer = [System.Threading.Timer]::new(
         [System.Threading.TimerCallback]{ param($state) Stop-ProxySession $state | Out-Null },
         $sessionToken,
@@ -141,7 +141,7 @@ function Stop-ProxySession ($sessionToken) {
         if ($state.ExpiryTimer) { $state.ExpiryTimer.Dispose() }
         $state.CTS.Cancel()
         $state.Listener.Stop()
-        $script:Sessions.Remove($sessionToken)
+        $script:Sessions.TryRemove($sessionToken, [ref]$null) | Out-Null
         return $true
     }
     return $false
