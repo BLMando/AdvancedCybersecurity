@@ -1,3 +1,10 @@
 [app/install/state]
 version = 10.4.0
 modtime = 1782894589.420624000
+
+[inputs/http%3A%2F%2Fzta_token]
+access = read : [ admin ], write : [ admin ]
+export = system
+owner = admin
+version = 10.4.0
+modtime = 1783007234.777573000
