@@ -1,6 +1,4 @@
-# ##########################################################################
-# Snort 3 — Regole Sonda Risorsa (MongoDB sidecar) - Versione Integrale
-# ##########################################################################
+# Snort 3 — Regole Sonda MongoDB
 
 # ── Accesso diretto MongoDB (Bypass del PEP) ──
 alert tcp any any -> any 27017 (
@@ -15,19 +13,4 @@ alert tcp any any -> any 27017 (
     detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
     sid:4000002; rev:7;
-)
-
-# ── Reconnaissance Interna su MongoDB (Port Sweep) ──
-alert tcp any any -> any 27017 (
-    msg:"Internal MongoDB port sweep - possible reconnaissance";
-    detection_filter: track by_src, count 5, seconds 5;
-    classtype:attempted-recon;
-    sid:4000003; rev:7;
-)
-
-# ── DIAGNOSTIC: Verifica ricezione pacchetti su Mongo ──
-alert tcp any any -> any 27017 (
-    msg:"RESOURCE DIAGNOSTIC: IP Packet reached MongoDB network namespace"; 
-    sid:4999999; 
-    rev:6;
 )

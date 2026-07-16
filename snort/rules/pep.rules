@@ -1,52 +1,19 @@
 # Snort 3 — Regole Sonda PEP
 
-# ── Rilevamento Downgrade SSL/TLS (Client Hello in chiaro) ──
-# Ispeziona solo i pacchetti IP/TCP diretti specificamente alla porta 10000
+# Rileva tentativi di accesso a file sensibili (/etc/passwd) nel payload HTTP
 alert tcp any any -> any 10000 (
-    msg:"Legacy TLS version/SSL downgrade attempt targeting Envoy";
-    ssl_version:sslv2,sslv3,tls1.0,tls1.1;
-    classtype:policy-violation;
-    sid:3000001; rev:7;
+    msg:"SERVER-WEBAPP /etc/passwd file access attempt targeting PEP";
+    flow:to_server,established;
+    content:"/etc/passwd";
+    fast_pattern;
+    nocase;
+    classtype:web-application-attack;
+    sid:3000010; rev:1;
 )
 
-# ── Prevenzione DDoS / SYN Flood su Envoy ──
-alert tcp any any -> any 10000 (
-    msg:"Possible SYN flood DDoS targeting PEP Envoy";
-    detection_filter: track by_src, count 15, seconds 5;
-    classtype:denial-of-service;
-    sid:3000002; rev:7;
-)
-
-# ── Lateral Movement: scansione est-ovest tra container ──
-# Monitora le scansioni generiche su qualsiasi porta
-alert tcp any any -> any any (
-    msg:"Internal lateral movement detected (east-west scan)";
-    detection_filter: track by_src, count 5, seconds 10;
-    classtype:attempted-recon;
-    sid:3000004; rev:10;
-)
-
-# ── Envoy Admin access da rete interna ──
-# Scatta SOLO se il pacchetto IP/TCP è diretto rigidamente alla porta admin 9901
+# Rileva tentativi di connessione diretta alla porta admin di Envoy (9901)
 alert tcp any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
     classtype:policy-violation;
     sid:3000005; rev:6;
-)
-
-# ── Port scan perimetrale verso Envoy ──
-alert tcp any any -> any any (
-    msg:"TCP SYN port scan targeting PEP perimeter";
-    detection_filter: track by_src, count 5, seconds 10;
-    classtype:attempted-recon;
-    sid:3000006; rev:10;
-)
-
-# ── ICMP Exfiltration / Tunnel verso Envoy ──
-alert icmp any any -> any any (
-    msg:"Suspicious ICMP packet with large payload (possible exfiltration)";
-    dsize:>100;
-    itype:8;
-    classtype:misc-activity;
-    sid:3000007; rev:7;
 )
