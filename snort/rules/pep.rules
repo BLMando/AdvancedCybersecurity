@@ -1,17 +1,15 @@
 # Snort 3 — Regole Sonda PEP
-
-# Rileva tentativi di accesso a file sensibili (/etc/passwd) nel payload HTTP
-alert tcp any any -> any 10000 (
-    msg:"SERVER-WEBAPP /etc/passwd file access attempt targeting PEP";
-    flow:to_server,established;
-    content:"/etc/passwd", fast_pattern, nocase;
-    classtype:web-application-attack;
-    sid:3000010; rev:1;
-)
-
 # Rileva tentativi di connessione diretta alla porta admin di Envoy (9901)
 alert tcp any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
     classtype:policy-violation;
     sid:3000005; rev:6;
+)
+
+# Rileva port scan perimetrale (più di 5 tentativi di connessione TCP in 10 secondi da stessa sorgente)
+alert tcp any any -> any any (
+    msg:"TCP port scan attempt targeting PEP perimeter";
+    detection_filter: track by_src, count 5, seconds 10;
+    classtype:attempted-recon;
+    sid:3000006; rev:11;
 )
