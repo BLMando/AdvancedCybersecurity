@@ -1,5 +1,3 @@
-# Entrypoint principale per Envoy, bypass e mapping degli header di risposta.
-
 package envoy.authz
 
 import future.keywords
@@ -7,16 +5,8 @@ import data.envoy.authz.identity
 import data.envoy.authz.criteria
 import data.envoy.authz.risk
 
-# ─── Hybrid ZTA Decision Rule ─────────────────────────────────────────────────
 
-default allow := false
-
-allow if {
-	criteria.criteria_allow
-	risk.risk_score_allow
-	is_valid_oidc_if_present
-}
-
+# Risposta OPA strutturata per ext_authz di Envoy
 main := {
 	"allowed": allow,
 	"http_status": 403,
@@ -27,28 +17,28 @@ main := {
 	"response_metadata": response_metadata
 }
 
-is_valid_oidc_if_present if {
-	not identity.is_mongodb_oidc
+default allow := false
+
+# Regola di autorizzazione principale
+allow if {
+	criteria.criteria_allow
+	risk.risk_score_allow
+	is_valid_oidc_if_present
 }
 
-is_valid_oidc_if_present if {
-	identity.is_mongodb_oidc
-	identity.valid_oidc_token
-}
-
-# Allow connection establishment when the MongoDB command has not been parsed yet.
+# Consente la fase iniziale di handshake e negoziazione della connessione MongoDB
+# (quando il comando/query database non è ancora stato inviato ed è quindi "unknown")
 allow if {
 	identity.action_name == "unknown"
 	identity.current_role in {"admin", "doctor", "billing_staff", "auditor", "receptionist"}
 	risk.risk_score_allow
 }
 
+# Consente le connessioni infrastrutturali dai proxy e servizi fidati del cluster
 allow if {
 	identity.action_name == "unknown"
 	identity.cert_subject_cn in identity.trusted_proxies
 }
-
-# ─── Default Deny ─────────────────────────────────────────────────────────────
 
 default deny := false
 
@@ -56,8 +46,18 @@ deny if {
 	not allow
 }
 
-# ─── Deny Reasons & Messages Mapping ──────────────────────────────────────────
 
+# Valida il Token OIDC solo se il protocollo in uso è MONGODB-OIDC
+is_valid_oidc_if_present if {
+	not identity.is_mongodb_oidc
+}
+
+is_valid_oidc_if_present if {
+	identity.valid_oidc_token
+}
+
+
+# Determina il codice d'errore specifico in base alla regola violata
 deny_reason := reason if {
 	identity.is_mongodb_oidc
 	not identity.valid_oidc_token
@@ -84,25 +84,10 @@ deny_reason := reason if {
 	identity.current_role == "unknown"
 	reason := "UNAUTHENTICATED"
 } else := reason if {
-	is_segregation_violation
-	reason := "ROLE_SEGREGATION_DENIED"
-} else := reason if {
 	criteria.inspection_violation
 	reason := "INSPECTION_VIOLATION"
 } else := "POLICY_DENIED"
 
-is_segregation_violation if {
-	identity.current_role == "billing_staff"
-	identity.normalized_collection_name == "clinical_records"
-}
-is_segregation_violation if {
-	identity.current_role == "receptionist"
-	identity.normalized_collection_name in {"billing", "clinical_records"}
-}
-is_segregation_violation if {
-	identity.current_role == "doctor"
-	identity.normalized_collection_name == "billing"
-}
 
 deny_message := msg if {
 	deny_reason == "OIDC_TOKEN_INVALID"
@@ -126,9 +111,6 @@ deny_message := msg if {
 	deny_reason == "UNAUTHENTICATED"
 	msg := "Utente non identificato o certificato non registrato."
 } else := msg if {
-	deny_reason == "ROLE_SEGREGATION_DENIED"
-	msg := "Violazione della separazione dei compiti: l'accesso a questa risorsa è bloccato per motivi organizzativi."
-} else := msg if {
 	deny_reason == "INSPECTION_VIOLATION"
 	identity.current_role == "doctor"
 	identity.normalized_collection_name == "clinical_records"
@@ -140,6 +122,7 @@ deny_message := msg if {
 	msg := "Richiesta non conforme: controlli di sicurezza a livello applicativo (L7) hanno bloccato la query."
 } else := "Richiesta respinta dalle politiche di sicurezza Zero Trust."
 
+
 denied_body := json.marshal({
 	"status": "error",
 	"error_type": "policy_denied",
@@ -149,25 +132,22 @@ denied_body := json.marshal({
 	"translated_collection": identity.collection_name
 })
 
-final_block_reason := deny_reason if {
-	not allow
-} else := "none"
+# ─── SECTION 4: RESPONSE HEADERS & METADATA ──────────────────────────────────
 
-# ─── Response Headers ─────────────────────────────────────────────────────────
-
-response_headers := object.union_n([
-	{"x-zta-user": identity.user_identity},
-	{"x-zta-device": identity.device_identity},
-	{"x-zta-network": identity.network_identity_str},
-	{"x-zta-action": identity.action_name},
-	{"x-zta-collection": identity.collection_name},
-	{"x-zta-risk-score": sprintf("%d", [risk.risk_score])},
-	{"x-zta-decision": decision_label},
-	{"x-zta-role": identity.current_role},
-	{"x-zta-eff-risk": sprintf("%d", [risk.risk_score])},
-	{"x-zta-command": identity.action_name},
-	{"x-zta-block-reason": final_block_reason}
-])
+# Header HTTP iniettati da Envoy verso Splunk per telemetria
+response_headers := {
+	"x-zta-user": identity.user_identity,
+	"x-zta-device": identity.device_identity,
+	"x-zta-network": identity.network_identity_str,
+	"x-zta-action": identity.action_name,
+	"x-zta-collection": identity.collection_name,
+	"x-zta-risk-score": sprintf("%d", [risk.risk_score]),
+	"x-zta-decision": decision_label,
+	"x-zta-role": identity.current_role,
+	"x-zta-eff-risk": sprintf("%d", [risk.risk_score]),
+	"x-zta-command": identity.action_name,
+	"x-zta-block-reason": final_block_reason
+}
 
 response_metadata := {
 	"x-zta-user": identity.user_identity,
@@ -176,6 +156,10 @@ response_metadata := {
 	"x-zta-collection": identity.collection_name,
 	"x-zta-decision": decision_label
 }
+
+final_block_reason := deny_reason if {
+	not allow
+} else := "none"
 
 decision_label := "ALLOW" if {
 	allow

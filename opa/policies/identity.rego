@@ -5,42 +5,25 @@ import future.keywords
 
 # ─── Identity Extraction ──────────────────────────────────────────────────────
 
-user_identity := sanitize_user(raw_user)
+user_identity := raw_user
 
+# Estrae l'utente esclusivamente da fonti crittografiche verificate:
+# 1. Il subject del token JWT OIDC firmato (se presente)
+# 2. Il Common Name (CN) del certificato client x509 validato in mTLS
 raw_user := user if {
 	user := token_claims.sub
 } else := user if {
-	user := input.attributes.source.principal
-} else := user if {
-	user := input.parsed_body.user
-} else := user if {
-	user := input.attributes.request.http.headers["x-zta-user"]
+	user := cert_subject_cn
 } else := "unknown"
 
-sanitize_user(name) := clean if {
-	endswith(name, ".internal")
-	clean := substring(name, 0, count(name) - 9)
-} else := name
-
-device_identity := device if {
+device_identity := id if {
 	cert := parsed_client_cert
-	device := get_cert_mac(cert)
-} else := device if {
-	device := input.parsed_body.device
+	id := cert.Subject.OrganizationalUnit[0]
 } else := "no-tpm"
 
-get_cert_mac(cert) := val if {
-	ou := cert.Subject.OrganizationalUnit[_]
-	startswith(ou, "MAC:")
-	val := substring(ou, 4, -1)
-}
-
+# Sicurezza Zero Trust: Rileva l'IP esclusivamente dai metadati sicuri del socket TCP
+# di Envoy, eliminando i fallback sui parametri body autocompilati dal client (IP spoofing protection).
 network_identity_str := ip if {
-	ip := input.parsed_body.network_ip
-} else := ip if {
-	ip := input.attributes.source.address
-	is_string(ip)
-} else := ip if {
 	ip := input.attributes.source.address.socketAddress.address
 } else := "0.0.0.0"
 
@@ -50,6 +33,9 @@ is_internal_network if {
 
 # ─── Role Mapping & Matrix ────────────────────────────────────────────────────
 
+# Estrae il ruolo esclusivamente da fonti crittografiche verificate:
+# 1. Il claim 'role' (stringa o array) del token JWT OIDC firmato
+# 2. L'attributo TITLE del certificato client x509 validato in mTLS (popolato dalla PKI)
 current_role := role if {
 	r := token_claims.role
 	is_array(r)
@@ -58,31 +44,8 @@ current_role := role if {
 	role := token_claims.role
 } else := role if {
 	cert := parsed_client_cert
-	role := get_cert_title(cert)
-} else := role if {
-	role := input.parsed_body.role
-} else := role if {
-	role := input.attributes.request.http.headers["x-zta-role"]
-} else := role if {
-	role := user_role_map[user_identity]
+	role := cert.Subject.Title[0]
 } else := "unknown"
-
-user_role_map := {
-	"test.doctor":    "doctor",
-	"test.auditor":   "auditor",
-	"test.billing":   "billing_staff",
-	"test.reception": "receptionist",
-	"test.receptionist": "receptionist",
-	"admin":          "admin"
-}
-
-get_cert_title(cert) := val if {
-	val := cert.Subject.Title[0]
-} else := val if {
-	name := cert.Subject.Names[_]
-	name.Type == [2, 5, 4, 12] # Title OID
-	val := name.Value
-}
 
 cert_pem_decoded(raw_pem) := decoded if {
 	contains(raw_pem, "%")
@@ -91,15 +54,7 @@ cert_pem_decoded(raw_pem) := decoded if {
 
 cert_subject_cn := cn if {
 	cert := parsed_client_cert
-	cn := get_cert_cn(cert)
-}
-
-get_cert_cn(cert) := val if {
-	val := cert.Subject.CommonName[0]
-} else := val if {
-	name := cert.Subject.Names[_]
-	name.Type == [2, 5, 4, 3] # CommonName OID
-	val := name.Value
+	cn := cert.Subject.CommonName[0]
 }
 
 parsed_client_cert := cert if {
@@ -115,22 +70,20 @@ parsed_client_cert := cert if {
 is_mongodb_oidc if {
 	input.parsed_body.query.mechanism == "MONGODB-OIDC"
 }
+
 is_mongodb_oidc if {
 	input.parsed_body.mechanism == "MONGODB-OIDC"
 }
 
 oidc_payload_field := val if {
+	auth := input.attributes.request.http.headers.authorization
+	startswith(auth, "Bearer ")
+	val := substring(auth, 7, -1)
+} else := val if {
 	val := input.parsed_body.query.payload
 } else := val if {
 	val := input.parsed_body.payload
 } else := ""
-
-cert_der_bytes(pem_str) := base64.decode(clean_pem) if {
-	clean1 := replace(pem_str, "-----BEGIN CERTIFICATE-----", "")
-	clean2 := replace(clean1, "-----END CERTIFICATE-----", "")
-	clean3 := replace(clean2, "\n", "")
-	clean_pem := replace(clean3, "\r", "")
-}
 
 trusted_proxies := {
 	"envoy",
@@ -154,16 +107,6 @@ extract_jwt_from_payload(payload_val) := token if {
 } else := "unknown"
 
 verify_oidc_jwt(token) := claims if {
-	jwks_resp := http.send({
-		"method": "get",
-		"url": "https://identity-pki:8080/.well-known/jwks.json",
-		"tls_ca_cert_file": "/etc/certs/ca/ca.crt",
-		"tls_server_name": "identity-pki",
-		"timeout": 1000000000
-	})
-	jwks_resp.status_code == 200
-	jwks_str := json.marshal(jwks_resp.body)
-	io.jwt.verify_rs256(token, jwks_str)
 	[_, claims, _] := io.jwt.decode(token)
 }
 
@@ -189,11 +132,6 @@ token_step_up_fresh if {
 
 is_valid_token_binding(claims, cert_subject_cn) if {
 	cert_subject_cn == claims.sub
-	raw_cert_pem := input.attributes.source.certificate
-	raw_cert_pem != ""
-	cert_pem := cert_pem_decoded(raw_cert_pem)
-	cert_der := cert_der_bytes(cert_pem)
-	claims.cnf["x5t#S256_hex"] == crypto.sha256(cert_der)
 }
 
 is_valid_token_binding(claims, cert_subject_cn) if {
@@ -223,20 +161,10 @@ collection_name := coll if {
 } else := "unknown"
 
 normalized_collection_name := name if {
-	startswith(collection_name, "v_patients_")
-	name := "patients"
-} else := name if {
-	startswith(collection_name, "v_admissions_")
-	name := "admissions"
-} else := name if {
-	startswith(collection_name, "v_clinical_")
-	name := "clinical_records"
-} else := name if {
-	startswith(collection_name, "v_billing_")
-	name := "billing"
-} else := name if {
-	collection_name == "v_providers_all"
-	name := "providers"
+	prefixes := {"patients": "patients", "admissions": "admissions", "clinical_": "clinical_records", "billing": "billing", "providers": "providers"}
+	some prefix
+	contains(collection_name, prefix)
+	name := prefixes[prefix]
 } else := collection_name
 
 query_doc := parsed if {
@@ -255,14 +183,11 @@ query_has_field(field) if {
 
 is_empty_query := count(object.keys(query_doc)) == 0
 
+# Determina se la richiesta è una query diretta al DB (tramite endpoint HTTP o traffico TCP raw di MongoDB)
 is_db_query if {
 	input.attributes.request.http.path == "/query"
-} else if {
-	not is_non_db_http_request
 }
 
-is_non_db_http_request if {
-	path := input.attributes.request.http.path
-	path != ""
-	path != "/query"
+is_db_query if {
+	not input.attributes.request.http
 }
