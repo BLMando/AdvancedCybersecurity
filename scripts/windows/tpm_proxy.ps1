@@ -93,8 +93,11 @@ public class ZtaProxySession {
                     }
                 }
             }
-        } catch {
-            // Ignore connection aborts
+        } catch (Exception ex) {
+            Console.WriteLine("[Proxy ERROR] Error in mTLS tunnel: " + ex.Message);
+            if (ex.InnerException != null) {
+                Console.WriteLine("[Proxy ERROR] Inner: " + ex.InnerException.Message);
+            }
         }
     }
 

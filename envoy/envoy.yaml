@@ -98,7 +98,7 @@ static_resources:
                             if len > 0 then
                               local body_str = tostring(body:getBytes(0, len))
                               local body_lower = string.lower(body_str)
-                              local blocked_patterns = { "%$where", "%$function", "%$regex", "%$ne", "%$gt", "sleep%(", "while%(", "%f[%a]union%f[%A]%s+select", "%f[%a]or%f[%A]%s*['\"][^'\"]*['\"]%s*=%s*['\"][^'\"]*['\"]", "%-%-" }
+                              local blocked_patterns = { "%$where", "%$function", "sleep%(", "while%(", "%f[%a]union%f[%A]%s+select", "%f[%a]or%f[%A]%s*['\"][^'\"]*['\"]%s*=%s*['\"][^'\"]*['\"]", "%-%-" }
                               local is_blocked = false
                               local matched_pattern = nil
                               
@@ -138,10 +138,6 @@ static_resources:
                                   elseif matched_pattern == "sleep%(" or matched_pattern == "while%(" then
                                     block_reason = "WAF_DOS_INJECTION"
                                     block_message = "Blocked by L7 WAF: Denial of Service attempt detected (time-delay pattern or infinite loop)."
-                                  elseif matched_pattern == "%$regex" or matched_pattern == "%$ne" or matched_pattern == "%$gt" then
-                                    block_reason = "WAF_NOSQL_INJECTION"
-                                    local operator_name = string.gsub(matched_pattern, "%%", "")
-                                    block_message = string.format("Blocked by L7 WAF: NoSQL Injection attempt detected (operator '%s' not allowed).", operator_name)
                                   elseif string.match(matched_pattern, "union") or string.match(matched_pattern, "or") or matched_pattern == "%-%-" then
                                     block_reason = "WAF_SQL_INJECTION"
                                     block_message = "Blocked by L7 WAF: SQL Injection attempt detected."
