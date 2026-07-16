@@ -16,17 +16,13 @@ def create_app(data_dir=None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_SORT_KEYS"] = False
 
-    # Use /data/certs by default for persistence in Docker
     cert_dir = data_dir or os.environ.get("ZTA_PKI_DATA_DIR", "/data/certs")
     service = PKIService(cert_dir=cert_dir)
 
-    # Store PKIService in application config for routes to access
     app.config["pki_service"] = service
 
-    # Import blueprints semantically
     from .routes import admin_bp, auth_bp, oidc_bp, pki_bp, query_bp
 
-    # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(pki_bp)
     app.register_blueprint(oidc_bp)

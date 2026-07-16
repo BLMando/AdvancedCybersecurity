@@ -39,9 +39,9 @@ AD_USERS = {
     },
 }
 
-PENDING_OTPS = {}  # email -> {"otp": "123456", "expires_at": datetime, "user_info": dict}
-ENROLLMENT_SESSIONS = {}  # token -> {"cn": cn, "role": role, "department": department, "expires_at": datetime}
-PRIMARY_SESSIONS = {}  # cn -> {"login_time": datetime, "last_mfa_time": datetime}
+PENDING_OTPS = {} 
+ENROLLMENT_SESSIONS = {}
+PRIMARY_SESSIONS = {}
 
 
 def get_rls_view_name(role: str, collection_name: str) -> str:
