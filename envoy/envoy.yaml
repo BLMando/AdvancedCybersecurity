@@ -98,12 +98,17 @@ static_resources:
                             if len > 0 then
                               local body_str = tostring(body:getBytes(0, len))
                               local body_lower = string.lower(body_str)
+                              
+                              -- Strip payload and jwt_token base64 fields to prevent false-positive matches (like '--' in signatures)
+                              local body_to_scan = string.gsub(body_lower, '"payload"%s*:%s*"[^"]+"', "")
+                              body_to_scan = string.gsub(body_to_scan, '"jwt_token"%s*:%s*"[^"]+"', "")
+                              
                               local blocked_patterns = { "%$where", "%$function", "sleep%(", "while%(", "%f[%a]union%f[%A]%s+select", "%f[%a]or%f[%A]%s*['\"][^'\"]*['\"]%s*=%s*['\"][^'\"]*['\"]", "%-%-" }
                               local is_blocked = false
                               local matched_pattern = nil
                               
                               for _, pattern in ipairs(blocked_patterns) do
-                                if string.match(body_lower, pattern) then
+                                if string.match(body_to_scan, pattern) then
                                   is_blocked = true
                                   matched_pattern = pattern
                                   break
