@@ -76,7 +76,8 @@ services:
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
     networks:
-      - backend-net
+      backend-net:
+        ipv4_address: 172.19.0.100
 
   # Envoy Log Init (Fix Volume Permissions)
   envoy-log-init:
