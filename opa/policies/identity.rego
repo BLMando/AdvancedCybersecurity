@@ -132,11 +132,24 @@ token_step_up_fresh if {
 
 is_valid_token_binding(claims, cert_subject_cn) if {
 	cert_subject_cn == claims.sub
+	raw_cert_pem := input.attributes.source.certificate
+	raw_cert_pem != ""
+	cert_pem := cert_pem_decoded(raw_cert_pem)
+	cert_der := cert_der_bytes(cert_pem)
+	claims.cnf["x5t#S256_hex"] == crypto.sha256(cert_der)
 }
 
 is_valid_token_binding(claims, cert_subject_cn) if {
 	cert_subject_cn in trusted_proxies
 }
+
+cert_der_bytes(pem_str) := base64.decode(clean_pem) if {
+	clean1 := replace(pem_str, "-----BEGIN CERTIFICATE-----", "")
+	clean2 := replace(clean1, "-----END CERTIFICATE-----", "")
+	clean3 := replace(clean2, "\n", "")
+	clean_pem := replace(clean3, "\r", "")
+}
+
 
 # ─── Request Attributes extraction ───────────────────────────────────────────
 

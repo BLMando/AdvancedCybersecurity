@@ -70,6 +70,6 @@ adaptive_threshold := t if {
 	identity.current_role == "admin"
 	t := 60
 } else := t if {
-	thresholds := {"find": 30, "insert": 20, "update": 20, "delete": 20}
+	thresholds := {"find": 40, "insert": 30, "update": 30, "delete": 30}
 	t := thresholds[identity.action_name]
-} else := 15
+} else := 20

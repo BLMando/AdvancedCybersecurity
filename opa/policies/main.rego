@@ -26,20 +26,6 @@ allow if {
 	is_valid_oidc_if_present
 }
 
-# Consente la fase iniziale di handshake e negoziazione della connessione MongoDB
-# (quando il comando/query database non è ancora stato inviato ed è quindi "unknown")
-allow if {
-	identity.action_name == "unknown"
-	identity.current_role in {"admin", "doctor", "billing_staff", "auditor", "receptionist"}
-	risk.risk_score_allow
-}
-
-# Consente le connessioni infrastrutturali dai proxy e servizi fidati del cluster
-allow if {
-	identity.action_name == "unknown"
-	identity.cert_subject_cn in identity.trusted_proxies
-}
-
 default deny := false
 
 deny if {

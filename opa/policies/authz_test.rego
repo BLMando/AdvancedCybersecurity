@@ -80,6 +80,7 @@ test_step_up_allowed_with_fresh_token if {
 		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
 		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
 test_step_up_denied_without_token if {
@@ -87,6 +88,7 @@ test_step_up_denied_without_token if {
 	deny with input as input_req
 		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": false, "exp": 9999999999}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
 # ─── 3. Test OIDC Token Binding (Collegamento Token-Certificato) ──────────────
@@ -94,15 +96,28 @@ test_step_up_denied_without_token if {
 test_oidc_binding_allowed_matching_cn if {
 	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
 	allow with input as input_req
-		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999}
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
 }
 
 test_oidc_binding_denied_mismatch_cn if {
 	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
 	deny with input as input_req
-		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999}
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
 		with data.envoy.authz.identity.cert_subject_cn as "attacker.name"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_binding_denied_mismatch_fingerprint if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
+	deny with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
 }
 
 # ─── 4. Test L7 Query Content Inspection ──────────────────────────────────────
@@ -132,11 +147,13 @@ test_query_inspection_clinical_records_needs_patient_id if {
 		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
 		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 	
 	deny_reason == "INSPECTION_VIOLATION" with input as input_invalid
 		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
 		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
 test_query_inspection_clinical_records_allowed_with_patient_id if {
@@ -166,6 +183,7 @@ test_query_inspection_clinical_records_allowed_with_patient_id if {
 		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
 		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
 		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
 test_query_inspection_patients_find_empty_denied if {
@@ -215,7 +233,7 @@ test_risk_denied_if_exceeds_threshold if {
 		}
 	}
 	deny with input as input_unsafe
-		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["unknown"], "CommonName": ["unknown"]}}
 	deny_reason == "RISK_THRESHOLD_EXCEEDED" with input as input_unsafe
-		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["unknown"], "CommonName": ["unknown"]}}
 }
