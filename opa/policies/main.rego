@@ -158,7 +158,7 @@ response_metadata := {
 }
 
 final_block_reason := deny_reason if {
-	not allow
+	deny
 } else := "none"
 
 decision_label := "ALLOW" if {

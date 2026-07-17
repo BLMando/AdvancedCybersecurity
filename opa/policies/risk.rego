@@ -4,6 +4,7 @@ package envoy.authz.risk
 
 import future.keywords
 import data.envoy.authz.identity
+import data.envoy.authz.criteria
 
 default risk_score_allow := false
 
@@ -42,6 +43,7 @@ collection_sensitivity_val := 15 if {
 
 # Anomaly Risk Dimension
 anomaly_risk := boost if {
+	criteria.criteria_allow
 	# Evitiamo chiamate esterne per i comandi di sistema esclusi (bypass)
 	not identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo", "ping", "getLog", "getCmdLineOpts", "serverStatus"}
 
