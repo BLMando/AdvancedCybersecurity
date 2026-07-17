@@ -335,6 +335,7 @@ services:
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
+    user: root
     platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
@@ -342,6 +343,7 @@ services:
       - SPLUNK_PASSWORD=${SPLUNK_PASSWORD}
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
+      - ZTA_HEC_TOKEN=${SPLUNK_HEC_TOKEN}
     ports:
       - "${SPLUNK_WEB_PORT}:8000"
       - "${SPLUNK_HEC_PORT}:8088"
@@ -350,7 +352,6 @@ services:
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
-      - ./splunk/splunk_setup.py:/app/splunk_setup.py:ro
       - ./splunk/default/data/ui/views:/app/default/data/ui/views:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
@@ -358,8 +359,13 @@ services:
     networks:
       - backend-net
     restart: always
-    entrypoint: >
-      /bin/bash -c " (python3 /app/splunk_setup.py || true) & exec /sbin/entrypoint.sh start-service "
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        tr -d '\r' < /opt/splunk/etc/apps/zta/entrypoint.sh > /tmp/entrypoint.sh
+        chmod +x /tmp/entrypoint.sh
+        /tmp/entrypoint.sh
 
 volumes:
   splunk-var:
