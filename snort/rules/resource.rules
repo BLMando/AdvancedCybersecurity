@@ -10,6 +10,7 @@ alert tcp any any -> any 27017 (
 # ── Connection Flood su MongoDB ──
 alert tcp any any -> any 27017 (
     msg:"MongoDB TCP connection flood - possible resource exhaustion";
+    flags: S;
     detection_filter: track by_src, count 15, seconds 5;
     classtype:denial-of-service;
     sid:4000002; rev:7;

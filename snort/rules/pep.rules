@@ -9,6 +9,7 @@ alert tcp any any -> any 9901 (
 # Rileva port scan perimetrale (più di 5 tentativi di connessione TCP in 10 secondi da stessa sorgente)
 alert tcp any any -> any any (
     msg:"TCP port scan attempt targeting PEP perimeter";
+    flags: S;
     detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
     sid:3000006; rev:11;
