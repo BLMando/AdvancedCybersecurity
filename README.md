@@ -58,14 +58,14 @@ sequenceDiagram
     %% L7 Inspection & Decision Loop
     Envoy->>Envoy: Parse L7 payload (MongoDB wire protocol / Lua filter)
     Envoy->>OPA: gRPC ext_authz (Request Meta & parsed commands)
-    
+
     %% OPA Policy Checking
     Note over OPA: OPA evaluates policies: main, identity, criteria, risk, policy
     OPA->>OPA: Verify Client Certificate & Token Binding
     OPA->>OPA: Scan query for NoSQL Injection (WAF)
     OPA->>Splunk: Query live User/Device risk index (Basic Auth, HTTPS 8089)
     Splunk-->>OPA: Return Contextual Risk Score (0-100)
-    
+
     alt Policy validation fails OR Risk Score > Threshold
         OPA-->>Envoy: DENY request
         Envoy-->>Client: Rejection (HTTP 403 / TCP reset)
@@ -84,6 +84,7 @@ sequenceDiagram
 Follow these steps to run the complete infrastructure, configure the components, and verify the Zero Trust behavior.
 
 ### Prerequisites
+
 - **Docker Desktop** installed and running.
 - **Python 3.10+** (recommended to manage libraries with `uv` or `venv`).
 - Standard shell utility (`bash`, `zsh` or PowerShell).
@@ -92,24 +93,28 @@ Follow these steps to run the complete infrastructure, configure the components,
 
 1. **Initialize Environment Variables**:
    Copy the example environment configuration into a local file:
+
    ```bash
    cp .env.example .env
    ```
-   *(The default `.env` is pre-configured with secure default ports, credentials, and credentials values for Splunk/MongoDB).*
+
+   _(The default `.env` is pre-configured with secure default ports, credentials, and credentials values for Splunk/MongoDB)._
 
 2. **Boot the Security Mesh**:
    Build and launch all Docker services in detached mode:
+
    ```bash
    docker compose up --build -d
    ```
-   *Note: Allow 30–45 seconds for Splunk and MongoDB services to fully boot and run initialization scripts.*
 
-3. **Configure the Splunk Connection**:
+   _Note: Allow 30–45 seconds for Splunk and MongoDB services to fully boot and run initialization scripts._
+
+3. **ConfigurSPLUNK_HEC_TOKENn**:
    - Access Splunk Web UI at **`http://localhost:8000`** (User: `admin` | Password: `SplunkPassword123!`).
    - Go to **Settings > Data Inputs > HTTP Event Collector**.
    - Select **Global Settings** and ensure HEC is **Enabled**.
    - Create a new token named `zta_token`, assign it default access to index `zta_envoy`, and save.
-   - Update `SPLUNK_HEC_TOKEN_ENVOY` in your `.env` with the generated token.
+   - Update `SPLUNK_HEC_TOKEN` in your `.env` with the generated token.
    - Restart the forwarder daemon:
      ```bash
      docker compose up -d --force-recreate zta-log-forwarder
@@ -136,9 +141,9 @@ AdvancedCybersecurity/
 ├── CLAUDE.md                 # Project development constraints & workflows
 ├── AGENTS.md                 # AI assistant execution rules and skill mapping
 ├── identity_pki/             # Flask PKI Portal
-│   ├── app.py                
-│   ├── routes/               
-│   └── tests/                
+│   ├── app.py
+│   ├── routes/
+│   └── tests/
 ├── envoy/                    # Envoy Proxy (PEP) config
 ├── opa/                      # OPA (PDP) server & Rego authorization rules
 │   └── policies/             # Access control, risk scoring, and rules

@@ -23,7 +23,7 @@ app = Flask(__name__)
 hec_client = HEClient(
     host="splunk",
     port=8088,
-    token=os.environ.get("SPLUNK_HEC_TOKEN_ENVOY", ""),
+    token=os.environ.get("SPLUNK_HEC_TOKEN", ""),
     batch_size=int(os.environ.get("HEC_BATCH_SIZE", "100")),
 )
 

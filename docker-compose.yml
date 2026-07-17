@@ -1,5 +1,4 @@
 services:
-
   # Identity & PKI (Certificate Management)
   identity-pki:
     build:
@@ -119,7 +118,7 @@ services:
       - frontend-net
       - backend-net
     healthcheck:
-      test: [ "CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'" ]
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'"]
       interval: 5s
       timeout: 2s
       retries: 5
@@ -137,7 +136,7 @@ services:
       SPLUNK_USERNAME: ${SPLUNK_USERNAME}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
       SPLUNK_VERIFY_TLS: ${SPLUNK_VERIFY_TLS}
-      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN}
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
@@ -190,7 +189,7 @@ services:
     container_name: snort-pep
     user: root
     restart: unless-stopped
-    entrypoint: [ "/bin/sh", "-c" ]
+    entrypoint: ["/bin/sh", "-c"]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -221,7 +220,7 @@ services:
     container_name: snort-resource
     user: root
     restart: unless-stopped
-    entrypoint: [ "/bin/sh", "-c" ]
+    entrypoint: ["/bin/sh", "-c"]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -253,7 +252,7 @@ services:
     restart: unless-stopped
     environment:
       APPLY_NFT_RULES: "1"
-    entrypoint: [ "/bin/sh", "-c" ]
+    entrypoint: ["/bin/sh", "-c"]
     cap_add:
       - NET_ADMIN
     network_mode: "service:envoy"
@@ -265,7 +264,7 @@ services:
       - nftables-logs:/var/log/nftables
       - ./volumes/blocklist:/etc/blocklist:ro
     healthcheck:
-      test: [ "CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1" ]
+      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
       interval: 10s
       timeout: 2s
       retries: 3
@@ -300,7 +299,7 @@ services:
         echo "[nftables] Starting blocklist sync daemon..."
         BLOCKLIST_DIR="/etc/blocklist"
         BLOCKLIST_FILE="$$BLOCKLIST_DIR/blocklist.txt"
- 
+
         sync_blocklist() {
           IPs=$$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$$BLOCKLIST_FILE" 2>/dev/null | tr -d '\r')
           nft flush set inet zero_trust_fw blocklist 2>/dev/null
@@ -310,16 +309,16 @@ services:
             nft add element inet zero_trust_fw blocklist "{ $$ELEMENTS }" 2>/dev/null
           fi
         }
- 
+
         # Initial sync
         sync_blocklist
- 
+
         # Watch for changes and sync instantly (guarded by MD5 check to avoid infinite loops)
         LAST_HASH=""
         if [ -f "$$BLOCKLIST_FILE" ]; then
           LAST_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
         fi
- 
+
         inotifywait -q -m -e close_write,moved_to "$$BLOCKLIST_DIR" | while read -r directory events filename; do
           if [ "$$filename" = "blocklist.txt" ]; then
             CURRENT_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
