@@ -9,7 +9,7 @@ This repository implements a multi-layer **Zero Trust Architecture (ZTA)** tailo
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 The project leverages a modern, dockerized cybersecurity stack:
 
@@ -24,7 +24,7 @@ The project leverages a modern, dockerized cybersecurity stack:
 
 ---
 
-## 🗺️ Project Architecture
+## Project Architecture
 
 The architecture enforces a strict **"Never Trust, Always Verify"** design across three primary boundaries: L3/L4 Network Filtering, L7 Protocol Inspection, and Dynamic Multi-Source Risk Evaluation.
 
@@ -88,7 +88,7 @@ sequenceDiagram
 
 ---
 
-## ⚡ Getting Started
+## Getting Started
 
 Follow these steps to run the complete infrastructure, configure the components, and verify the Zero Trust behavior.
 
@@ -101,13 +101,8 @@ Follow these steps to run the complete infrastructure, configure the components,
 ### Setup and Configuration
 
 1. **Initialize Environment Variables**:
-   Copy the example environment configuration into a local file:
+   Use the `.env` file sent via email and place it in the root directory.
 
-   ```bash
-   cp .env.example .env
-   ```
-
-   _(The default `.env` is pre-configured with secure default ports, credentials, and credentials values for Splunk/MongoDB)._
 
 2. **Boot the Security Mesh**:
    Build and launch all Docker services in detached mode:
@@ -117,21 +112,20 @@ Follow these steps to run the complete infrastructure, configure the components,
    ```
 
 3. **Splunk Verification**:
-   - Access the Splunk Web UI at **`http://localhost:8000`** (User: `admin` | Password: `SplunkPassword123!`).
+   - Access the Splunk Web UI at **`http://localhost:8000`** (credentials are defined in the `.env` file).
    - All security indexes (`zta_envoy`, `zta_snort`, etc.) and the HTTP Event Collector (HEC) token `zta_token` are configured **automatically** at boot using the `SPLUNK_HEC_TOKEN` value from `.env`.
    - In the Splunk Web UI sidebar, click on **ZTA App** to access the pre-configured security logs dashboard.
 
 
 4. **Trust Certificate and Start Agent**:
    - Trust the root Certificate Authority file located at `volumes/certs/ca/ca.crt` on your OS.
-   - Run the local TPM Agent service on Windows:
-     ```powershell
-     powershell -ExecutionPolicy Bypass -File .\scripts\windows\tpm_agent_service.ps1
-     ```
+   - On macOS, open the `ztaagent/ZTAAGENT.xcodeproj` file using Xcode. Make sure to update the Team in the Signing & Capabilities tab to successfully build and run the agent.
+
+
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 AdvancedCybersecurity/
@@ -153,5 +147,64 @@ AdvancedCybersecurity/
 │   └── zta_log_forwarder/    # Log forwarding
 └── shared/                   # Common python models and role specifications
 ```
+
+---
+
+
+### Roles and Permissions Matrix
+
+| User | Role | Allowed Collections | Operations / Permissions |
+|------|------|----------------------|---------------------------|
+| `test.admin` | System Administrator | `*` (All Collections) | Full Access (Read/Write/Delete) |
+| `test.doctor` | Doctor | `patients`, `providers`, `admissions`, `clinical_records` | Read/Write (Row-Level Security Enforced) |
+| `test.auditor` | Auditor | `patients`, `providers`, `admissions`, `clinical_records`, `billing` | Read-Only (Data Masking Enforced) |
+| `test.receptionist`| Receptionist | `patients`, `admissions`, `providers` | Read/Write (No Clinical Data) |
+| `test.billing` | Billing Staff | `patients`, `providers`, `admissions`, `billing` | Read/Write (Billing Data Only) |
+
+
+## Testing the Zero Trust Architecture
+- Go to the PKI Portal at **`http://127.0.0.1:8080/`**.
+- Authenticate with the user **`test.doctor`**.
+- Insert the OTP sent to the email `zta.healthcare@outlook.com` (email credentials have been provided to you).
+- Authenticate with the macOS Agent (or TPM on Windows) to complete the hardware attestation.
+- Try performing allowed and denied operations against the proxy to see OPA and Splunk in action!
+
+### Monitoring the Risk Engine in Splunk
+
+1. **Viewing Raw Logs**:
+   In the Splunk Web UI search bar (`http://localhost:8000`), you can view the raw security logs using the following filters:
+   - For Snort NIDS alerts: `index="zta_snort"`
+   - For Envoy Proxy decisions: `index="zta_envoy"`
+
+2. **Populating the User Baseline**:
+   The contextual risk engine relies on historical data to detect anomalies. Instead of waiting for the hourly cron job to run, after you perform some initial allowed operations, manually populate the baseline by running this query:
+   ```spl
+   index=zta_envoy sourcetype="opa:decision" earliest=-7d
+   | bucket _time span=15m 
+   | stats count as query_count by user, _time 
+   | collect index=zta_baseline_summary
+   ```
+
+3. **Checking the Contextual Risk**:
+   Now, check the dynamic risk score calculated for your user by executing the saved search:
+   ```spl
+   | savedsearch "Calcolo_Rischio_Contestuale_ZTA" user="test.doctor" client_ip="192.168.65.1"
+   ```
+   *(Note: Change `test.doctor` to whichever user you are testing with). If you only performed allowed operations, the risk score should be **0**.*
+
+4. **Generating Risk (Denied Operations)**:
+   Perform some denied operations (e.g., trying to access unauthorized endpoints or perform actions outside your role's permissions). Re-execute the saved search from step 3. You will see the risk score rise dynamically based on the policy violations.
+
+5. **Generating Risk (Network Intrusions)**:
+   Simulate a network attack by opening a terminal and running the following port scans against the proxy:
+   ```bash
+   nmap -p 9901 localhost
+   nmap -p 10000-10020 localhost
+   ```
+   Check the new alerts generated by Snort (`index="zta_snort"`). Re-execute the saved search from step 3 once more: you will see the risk score spike dramatically due to the active intrusion detection penalties.
+
+6. **Handling Blocklists (Automated SOAR)**:
+   If the risk score exceeds the critical threshold (e.g., > 50) due to consecutive denied actions or network intrusions, the automated SOAR mechanism will permanently ban your IP in the L3/L4 Firewall (`nftables`), cutting off all connection to the proxy.
+   To restore your access, you must log in to the PKI Portal as an administrator (`test.admin`), navigate to the **Firewall Blocklist** management section, and manually remove your IP (`192.168.65.1`) from the banned list.
 
 ---
