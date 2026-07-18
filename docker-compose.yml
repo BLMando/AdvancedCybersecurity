@@ -43,7 +43,7 @@ services:
     container_name: mongo
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${MONGO_PORT}:27017"
+      - "${MONGO_PORT}:27017"
     environment:
       ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
