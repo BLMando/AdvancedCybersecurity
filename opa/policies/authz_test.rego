@@ -1,10 +1,10 @@
-# Suite di test unitari per la validazione delle politiche OPA (Zero Trust PDP).
+# Unit test suite for validating OPA policies (Zero Trust PDP).
 
 package envoy.authz
 
 import future.keywords
 
-# Helper per simulare richieste HTTP legittime (mTLS)
+# Helper to simulate legitimate HTTP requests (mTLS)
 mock_input_mtls(role, collection, action) := {
 	"attributes": {
 		"source": {
@@ -27,7 +27,7 @@ mock_input_mtls(role, collection, action) := {
 	}
 }
 
-# Helper per simulare richieste OIDC (mTLS + Token JWT)
+# Helper to simulate OIDC requests (mTLS + JWT Token)
 mock_input_oidc(role, user, action, collection) := {
 	"attributes": {
 		"source": {
@@ -50,7 +50,7 @@ mock_input_oidc(role, user, action, collection) := {
 	}
 }
 
-# ─── 1. Test di Autorizzazione RBAC (Matrice Permessi) ────────────────────────
+# 1. RBAC Authorization Tests (Permission Matrix)
 
 test_rbac_allowed_admin_all if {
 	allow with input as mock_input_mtls("admin", "billing", "insert")
@@ -72,7 +72,7 @@ test_rbac_denied_receptionist_billing if {
 		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["receptionist"], "CommonName": ["test.receptionist"]}}
 }
 
-# ─── 2. Test Biometric Step-Up (Azioni Sensitive) ─────────────────────────────
+# 2. Biometric Step-Up Tests (Sensitive Actions)
 
 test_step_up_allowed_with_fresh_token if {
 	input_req := mock_input_oidc("doctor", "test.doctor", "delete", "admissions")
@@ -91,7 +91,7 @@ test_step_up_denied_without_token if {
 		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
-# ─── 3. Test OIDC Token Binding (Collegamento Token-Certificato) ──────────────
+# 3. OIDC Token Binding Tests (Token-Certificate Linking)
 
 test_oidc_binding_allowed_matching_cn if {
 	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
@@ -120,7 +120,7 @@ test_oidc_binding_denied_mismatch_fingerprint if {
 		with crypto.sha256 as "mock-fingerprint"
 }
 
-# ─── 4. Test L7 Query Content Inspection ──────────────────────────────────────
+# 4. L7 Query Content Inspection Tests
 
 test_query_inspection_clinical_records_needs_patient_id if {
 	input_invalid := {
@@ -208,10 +208,10 @@ test_query_inspection_patients_find_empty_denied if {
 		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
 }
 
-# ─── 5. Test Calcolo Dinamico del Rischio (Adaptive Threshold) ────────────────
+# 5. Dynamic Risk Calculation Tests (Adaptive Threshold)
 
 test_risk_denied_if_exceeds_threshold if {
-	# Forza un punteggio di rischio alto simulando una rete esterna ed un'azione di delete
+	# Force a high risk score by simulating an external network and a delete action
 	input_unsafe := {
 		"attributes": {
 			"source": {

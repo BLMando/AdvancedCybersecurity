@@ -1,4 +1,4 @@
-# Calcolo dinamico del punteggio di rischio e integrazione delle tabelle Splunk.
+# Dynamic calculation of the risk score and integration with Splunk tables.
 
 package envoy.authz.risk
 
@@ -44,7 +44,7 @@ collection_sensitivity_val := 15 if {
 # Anomaly Risk Dimension
 anomaly_risk := boost if {
 	criteria.criteria_allow
-	# Evitiamo chiamate esterne per i comandi di sistema esclusi (bypass)
+	# Avoid external calls for excluded system commands (bypass)
 	not identity.action_name in {"hello", "isMaster", "saslContinue", "buildinfo", "buildInfo", "ping", "getLog", "getCmdLineOpts", "serverStatus"}
 
 	resp := http.send({
@@ -55,8 +55,8 @@ anomaly_risk := boost if {
 			"Authorization": "Basic YWRtaW46U3BsdW5rUGFzc3dvcmQxMjMh"
 		},
 		"body": sprintf("search=%%7C+savedsearch+Calcolo_Rischio_Contestuale_ZTA+user%%3D%%22%v%%22+client_ip%%3D%%22%v%%22&exec_mode=oneshot&output_mode=json", [identity.user_identity, identity.network_identity_str]),
-		"tls_ca_cert_file": "/etc/certs/ca/ca.crt", # Convalida crittografica tramite la CA di progetto
-		"timeout": "400000000" # 400ms in nanosecondi
+		"tls_ca_cert_file": "/etc/certs/ca/ca.crt", # Cryptographic validation via the project CA
+		"timeout": "400000000" # 400ms in nanoseconds
 	})
 
 	resp.status_code == 200
@@ -64,7 +64,7 @@ anomaly_risk := boost if {
 	boost := to_number(score_str)
 } else := 0
 
-# ─── Adaptive Thresholds ──────────────────────────────────────────────────────
+# Adaptive Thresholds
 
 adaptive_threshold := t if {
 	identity.current_role == "admin"

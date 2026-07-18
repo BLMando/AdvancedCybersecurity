@@ -1,15 +1,15 @@
-# Estrazione identità (utente, dispositivo, rete, ruolo) ed attributi di richiesta.
+# Identity extraction (user, device, network, role) and request attributes.
 package envoy.authz.identity
 
 import future.keywords
 
-# ─── Identity Extraction ──────────────────────────────────────────────────────
+# Identity Extraction
 
 user_identity := raw_user
 
-# Estrae l'utente esclusivamente da fonti crittografiche verificate:
-# 1. Il subject del token JWT OIDC firmato (se presente)
-# 2. Il Common Name (CN) del certificato client x509 validato in mTLS
+# Extracts the user exclusively from verified cryptographic sources:
+# 1. The subject of the signed OIDC JWT token (if present)
+# 2. The Common Name (CN) of the client x509 certificate validated in mTLS
 raw_user := user if {
 	user := token_claims.sub
 } else := user if {
@@ -21,8 +21,8 @@ device_identity := id if {
 	id := cert.Subject.OrganizationalUnit[0]
 } else := "no-tpm"
 
-# Sicurezza Zero Trust: Rileva l'IP esclusivamente dai metadati sicuri del socket TCP
-# di Envoy, eliminando i fallback sui parametri body autocompilati dal client (IP spoofing protection).
+# Zero Trust Security: Detects the IP exclusively from the secure TCP socket metadata
+# of Envoy, eliminating fallbacks on self-compiled body parameters from the client (IP spoofing protection).
 network_identity_str := ip if {
 	ip := input.attributes.source.address.socketAddress.address
 } else := "0.0.0.0"
@@ -31,11 +31,11 @@ is_internal_network if {
 	regex.match(`^(172\.19\.|172\.20\.|172\.21\.|10\.)`, network_identity_str)
 }
 
-# ─── Role Mapping & Matrix ────────────────────────────────────────────────────
+# Role Mapping & Matrix
 
-# Estrae il ruolo esclusivamente da fonti crittografiche verificate:
-# 1. Il claim 'role' (stringa o array) del token JWT OIDC firmato
-# 2. L'attributo TITLE del certificato client x509 validato in mTLS (popolato dalla PKI)
+# Extracts the role exclusively from verified cryptographic sources:
+# 1. The 'role' claim (string or array) of the signed OIDC JWT token
+# 2. The TITLE attribute of the client x509 certificate validated in mTLS (populated by PKI)
 current_role := role if {
 	r := token_claims.role
 	is_array(r)
@@ -65,7 +65,7 @@ parsed_client_cert := cert if {
 	cert := certs[0]
 }
 
-# ─── OIDC Federated mTLS & RFC 8705 Token Binding ─────────────────────────────
+# OIDC Federated mTLS & RFC 8705 Token Binding
 
 is_mongodb_oidc if {
 	input.parsed_body.query.mechanism == "MONGODB-OIDC"
@@ -151,7 +151,7 @@ cert_der_bytes(pem_str) := base64.decode(clean_pem) if {
 }
 
 
-# ─── Request Attributes extraction ───────────────────────────────────────────
+# Request Attributes extraction
 
 action_name := cmd if {
 	cmd := input.parsed_body.command
@@ -196,7 +196,7 @@ query_has_field(field) if {
 
 is_empty_query := count(object.keys(query_doc)) == 0
 
-# Determina se la richiesta è una query diretta al DB (tramite endpoint HTTP o traffico TCP raw di MongoDB)
+# Determines if the request is a direct query to the DB (via HTTP endpoint or raw TCP MongoDB traffic)
 is_db_query if {
 	input.attributes.request.http.path == "/query"
 }

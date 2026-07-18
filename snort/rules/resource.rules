@@ -1,13 +1,13 @@
-# Snort 3 — Regole Sonda MongoDB
+# Snort 3 - MongoDB Probe Rules
 
-# ── Accesso diretto MongoDB (Bypass del PEP) ──
+# Direct MongoDB Access (PEP Bypass)
 alert tcp !172.19.0.100 any -> any 27017 (
     msg:"Direct MongoDB access attempt - PEP bypass";
     classtype:policy-violation;
     sid:4000001; rev:8;
 )
 
-# ── Connection Flood su MongoDB ──
+# Connection Flood on MongoDB
 alert tcp any any -> any 27017 (
     msg:"MongoDB TCP connection flood - possible resource exhaustion";
     flags: S;

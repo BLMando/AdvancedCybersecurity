@@ -21,15 +21,15 @@ role_action_allowed if {
 	identity.action_name in allowed_cmds
 }
 
-# ─── Hard-Deny Rules ──────────────────────────────────────────────────────────
+# Hard-Deny Rules
 
-# Le azioni sensitive (scrittura/cancellazione) richiedono step-up biometrico
+# Sensitive actions (write/delete) require biometric step-up
 is_sensitive_action if {
 	identity.action_name in {"update", "delete"}
 }
 
-# Intercettare transazioni di fatturazione
-# con importi superiori a 5000 (ritenute operazioni a rischio che richiedono step-up)
+# Intercept billing transactions
+# with amounts greater than 5000 (considered high-risk operations requiring step-up)
 is_sensitive_action if {
 	identity.normalized_collection_name == "billing"
 	walk(identity.query_doc, [path, value])
@@ -40,21 +40,21 @@ is_sensitive_action if {
 	value > 5000
 }
 
-# Blocca le azioni sensibili se non è presente un token step-up biometrico valido e fresco
+# Block sensitive actions if a valid and fresh biometric step-up token is not present
 hard_deny if {
 	is_sensitive_action
 	not identity.token_step_up_fresh
 }
 
-# Blocca immediatamente i client non autenticati o sprovvisti di ruolo valido
+# Immediately block unauthenticated clients or those without a valid role
 hard_deny if {
 	identity.current_role == "unknown"
 }
 
-# ─── Content Inspection ──────────────────────────────────────
+# Content Inspection
 
-# Regola di Compliance Clinica: I medici possono aggiornare le cartelle cliniche
-# solo se specificano un filtro mirato per il singolo paziente
+# Clinical Compliance Rule: Doctors can update clinical records
+# only if they specify a targeted filter for the individual patient
 inspection_violation if {
 	identity.is_db_query
 	identity.normalized_collection_name == "clinical_records"
@@ -62,8 +62,8 @@ inspection_violation if {
 	not identity.query_has_field("patient_id")
 }
 
-# Regola di Compliance Privacy: Impedisce query vuote (es. {}) sulla tabella pazienti
-# a ruoli non amministratori per prevenire il dump massivo dell'anagrafica
+# Privacy Compliance Rule: Prevents empty queries (e.g. {}) on the patients table
+# for non-admin roles to prevent massive dumping of registry data
 inspection_violation if {
 	identity.is_db_query
 	identity.normalized_collection_name == "patients"
@@ -72,7 +72,7 @@ inspection_violation if {
 	identity.is_empty_query
 }
 
-# Matrix dei permessi (Zero Trust Default Deny per i campi vuoti {})
+# Permission Matrix (Zero Trust Default Deny for empty fields {})
 permissions := {
 	"admin": {
 		"patients":         {"find", "insert", "update", "delete"},
