@@ -107,7 +107,8 @@ services:
       opa:
         condition: service_started
     ports:
-      - "${ENVOY_PROXY_PORT}:10000"
+      #- "${ENVOY_PROXY_PORT}:10000"
+      - "10000-10020:10000-10020"
       - "127.0.0.1:${ENVOY_ADMIN_PORT}:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
