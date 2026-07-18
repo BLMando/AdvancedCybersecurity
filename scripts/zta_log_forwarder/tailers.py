@@ -33,9 +33,30 @@ AUTO_BLOCK_SIDS = {
 }
 
 
+def is_internal_ip(ip: str) -> bool:
+    if ip.startswith("127.") or ip in ("localhost", "host.docker.internal"):
+        return True
+    try:
+        parts = ip.split(".")
+        if len(parts) == 4:
+            first = int(parts[0])
+            second = int(parts[1])
+            if first == 172 and (16 <= second <= 31):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+# Track port scan counts per IP to enforce a threshold before blocking
+PORT_SCAN_BLOCK_THRESHOLD = 3
+_port_scan_counts = {}
+_port_scan_lock = threading.Lock()
+
+
 def auto_block_ip(ip: str) -> None:
     path = "/app/blocklist/blocklist.txt"
-    if ip.startswith("127.") or ip.startswith("172.19."):
+    if is_internal_ip(ip):
         logger.info("[SOAR] IP %s is part of internal infrastructure, skipping auto-block", ip)
         return
     try:
@@ -53,6 +74,22 @@ def auto_block_ip(ip: str) -> None:
             fcntl.flock(f, fcntl.LOCK_UN)
     except Exception as e:
         logger.error("[SOAR] Failed to auto-block IP %s: %s", ip, e)
+
+
+def process_snort_alert(fields: dict) -> None:
+    src_addr = fields.get("src_addr", "0.0.0.0")
+    sid = int(fields.get("sid", 0))
+    if sid in AUTO_BLOCK_SIDS and src_addr != "0.0.0.0" and not is_internal_ip(src_addr):
+        if sid == 3000006:
+            with _port_scan_lock:
+                count = _port_scan_counts.get(src_addr, 0) + 1
+                _port_scan_counts[src_addr] = count
+            if count >= PORT_SCAN_BLOCK_THRESHOLD:
+                auto_block_ip(src_addr)
+            else:
+                logger.info("[SOAR] IP %s port scan count: %d/%d. Skipping block.", src_addr, count, PORT_SCAN_BLOCK_THRESHOLD)
+        else:
+            auto_block_ip(src_addr)
 
 
 class FileTailer:
@@ -130,16 +167,7 @@ def start_background_tailers(hec_client) -> None:
                 fields = extract_snort_fields(log_entry)
                 fields["sensor"] = "pep"
                 hec_client.send_event(fields, index="zta_snort", sourcetype="snort:alert_json")
-
-                src_addr = fields.get("src_addr", "0.0.0.0")
-                sid = int(fields.get("sid", 0))
-                if sid in AUTO_BLOCK_SIDS and src_addr not in (
-                    "0.0.0.0",
-                    "127.0.0.1",
-                    "localhost",
-                    "host.docker.internal",
-                ):
-                    auto_block_ip(src_addr)
+                process_snort_alert(fields)
             except json.JSONDecodeError:
                 logger.warning("Skipping invalid JSON from Snort [pep] log")
 
@@ -150,16 +178,7 @@ def start_background_tailers(hec_client) -> None:
                 fields = extract_snort_fields(log_entry)
                 fields["sensor"] = "resource"
                 hec_client.send_event(fields, index="zta_snort", sourcetype="snort:alert_json")
-
-                src_addr = fields.get("src_addr", "0.0.0.0")
-                sid = int(fields.get("sid", 0))
-                if sid in AUTO_BLOCK_SIDS and src_addr not in (
-                    "0.0.0.0",
-                    "127.0.0.1",
-                    "localhost",
-                    "host.docker.internal",
-                ):
-                    auto_block_ip(src_addr)
+                process_snort_alert(fields)
             except json.JSONDecodeError:
                 logger.warning("Skipping invalid JSON from Snort [resource] log")
 
