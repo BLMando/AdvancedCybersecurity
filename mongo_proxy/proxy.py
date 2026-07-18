@@ -111,11 +111,11 @@ def handle_query():
                 count = res.modified_count
             else:
                 count = 0
-            message = f"Aggiornati {count} documenti in '{collection_name}'"
+            message = f"Updated {count} documents in '{collection_name}'"
         elif action == "delete":
             res = db[collection_name].delete_many(query_filter)
             count = res.deleted_count
-            message = f"Eliminati {count} documenti da '{collection_name}'"
+            message = f"Deleted {count} documents from '{collection_name}'"
         elif action == "aggregate":
             pipeline = payload.get("pipeline", [])
             pipeline = json_util.loads(json_util.dumps(pipeline))

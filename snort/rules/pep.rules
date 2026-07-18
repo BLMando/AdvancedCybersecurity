@@ -1,12 +1,13 @@
-# Snort 3 — Regole Sonda PEP
-# Rileva tentativi di connessione diretta alla porta admin di Envoy (9901)
+# Snort 3 - PEP Probe Rules
+# Detect direct connection attempts to Envoy admin port (9901)
 alert tcp any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
+    flags: S;
     classtype:policy-violation;
-    sid:3000005; rev:6;
+    sid:3000005; rev:7;
 )
 
-# Rileva port scan perimetrale (più di 5 tentativi di connessione TCP in 10 secondi da stessa sorgente)
+# Detect perimeter port scan (more than 5 TCP connection attempts in 10 seconds from the same source)
 alert tcp any any -> any any (
     msg:"TCP port scan attempt targeting PEP perimeter";
     flags: S;

@@ -149,6 +149,12 @@ ips =
     },
 }
 
+-- Suppress known false positives from the Docker environment.
+suppress =
+{
+    { gid = 112, sid = 1 },
+}
+
 -- 5. configure outputs
 
 -- JSON Alert output per inoltro log a Splunk HEC

@@ -31,7 +31,8 @@ services:
       - ./identity_pki/static:/app/identity_pki/static
       - ./volumes/blocklist:/app/blocklist:rw
     networks:
-      - backend-net
+      backend-net:
+        ipv4_address: 172.19.0.101
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -109,7 +110,7 @@ services:
     ports:
       #- "${ENVOY_PROXY_PORT}:10000"
       - "10000-10020:10000-10020"
-      - "127.0.0.1:${ENVOY_ADMIN_PORT}:9901"
+      - "${ENVOY_ADMIN_PORT}:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ./envoy/lua:/etc/envoy/lua:ro
@@ -120,7 +121,7 @@ services:
       - frontend-net
       - backend-net
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'"]
+      test: [ "CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/9901'" ]
       interval: 5s
       timeout: 2s
       retries: 5
@@ -191,7 +192,7 @@ services:
     container_name: snort-pep
     user: root
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -222,7 +223,7 @@ services:
     container_name: snort-resource
     user: root
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -254,7 +255,7 @@ services:
     restart: unless-stopped
     environment:
       APPLY_NFT_RULES: "1"
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     cap_add:
       - NET_ADMIN
     network_mode: "service:envoy"
@@ -266,7 +267,7 @@ services:
       - nftables-logs:/var/log/nftables
       - ./volumes/blocklist:/etc/blocklist:ro
     healthcheck:
-      test: ["CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1"]
+      test: [ "CMD-SHELL", "nft list table inet zero_trust_fw > /dev/null 2>&1" ]
       interval: 10s
       timeout: 2s
       retries: 3

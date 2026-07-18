@@ -1313,10 +1313,10 @@
               throw new Error(data.message || data.error || "Update error");
             msgEl.className = "edit-status-msg success";
             msgEl.textContent = `${data.message || "Saved"}`;
-            // Close edit panel after success
+            // Close edit panel after success and update the table visually
             setTimeout(() => {
-              document.getElementById(`edit-row-${idx}`).style.display =
-                "none";
+              Object.assign(row, updateFields);
+              renderQueryResults(window.lastQueryResults, collection);
             }, 1200);
           } finally {
             fetch("http://localhost:9090/proxy/stop", {
@@ -1339,7 +1339,8 @@
           msgEl.className = "edit-status-msg success";
           msgEl.textContent = `${data.message || "Saved"}`;
           setTimeout(() => {
-            document.getElementById(`edit-row-${idx}`).style.display = "none";
+            Object.assign(row, updateFields);
+            renderQueryResults(window.lastQueryResults, collection);
           }, 1200);
 
         }
