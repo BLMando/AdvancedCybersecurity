@@ -34,7 +34,7 @@ AD_USERS = {
     "zta.healthcare+billing@outlook.com": {
         "cn": "test.billing",
         "role": "billing_staff",
-        "department": "Cardiology",
+        "department": "Billing",
         "password": "password123",
     },
 }

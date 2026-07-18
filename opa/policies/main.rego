@@ -6,7 +6,7 @@ import data.envoy.authz.criteria
 import data.envoy.authz.risk
 
 
-# Risposta OPA strutturata per ext_authz di Envoy
+# Structured OPA response for Envoy ext_authz
 main := {
 	"allowed": allow,
 	"http_status": 403,
@@ -19,25 +19,11 @@ main := {
 
 default allow := false
 
-# Regola di autorizzazione principale
+# Main authorization rule
 allow if {
 	criteria.criteria_allow
 	risk.risk_score_allow
 	is_valid_oidc_if_present
-}
-
-# Consente la fase iniziale di handshake e negoziazione della connessione MongoDB
-# (quando il comando/query database non è ancora stato inviato ed è quindi "unknown")
-allow if {
-	identity.action_name == "unknown"
-	identity.current_role in {"admin", "doctor", "billing_staff", "auditor", "receptionist"}
-	risk.risk_score_allow
-}
-
-# Consente le connessioni infrastrutturali dai proxy e servizi fidati del cluster
-allow if {
-	identity.action_name == "unknown"
-	identity.cert_subject_cn in identity.trusted_proxies
 }
 
 default deny := false
@@ -47,7 +33,7 @@ deny if {
 }
 
 
-# Valida il Token OIDC solo se il protocollo in uso è MONGODB-OIDC
+# Validate OIDC Token only if the protocol in use is MONGODB-OIDC
 is_valid_oidc_if_present if {
 	not identity.is_mongodb_oidc
 }
@@ -57,7 +43,7 @@ is_valid_oidc_if_present if {
 }
 
 
-# Determina il codice d'errore specifico in base alla regola violata
+# Determines the specific error code based on the violated rule
 deny_reason := reason if {
 	identity.is_mongodb_oidc
 	not identity.valid_oidc_token
@@ -91,36 +77,36 @@ deny_reason := reason if {
 
 deny_message := msg if {
 	deny_reason == "OIDC_TOKEN_INVALID"
-	msg := "Sessione di autenticazione non valida o scaduta. Effettua nuovamente il login hardware."
+	msg := "Invalid or expired authentication session. Please perform hardware login again."
 } else := msg if {
 	deny_reason == "RISK_THRESHOLD_EXCEEDED"
-	msg := sprintf("Accesso negato: il livello di rischio calcolato (%d) supera la soglia di sicurezza consentita.", [risk.risk_score])
+	msg := sprintf("Access denied: calculated risk level (%d) exceeds the allowed security threshold.", [risk.risk_score])
 } else := msg if {
 	deny_reason == "INVALID_ACTION"
-	msg := "Operazione database non valida o non supportata."
+	msg := "Invalid or unsupported database operation."
 } else := msg if {
 	deny_reason == "RBAC_DENIED"
-	msg := sprintf("Il tuo ruolo (%s) non dispone dei permessi necessari per eseguire l'azione '%s' sulla collezione '%s'.", [identity.current_role, identity.action_name, identity.collection_name])
+	msg := sprintf("Your role (%s) does not have the necessary permissions to perform the action '%s' on collection '%s'.", [identity.current_role, identity.action_name, identity.collection_name])
 } else := msg if {
 	deny_reason == "STEP_UP_REQUIRED"
-	msg := "Autenticazione secondaria (Step-up) richiesta. Effettua la verifica Touch ID / Windows Hello per procedere con questa operazione sensibile."
+	msg := "Secondary authentication (Step-up) required. Perform Touch ID / Windows Hello verification to proceed with this sensitive operation."
 } else := msg if {
 	deny_reason == "STEP_UP_STALE"
-	msg := "Sessione di verifica biometrica scaduta. Si prega di rieffettuare la verifica sul dispositivo."
+	msg := "Biometric verification session expired. Please re-verify on the device."
 } else := msg if {
 	deny_reason == "UNAUTHENTICATED"
-	msg := "Utente non identificato o certificato non registrato."
+	msg := "Unidentified user or unregistered certificate."
 } else := msg if {
 	deny_reason == "INSPECTION_VIOLATION"
 	identity.current_role == "doctor"
 	identity.normalized_collection_name == "clinical_records"
 	identity.action_name == "update"
 	not identity.query_has_field("patient_id")
-	msg := "I medici sono tenuti a specificare il filtro patient_id durante l'aggiornamento delle cartelle cliniche."
+	msg := "Doctors are required to specify the patient_id filter when updating clinical records."
 } else := msg if {
 	deny_reason == "INSPECTION_VIOLATION"
-	msg := "Richiesta non conforme: controlli di sicurezza a livello applicativo (L7) hanno bloccato la query."
-} else := "Richiesta respinta dalle politiche di sicurezza Zero Trust."
+	msg := "Non-compliant request: application-level security controls (L7) blocked the query."
+} else := "Request rejected by Zero Trust security policies."
 
 
 denied_body := json.marshal({
@@ -132,9 +118,9 @@ denied_body := json.marshal({
 	"translated_collection": identity.collection_name
 })
 
-# ─── SECTION 4: RESPONSE HEADERS & METADATA ──────────────────────────────────
+# SECTION 4: RESPONSE HEADERS & METADATA
 
-# Header HTTP iniettati da Envoy verso Splunk per telemetria
+# HTTP headers injected by Envoy towards Splunk for telemetry
 response_headers := {
 	"x-zta-user": identity.user_identity,
 	"x-zta-device": identity.device_identity,
@@ -158,7 +144,7 @@ response_metadata := {
 }
 
 final_block_reason := deny_reason if {
-	not allow
+	deny
 } else := "none"
 
 decision_label := "ALLOW" if {

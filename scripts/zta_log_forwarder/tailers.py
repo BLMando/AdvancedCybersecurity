@@ -23,16 +23,13 @@ NFTABLES_LOG_PATH = Path("/var/log/nftables/nft.log")
 MONGO_LOG_PATH = Path("/var/log/mongodb/mongod.log")
 MONGO_AUDIT_PATH = Path("/var/log/mongodb/audit.json")
 
-# High-fidelity SIDs for automated L3/L4 blocking
 AUTO_BLOCK_SIDS = {
     # Sonda PEP
-    3000002,  # Possible SYN flood DDoS
-    3000004,  # Internal lateral movement
-    3000006,  # TCP SYN port scan targeting PEP
+    3000005,  # Envoy admin access attempt from internal network
+    3000006,  # TCP port scan attempt targeting PEP perimeter
     # Sonda Risorsa
     4000001,  # Direct MongoDB access attempt (PEP bypass)
     4000002,  # MongoDB TCP connection flood
-    4000003,  # Internal MongoDB port sweep
 }
 
 
