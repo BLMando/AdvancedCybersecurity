@@ -120,7 +120,10 @@ Follow these steps to run the complete infrastructure, configure the components,
 4. **Trust Certificate and Start Agent**:
    - Trust the root Certificate Authority file located at `volumes/certs/ca/ca.crt` on your OS.
    - On macOS, open the `ztaagent/ZTAAGENT.xcodeproj` file using Xcode. Make sure to update the Team in the Signing & Capabilities tab to successfully build and run the agent.
-
+   - On Windows, run the local TPM Agent service on Windows:
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File .\scripts\windows\tpm_agent_service.ps1
+     ```
 
 
 ---
@@ -163,7 +166,7 @@ AdvancedCybersecurity/
 
 
 ## Testing the Zero Trust Architecture
-- Go to the PKI Portal at **`http://127.0.0.1:8080/`**.
+- Go to the PKI Portal at **`https://127.0.0.1:8080/`**.
 - Authenticate with the user **`test.doctor`**.
 - Insert the OTP sent to the email `zta.healthcare@outlook.com` (email credentials have been provided to you).
 - Authenticate with the macOS Agent (or TPM on Windows) to complete the hardware attestation.
