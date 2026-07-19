@@ -166,48 +166,104 @@ AdvancedCybersecurity/
 
 
 ## Testing the Zero Trust Architecture
-- Go to the PKI Portal at **`https://127.0.0.1:8080/`**.
-- Authenticate with the user **`test.doctor`**.
-- Insert the OTP sent to the email `zta.healthcare@outlook.com` (email credentials have been provided to you).
-- Authenticate with the macOS Agent (or TPM on Windows) to complete the hardware attestation.
-- Try performing allowed and denied operations against the proxy to see OPA and Splunk in action!
 
-### Monitoring the Risk Engine in Splunk
+Follow this test suite to validate every security boundary of the Zero Trust Architecture, from identity and data isolation to WAF inspection, intrusion detection, SOAR response, and SIEM risk scoring.
 
-1. **Viewing Raw Logs**:
-   In the Splunk Web UI search bar (`http://localhost:8000`), you can view the raw security logs using the following filters:
-   - For Snort NIDS alerts: `index="zta_snort"`
-   - For Envoy Proxy decisions: `index="zta_envoy"`
+---
 
-2. **Populating the User Baseline**:
-   The contextual risk engine relies on historical data to detect anomalies. Instead of waiting for the hourly cron job to run, after you perform some initial allowed operations, manually populate the baseline by running this query:
-   ```spl
-   index=zta_envoy sourcetype="opa:decision" earliest=-7d
-   | bucket _time span=15m 
-   | stats count as query_count by user, _time 
-   | collect index=zta_baseline_summary
-   ```
+### 1. Row-Level & Field-Level Security (RLS / FLS)
 
-3. **Checking the Contextual Risk**:
-   Now, check the dynamic risk score calculated for your user by executing the saved search:
-   ```spl
-   | savedsearch "Calcolo_Rischio_Contestuale_ZTA" user="test.doctor" client_ip="192.168.65.1"
-   ```
-   *(Note: Change `test.doctor` to whichever user you are testing with). If you only performed allowed operations, the risk score should be **0**.*
+Test that data access is restricted according to the **Least Privilege Principle** using MongoDB views and RBAC:
 
-4. **Generating Risk (Denied Operations)**:
-   Perform some denied operations (e.g., trying to access unauthorized endpoints or perform actions outside your role's permissions). Re-execute the saved search from step 3. You will see the risk score rise dynamically based on the policy violations.
+1. **Access the Web Console**:
+   - Navigate to the PKI Portal at **`https://127.0.0.1:8080/`**.
+   - Authenticate with username and password, then input the OTP code sent to `zta.healthcare@outlook.com`.
+   - Complete hardware attestation via the local client agent (macOS ZTAAgent or Windows TPM Agent).
 
-5. **Generating Risk (Network Intrusions)**:
-   Simulate a network attack by opening a terminal and running the following port scans against the proxy:
+2. **Verify Role Isolation in the GUI**:
+   - **As `test.doctor`**: Query the `clinical_records` collection. You receive full clinical notes, diagnoses, and test results via `v_clinical_doctor`. Attempting to query `billing` returns `RBAC_DENIED` (HTTP 403).
+   - **As `test.auditor`**: Query the `clinical_records` collection. Patient names are pseudonymized to initials (`patient_initials`: `M.R.`) and exact ages are replaced with age bands (`30-50`) via `v_clinical_auditor`. Querying `billing` returns rounded amounts (`billing_amount_approx` to nearest 1,000) and masked insurance providers (`Blu***`) via `v_billing_auditor`. Writing data is strictly denied.
+   - **As `test.billing`**: Querying `billing` returns full financial data via `v_billing_staff`. Attempting to query `clinical_records` returns `RBAC_DENIED` (HTTP 403).
+   - **As `test.receptionist`**: Querying `patients` returns basic demographics via `v_patients_reception` (sensitive fields like `blood_type` are hidden). Access to `clinical_records` or `billing` is denied.
+
+---
+
+### 2. Layer 7 WAF Injection Scenarios (Directly from Web Console UI)
+
+Envoy's L7 Lua WAF filter inspects incoming queries inline for malicious patterns before they reach the database. In the Web Console search/query input field, enter the following payloads to verify real-time blocking:
+
+* **NoSQL Injection Test (`$where` / `$function` operators)**:
+  - **Input Payload**: `{"$where": "this.age > 0"}` or `{"$function": "function() { return true; }"}`
+  - **Expected Result**: Envoy L7 WAF intercepts the query and returns an **HTTP 403 Forbidden** error with message: `Blocked by L7 WAF: NoSQL Injection attempt detected (operator '$where' not allowed)`.
+
+* **Denial of Service (DoS) Injection Test (Time Delays / Infinite Loops)**:
+  - **Input Payload**: `{"full_name": "sleep(5000)"}` or `{"full_name": "while(true)"}`
+  - **Expected Result**: Envoy L7 WAF blocks the execution immediately, returning **HTTP 403 Forbidden**: `Blocked by L7 WAF: Denial of Service attempt detected (time-delay pattern or infinite loop)`.
+
+* **SQL Injection Test (Tautologies / Union Select)**:
+  - **Input Payload**: `{"full_name": "admin' OR '1'='1"}` or `{"full_name": "union select 1,2,3--"}`
+  - **Expected Result**: Envoy L7 WAF blocks the request, returning **HTTP 403 Forbidden**: `Blocked by L7 WAF: SQL Injection attempt detected`.
+
+---
+
+### 3. Intrusion Detection (Snort 3), SOAR Auto-Blocking & nftables Firewall
+
+Test network-level intrusion detection and the automated SOAR mitigation pipeline:
+
+1. **Simulate Perimeter Scan**:
+   Open a terminal on your host machine and run port scans against the gateway:
    ```bash
-   nmap -p 9901 localhost
    nmap -p 10000-10020 localhost
    ```
-   Check the new alerts generated by Snort (`index="zta_snort"`). Re-execute the saved search from step 3 once more: you will see the risk score spike dramatically due to the active intrusion detection penalties.
+2. **Simulate Envoy Admin Probe**:
+   Attempt unauthorized access to Envoy's management port:
+   ```bash
+   nmap -p 9901 localhost
+   ```
+3. **Simulate Direct Database Access / PEP Bypass**:
+   Attempt to bypass Envoy by directly reaching MongoDB's native port:
+   ```bash
+   # On macOS / Linux:
+   nc -zv localhost 27017
 
-6. **Handling Blocklists (Automated SOAR)**:
-   If the risk score exceeds the critical threshold (e.g., > 50) due to consecutive denied actions or network intrusions, the automated SOAR mechanism will permanently ban your IP in the L3/L4 Firewall (`nftables`), cutting off all connection to the proxy.
-   To restore your access, you must log in to the PKI Portal as an administrator (`test.admin`), navigate to the **Firewall Blocklist** management section, and manually remove your IP (`192.168.65.1`) from the banned list.
+   # On Windows (PowerShell):
+   Test-NetConnection -ComputerName localhost -Port 27017
+   ```
+4. **Automated SOAR & nftables L3/L4 Firewall Block**:
+   - High-fidelity Snort alerts trigger the SOAR module in `zta_log_forwarder`, which writes the attacker's IP to the shared blocklist file `/app/blocklist/blocklist.txt`.
+   - The **nftables** container reads `@blocklist` and drops all subsequent packets at the Linux kernel level (`NFT_BLOCKLIST_DROP`).
+5. **Unblocking via Admin GUI**:
+   - Log into the PKI Portal as `test.admin`.
+   - Navigate to the **Firewall Blocklist** management tab.
+   - View active blocked IPs and click **Unblock** to remove your IP from the firewall blocklist.
+
+---
+
+### 4. Risk Engine & Centralized SIEM Monitoring (Splunk)
+
+Monitor real-time security events, UEBA behavior, and dynamic risk scoring:
+
+1. **Access Splunk Web UI**:
+   - Open **`http://localhost:8000`** in your browser.
+   - Open the **ZTA App** dashboard from the left navigation panel.
+
+2. **Splunk ZTA Command Center Dashboard**:
+   - **Postura Zero Trust e Controllo degli Accessi**: View real-time charts comparing `ALLOW` vs `DENY` decisions, device authentication posture (`Hardware-Bound TPM` vs `no-tpm`), and top block reasons (`STEP_UP_REQUIRED`, `RBAC_DENIED`, `INSPECTION_VIOLATION`).
+   - **Indicatori di Compromissione (IoC)**: Monitor alerts from `snort-pep` vs `snort-resource`, nftables port scanning attempts, and MongoDB brute force login attempts.
+   - **Analisi Comportamentale (UEBA)**: Monitor volumetric anomalies (Z-Score > 2.0 / 3.0) and high-risk entity rankings (`User x IP x Device`).
+
+3. **Calculating Dynamic Contextual Risk Score**:
+   - Populate the historical user baseline:
+     ```spl
+     index=zta_envoy sourcetype="opa:decision" earliest=-7d
+     | bucket _time span=15m 
+     | stats count as query_count by user, _time 
+     | collect index=zta_baseline_summary
+     ```
+   - Execute the contextual risk calculation search:
+     ```spl
+     | savedsearch "Calcolo_Rischio_Contestuale_ZTA" user="test.doctor" client_ip="192.168.65.1"
+     ```
+   - Observe how the **Risk Score** dynamically increases based on identity penalties (+30 unknown, +20 no-tpm, +15 external IP), query gravity, UBA volumetric spikes (+20/+40), and active Snort NIDS alerts (+80/+100).
 
 ---
