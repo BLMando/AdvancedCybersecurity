@@ -54,7 +54,7 @@ anomaly_risk := boost if {
 			"Content-Type": "application/x-www-form-urlencoded",
 			"Authorization": "Basic YWRtaW46U3BsdW5rUGFzc3dvcmQxMjMh"
 		},
-		"body": sprintf("search=%%7C+savedsearch+Calcolo_Rischio_Contestuale_ZTA+user%%3D%%22%v%%22+client_ip%%3D%%22%v%%22&exec_mode=oneshot&output_mode=json", [identity.user_identity, identity.network_identity_str]),
+		"raw_body": sprintf("search=%%7C+savedsearch+Calcolo_Rischio_Contestuale_ZTA+user%%3D%%22%v%%22+client_ip%%3D%%22%v%%22&exec_mode=oneshot&output_mode=json", [identity.user_identity, identity.network_identity_str]),
 		"tls_ca_cert_file": "/etc/certs/ca/ca.crt", # Cryptographic validation via the project CA
 		"timeout": "400000000" # 400ms in nanoseconds
 	})

@@ -640,35 +640,9 @@ for role_doc in roles_def:
     db.command("createRole", role_doc["role"], privileges=role_doc["privileges"], roles=role_doc["roles"])
     print(f"Role created: {role_doc['role']}")
 
-# Create the Envoy proxy X.509 user in $external database
-db_external = client["$external"]
-db_admin = client["admin"]
 
-# Create custom role with 'impersonate' privilege to allow proxy impersonation
-try:
-    db_admin.command(
-        "createRole",
-        "impersonatorRole",
-        privileges=[{"resource": {"db": "", "collection": ""}, "actions": ["impersonate"]}],
-        roles=[],
-    )
-    print("Role 'impersonatorRole' created in admin")
-except OperationFailure as e:
-    if "already exists" in str(e):
-        print("Role 'impersonatorRole' already exists")
-    else:
-        print(f"Warning: Failed to create impersonatorRole: {e}")
 
-try:
-    db_external.command("dropUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
-except OperationFailure:
-    pass
 
-envoy_roles = [{"role": role_config["mongo_role"], "db": MONGO_DB} for role_config in ZTA_ROLES.values()]
-envoy_roles.append({"role": "impersonatorRole", "db": "admin"})
-
-db_external.command("createUser", "CN=envoy,O=AdvancedCybersecurity-Clients,C=IT", roles=envoy_roles)
-print("X.509 User created in $external: CN=envoy,O=AdvancedCybersecurity-Clients,C=IT")
 print("\n *** RLS complete: views + roles + users ready ***")
 
 client.close()
