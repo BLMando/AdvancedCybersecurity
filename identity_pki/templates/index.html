@@ -1018,30 +1018,125 @@
           row.blood_type || "N/A",
         ];
       } else if (collection === "clinical_records") {
-        headers = [
-          "Record ID",
-          "Patient ID",
-          "Condition",
-          "Medication",
-          "Result",
-          "Date",
-        ];
-        rowRenderer = (row) => {
-          let dateStr = "N/A";
-          if (row.recorded_at) {
-            dateStr = row.recorded_at.$date
-              ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
-              : new Date(row.recorded_at).toLocaleDateString("en-US");
+        const hasPseudonym = results.some(
+          (r) => r.patient_initials !== undefined || r.patient_age_band !== undefined
+        );
+        const hasPatientId = results.some((r) => r.patient_id !== undefined);
+
+        if (hasPseudonym) {
+          if (hasPatientId) {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Initials",
+              "Age Band",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.patient_initials || "N/A",
+                row.patient_age_band || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
+          } else {
+            headers = [
+              "Record ID",
+              "Patient Initials",
+              "Age Band",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_initials || "N/A",
+                row.patient_age_band || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
           }
-          return [
-            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-            row.patient_id || "N/A",
-            row.medical_condition || "N/A",
-            row.medication || "N/A",
-            row.test_results || "N/A",
-            dateStr,
-          ];
-        };
+        } else {
+          const hasNotes = results.some((r) => r.notes !== undefined);
+          if (hasNotes) {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Condition",
+              "Medication",
+              "Result",
+              "Notes",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                row.notes || "N/A",
+                dateStr,
+              ];
+            };
+          } else {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
+          }
+        }
       } else if (collection === "admissions") {
         headers = [
           "Admission ID",
@@ -1095,10 +1190,22 @@
           "Insurance",
         ];
         rowRenderer = (row) => {
-          let amountStr =
+          let amountVal =
             row.billing_amount !== undefined
-              ? `$ ${parseFloat(row.billing_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : "N/A";
+              ? row.billing_amount
+              : row.billing_amount_approx;
+          let isApprox =
+            row.billing_amount === undefined &&
+            row.billing_amount_approx !== undefined;
+          let amountStr = "N/A";
+          if (amountVal !== undefined && amountVal !== null) {
+            const formatted = parseFloat(amountVal).toLocaleString("en-US", {
+              minimumFractionDigits: isApprox ? 0 : 2,
+              maximumFractionDigits: 2,
+            });
+            amountStr = `$ ${formatted}${isApprox ? " (Approx)" : ""}`;
+          }
+
           let sc = "badge-muted";
           let label = row.payment_status || "N/A";
           const statusLower = (row.payment_status || "").toLowerCase();
@@ -1107,12 +1214,15 @@
           else if (statusLower === "disputed") { sc = "badge-danger"; label = "Disputed"; }
           else if (statusLower === "written_off") { sc = "badge-danger"; label = "Written Off"; }
 
+          let insuranceStr =
+            row.insurance_provider || row.insurance_masked || "N/A";
+
           return [
             `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
             row.patient_id || "N/A",
             amountStr,
             `<span class="badge ${sc}">${label}</span>`,
-            row.insurance_provider || "N/A",
+            insuranceStr,
           ];
         };
       } else if (collection === "providers") {
