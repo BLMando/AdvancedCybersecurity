@@ -120,7 +120,7 @@ Follow these steps to run the complete infrastructure, configure the components,
 4. **Trust Certificate and Start Agent**:
    - Trust the root Certificate Authority file located at `volumes/certs/ca/ca.crt` on your OS.
    - On macOS, open the `ztaagent/ZTAAGENT.xcodeproj` file using Xcode. Make sure to update the Team in the Signing & Capabilities tab to successfully build and run the agent.
-   - On Windows, run the local TPM Agent service on Windows:
+   - On Windows, run as administrator the local TPM Agent service on Windows:
      ```powershell
      powershell -ExecutionPolicy Bypass -File .\scripts\windows\tpm_agent_service.ps1
      ```
