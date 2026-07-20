@@ -108,7 +108,6 @@ services:
       opa:
         condition: service_started
     ports:
-      #- "${ENVOY_PROXY_PORT}:10000"
       - "10000-10020:10000-10020"
       - "${ENVOY_ADMIN_PORT}:9901"
     volumes:

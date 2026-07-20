@@ -16,6 +16,3 @@ __pycache__/
 *.pyc
 splunk/local/
 splunk/metadata/local.meta
-.agents/
-CLAUDE.MD
-AGENTS.MD
