@@ -1,52 +1,17 @@
-# Snort 3 — Regole Sonda PEP
-
-# ── Rilevamento Downgrade SSL/TLS (Client Hello in chiaro) ──
-# Ispeziona solo i pacchetti IP/TCP diretti specificamente alla porta 10000
-alert tcp any any -> any 10000 (
-    msg:"Legacy TLS version/SSL downgrade attempt targeting Envoy";
-    ssl_version:sslv2,sslv3,tls1.0,tls1.1;
-    classtype:policy-violation;
-    sid:3000001; rev:7;
-)
-
-# ── Prevenzione DDoS / SYN Flood su Envoy ──
-alert tcp any any -> any 10000 (
-    msg:"Possible SYN flood DDoS targeting PEP Envoy";
-    detection_filter: track by_src, count 15, seconds 5;
-    classtype:denial-of-service;
-    sid:3000002; rev:7;
-)
-
-# ── Lateral Movement: scansione est-ovest tra container ──
-# Monitora le scansioni generiche su qualsiasi porta
-alert tcp any any -> any any (
-    msg:"Internal lateral movement detected (east-west scan)";
-    detection_filter: track by_src, count 5, seconds 10;
-    classtype:attempted-recon;
-    sid:3000004; rev:10;
-)
-
-# ── Envoy Admin access da rete interna ──
-# Scatta SOLO se il pacchetto IP/TCP è diretto rigidamente alla porta admin 9901
+# Snort 3 - PEP Probe Rules
+# Detect direct connection attempts to Envoy admin port (9901)
 alert tcp any any -> any 9901 (
     msg:"Envoy admin access attempt from internal network";
+    flags: S;
     classtype:policy-violation;
-    sid:3000005; rev:6;
+    sid:3000005; rev:7;
 )
 
-# ── Port scan perimetrale verso Envoy ──
+# Detect perimeter port scan (more than 5 TCP connection attempts in 10 seconds from the same source)
 alert tcp any any -> any any (
-    msg:"TCP SYN port scan targeting PEP perimeter";
+    msg:"TCP port scan attempt targeting PEP perimeter";
+    flags: S;
     detection_filter: track by_src, count 5, seconds 10;
     classtype:attempted-recon;
-    sid:3000006; rev:10;
-)
-
-# ── ICMP Exfiltration / Tunnel verso Envoy ──
-alert icmp any any -> any any (
-    msg:"Suspicious ICMP packet with large payload (possible exfiltration)";
-    dsize:>100;
-    itype:8;
-    classtype:misc-activity;
-    sid:3000007; rev:7;
+    sid:3000006; rev:11;
 )

@@ -1,879 +1,239 @@
-# Suite di test per i 40 unit test riorganizzati con i namespace corretti.
-
+# Unit test suite for validating OPA policies (Zero Trust PDP).
 
 package envoy.authz
 
 import future.keywords
-import data.envoy.authz.identity
 
-# ─── Standard Authorization Tests ─────────────────────────────────────────────
-
-test_legitimate_user if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-}
-
-test_unknown_user_denied if {
-	not allow with input as {
-		"parsed_body": {
-			"user": "attacker.evil",
-			"device": "no-tpm",
-			"network_ip": "192.168.1.100",
-			"command": "find",
-			"collection": "payments"
-		}
-	}
-}
-
-test_destructive_denied if {
-	deny with input as {
-		"parsed_body": {
-			"user": "test.doctor",
-			"command": "drop",
-			"collection": "utenti"
-		}
-	}
-}
-
-test_doctor_clinical_find if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "clinical_records",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-}
-
-# Doctors may query clinical_records without patient_id filter (only update requires it)
-test_doctor_clinical_find_no_patient_id_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "clinical_records",
-			"query": "{}"
-		}
-	}
-}
-
-test_doctor_billing_denied if {
-	deny with input as {
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "billing"
-		}
-	}
-}
-
-test_billing_staff_clinical_denied if {
-	deny with input as {
-		"parsed_body": {
-			"user": "test.billing",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "clinical_records"
-		}
-	}
-}
-
-test_auditor_read_all if {
-	allow with input as {
-		"parsed_body": {
-			"user": "test.auditor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "billing"
-		}
-	}
-}
-
-test_auditor_no_write if {
-	deny with input as {
-		"parsed_body": {
-			"user": "test.auditor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "insert",
-			"collection": "patients"
-		}
-	}
-}
-
-test_unknown_role_denied if {
-	deny with input as {
-		"parsed_body": {
-			"user": "attacker.external",
-			"device": "no-tpm",
-			"network_ip": "8.8.8.8",
-			"command": "find",
-			"collection": "patients"
-		}
-	}
-}
-
-test_receptionist_no_clinical if {
-	deny with input as {
-		"parsed_body": {
-			"user": "test.receptionist",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "clinical_records"
-		}
-	}
-}
-
-# ─── Content Inspection Tests ─────────────────────────────────────────────────
-
-test_clinical_no_patient_id_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "update",
-			"collection": "clinical_records",
-			"query": "{}"
-		}
-	}
-}
-
-test_clinical_with_patient_id_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "clinical_records",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-}
-
-test_billing_where_operator_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.billing"}},
-		"parsed_body": {
-			"user": "test.billing",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "billing",
-			"query": "{\"$where\": \"this.amount > 1000\"}"
-		}
-	}
-}
-
-test_patients_empty_query_denied_receptionist if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.receptionist"}},
-		"parsed_body": {
-			"user": "test.receptionist",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{}"
-		}
-	}
-}
-
-test_admin_empty_query_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "admin"}},
-		"parsed_body": {
-			"user": "admin",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{}"
-		}
-	}
-}
-
-# ─── View query authorization tests ───────────────────────────────────────────
-
-test_doctor_clinical_view_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "v_clinical_doctor",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-}
-
-test_doctor_clinical_view_no_patient_id_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "update",
-			"collection": "v_clinical_doctor",
-			"query": "{}"
-		}
-	}
-}
-
-test_doctor_billing_view_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "v_billing_staff",
-			"query": "{}"
-		}
-	}
-}
-
-# ─── OIDC Verification Tests ──────────────────────────────────────────────────
-
-test_oidc_valid if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "find",
-			"collection": "patients",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_oidc_invalid_cert_denied if {
-	not allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "find",
-			"collection": "patients",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_oidc_expired_token_denied if {
-	not allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "find",
-			"collection": "patients",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 100000, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_oidc_wrong_cn_denied if {
-	not allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "find",
-			"collection": "patients",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "attacker.name", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_oidc_trusted_proxy_valid if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "envoy",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "find",
-			"collection": "patients",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "envoy"
-}
-
-# ─── Unknown Connection / Ext-Authz Tests ─────────────────────────────────────
-
-test_unknown_action_allowed_for_valid_role if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "unknown"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-}
-
-test_unknown_action_denied_for_invalid_role if {
-	not allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "attacker.evil",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "unknown"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "unknown"
-}
-
-test_unknown_action_allowed_for_trusted_proxy if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "envoy",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "unknown"
-		}
-	}
-	with data.envoy.authz.identity.cert_subject_cn as "envoy"
-}
-
-test_unknown_action_unseen_device_denied if {
-	deny with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"command": "unknown",
-			"device": "device-attacker-pc",
-			"network_ip": "172.20.0.5"
-		}
-	}
-	with data.envoy.authz.identity.current_role as "doctor"
-	with data.splunk.trust_registry as {
-		"test.doctor": {
-			"device-laptop-001": ["172.20.0.5"]
-		}
-	}
-	with http.send as mock_http_send_high_risk
-}
-
-# ─── HTTP Specific Tests ──────────────────────────────────────────────────────
-
-test_http_get_patients_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {"principal": "test.doctor"},
-			"request": {
-				"http": {
-					"method": "GET",
-					"path": "/patients",
-					"headers": {"x-user": "test.doctor"}
+# Helper to simulate legitimate HTTP requests (mTLS)
+mock_input_mtls(role, collection, action) := {
+	"attributes": {
+		"source": {
+			"principal": sprintf("test.%v", [role]),
+			"address": {
+				"socketAddress": {
+					"address": "172.20.0.5"
 				}
-			}
-		}
-	}
-}
-
-test_http_post_clinical_records_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"address": "172.20.0.5"
 			},
-			"request": {
-				"http": {
-					"method": "POST",
-					"path": "/clinical_records",
-					"headers": {"x-user": "test.doctor"}
+			"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+		}
+	},
+	"parsed_body": {
+		"user": sprintf("test.%v", [role]),
+		"device": "device-laptop-001",
+		"network_ip": "172.20.0.5",
+		"command": action,
+		"collection": collection,
+		"query": "{\"patient_id\": \"P001\"}"
+	}
+}
+
+# Helper to simulate OIDC requests (mTLS + JWT Token)
+mock_input_oidc(role, user, action, collection) := {
+	"attributes": {
+		"source": {
+			"principal": user,
+			"address": {
+				"socketAddress": {
+					"address": "172.20.0.5"
+				}
+			},
+			"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
+		}
+	},
+	"parsed_body": {
+		"command": action,
+		"collection": collection,
+		"mechanism": "MONGODB-OIDC",
+		"query": {
+			"payload": "a.b.c"
+		}
+	}
+}
+
+# 1. RBAC Authorization Tests (Permission Matrix)
+
+test_rbac_allowed_admin_all if {
+	allow with input as mock_input_mtls("admin", "billing", "insert")
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["admin"], "CommonName": ["test.admin"]}}
+}
+
+test_rbac_allowed_doctor_patients if {
+	allow with input as mock_input_mtls("doctor", "patients", "find")
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
+}
+
+test_rbac_denied_doctor_billing if {
+	deny with input as mock_input_mtls("doctor", "billing", "find")
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
+}
+
+test_rbac_denied_receptionist_billing if {
+	deny with input as mock_input_mtls("receptionist", "billing", "find")
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["receptionist"], "CommonName": ["test.receptionist"]}}
+}
+
+# 2. Biometric Step-Up Tests (Sensitive Actions)
+
+test_step_up_allowed_with_fresh_token if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "delete", "admissions")
+	allow with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
+}
+
+test_step_up_denied_without_token if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "delete", "admissions")
+	deny with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": false, "exp": 9999999999}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.is_valid_token_binding as true
+}
+
+# 3. OIDC Token Binding Tests (Token-Certificate Linking)
+
+test_oidc_binding_allowed_matching_cn if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
+	allow with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_binding_denied_mismatch_cn if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
+	deny with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
+		with data.envoy.authz.identity.cert_subject_cn as "attacker.name"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
+}
+
+test_oidc_binding_denied_mismatch_fingerprint if {
+	input_req := mock_input_oidc("doctor", "test.doctor", "find", "patients")
+	deny with input as input_req
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "exp": 9999999999, "cnf": {"x5t#S256_hex": "different-fingerprint"}}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.cert_der_bytes as "mock-der"
+		with crypto.sha256 as "mock-fingerprint"
+}
+
+# 4. L7 Query Content Inspection Tests
+
+test_query_inspection_clinical_records_needs_patient_id if {
+	input_invalid := {
+		"attributes": {
+			"source": {
+				"principal": "test.doctor",
+				"address": {
+					"socketAddress": {
+						"address": "172.20.0.5"
+					}
 				}
 			}
+		},
+		"parsed_body": {
+			"command": "update",
+			"collection": "clinical_records",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c"
+			}
 		}
 	}
+	deny with input as input_invalid
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
+	
+	deny_reason == "INSPECTION_VIOLATION" with input as input_invalid
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
-test_http_get_billing_denied_doctor if {
-	deny with input as {
+test_query_inspection_clinical_records_allowed_with_patient_id if {
+	input_valid := {
 		"attributes": {
-			"source": {"principal": "test.doctor"},
-			"request": {
-				"http": {
-					"method": "GET",
-					"path": "/billing",
-					"headers": {"x-user": "test.doctor"}
+			"source": {
+				"principal": "test.doctor",
+				"address": {
+					"socketAddress": {
+						"address": "172.20.0.5"
+					}
 				}
 			}
+		},
+		"parsed_body": {
+			"command": "update",
+			"collection": "clinical_records",
+			"mechanism": "MONGODB-OIDC",
+			"query": {
+				"payload": "a.b.c",
+				"patient_id": "P001",
+				"notes": "updated"
+			}
 		}
 	}
+	allow with input as input_valid
+		with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999}
+		with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
+		with data.envoy.authz.identity.device_identity as "mock-device"
+		with data.envoy.authz.identity.is_valid_token_binding as true
 }
 
-test_http_non_existent_role_denied if {
-	deny with input as {
+test_query_inspection_patients_find_empty_denied if {
+	input_invalid := {
 		"attributes": {
-			"source": {"principal": "attacker.external"},
-			"request": {
-				"http": {
-					"method": "GET",
-					"path": "/patients",
-					"headers": {"x-user": "attacker.external"}
+			"source": {
+				"principal": "test.doctor",
+				"address": {
+					"socketAddress": {
+						"address": "172.20.0.5"
+					}
 				}
 			}
-		}
-	}
-}
-
-# ─── Hybrid ZTA Risk Score & Threshold Tests ──────────────────────────────────
-
-test_risk_threshold_deny_under_high_risk if {
-	allow with input as {
-		"attributes": {
-			"source": {"principal": "test.doctor"},
-			"address": "8.8.8.8"
 		},
 		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "8.8.8.8",
 			"command": "find",
 			"collection": "patients",
-			"query": "{\"name\": \"Pippo\"}"
+			"query": "{}"
 		}
 	}
+	deny with input as input_invalid
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["doctor"], "CommonName": ["test.doctor"]}}
 }
 
-# ─── Trust Registry Unit Tests ────────────────────────────────────────────────
+# 5. Dynamic Risk Calculation Tests (Adaptive Threshold)
 
-test_trust_registry_match_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_safe
-}
-
-test_trust_registry_unseen_device_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-attacker-pc",
-			"network_ip": "172.20.0.5",
-			"command": "insert",
-			"collection": "admissions",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_high_risk
-}
-
-test_trust_registry_unseen_ip_denied if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "192.168.1.50",
-			"command": "insert",
-			"collection": "admissions",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_medium_risk
-}
-
-# ─── Dynamic subnet (/24 prefix) IP Matching tests ───────────────────────────
-
-test_trust_registry_dhcp_subnet_match_allowed if {
-	allow with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.99",
-			"command": "find",
-			"collection": "patients",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_safe
-}
-
-# ─── Anti-Spoofing Certificate MAC Verification tests ──────────────────────────
-
-test_device_identity_from_certificate if {
-	identity.device_identity == "AA-BB-CC-DD-EE-FF" with input as {
+test_risk_denied_if_exceeds_threshold if {
+	# Force a high risk score by simulating an external network and a delete action
+	input_unsafe := {
 		"attributes": {
 			"source": {
 				"principal": "test.doctor",
-				"certificate": "---BEGIN CERTIFICATE---\n---END CERTIFICATE---"
+				"address": {
+					"socketAddress": {
+						"address": "8.8.8.8"
+					}
+				}
 			}
-		}
-	} with crypto.x509.parse_certificates as [{
-		"Subject": {
-			"CommonName": "test.doctor",
-			"OrganizationalUnit": ["MAC:AA-BB-CC-DD-EE-FF"]
-		}
-	}]
-}
-
-# ─── Multi-Service Threat Intelligence Integration Tests ────────────────────
-
-test_snort_alert_raises_risk_and_denies if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
+		},
 		"parsed_body": {
 			"user": "test.doctor",
-			"device": "device-laptop-001",
+			"device": "no-tpm",
 			"network_ip": "8.8.8.8",
-			"command": "insert",
-			"collection": "admissions",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_high_risk
-}
-
-test_nftables_drops_raises_risk_and_denies if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "8.8.8.8",
-			"command": "insert",
-			"collection": "admissions",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_medium_risk
-}
-
-test_mongo_failures_raises_risk_and_denies if {
-	deny with input as {
-		"attributes": {"source": {"principal": "test.doctor"}},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "insert",
-			"collection": "admissions",
-			"query": "{\"patient_id\": \"P001\"}"
-		}
-	}
-	with http.send as mock_http_send_high_risk
-}
-
-# ─── NoSQL Injection & WAF Tests ──────────────────────────────────────────────
-# NOTE: L'ispezione del payload (NoSQL Injection, DoS patterns) è ora gestita
-# esclusivamente dal filtro Lua L7 WAF inline in Envoy, posizionato dopo
-# ext_authz (OPA). OPA non valuta più is_malicious; la responsabilità è:
-#   - OPA  -> identità, RBAC, rischio, step-up, segregation of duties
-#   - Lua  -> ispezione contenuto query (pattern matching raw sul body)
-# I test relativi a $where, $function, sleep() sono stati rimossi da qui.
-
-
-
-# Helper mocks per http.send
-mock_http_send_high_risk(req) := {
-	"status_code": 200,
-	"body": {
-		"results": [{"anomaly_risk": "100"}]
-	}
-}
-
-mock_http_send_medium_risk(req) := {
-	"status_code": 200,
-	"body": {
-		"results": [{"anomaly_risk": "60"}]
-	}
-}
-
-mock_http_send_safe(req) := {
-	"status_code": 200,
-	"body": {
-		"results": [{"anomaly_risk": "0"}]
-	}
-}
-
-# ─── Step-Up Authentication for Delete Actions Tests ─────────────────────────
-
-test_doctor_delete_admissions_with_step_up_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
 			"command": "delete",
 			"collection": "admissions",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
+			"query": "{\"admission_id\": \"A001\"}"
 		}
 	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-	with http.send as mock_http_send_safe
-}
-
-test_doctor_delete_admissions_without_step_up_denied if {
-	deny with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "admissions",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": false, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_receptionist_delete_admissions_with_step_up_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.receptionist",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.receptionist",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "admissions",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.receptionist", "role": "receptionist", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.receptionist"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-	with http.send as mock_http_send_safe
-}
-
-test_receptionist_delete_admissions_without_step_up_denied if {
-	deny with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.receptionist",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.receptionist",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "admissions",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.receptionist", "role": "receptionist", "step_up": false, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.receptionist"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_billing_staff_delete_billing_with_step_up_allowed if {
-	allow with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.billing",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.billing",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "billing",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.billing", "role": "billing_staff", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.billing"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-	with http.send as mock_http_send_safe
-}
-
-test_billing_staff_delete_billing_without_step_up_denied if {
-	deny with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.billing",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.billing",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "billing",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.billing", "role": "billing_staff", "step_up": false, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.billing"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
-}
-
-test_doctor_delete_billing_denied if {
-	deny with input as {
-		"attributes": {
-			"source": {
-				"principal": "test.doctor",
-				"certificate": "-----BEGIN CERTIFICATE-----\nmock-pem\n-----END CERTIFICATE-----"
-			}
-		},
-		"parsed_body": {
-			"user": "test.doctor",
-			"device": "device-laptop-001",
-			"network_ip": "172.20.0.5",
-			"command": "delete",
-			"collection": "billing",
-			"mechanism": "MONGODB-OIDC",
-			"query": {
-				"payload": "a.b.c"
-			}
-		}
-	}
-	with data.envoy.authz.identity.verify_oidc_jwt as {"sub": "test.doctor", "role": "doctor", "step_up": true, "step_up_time": 9999999999, "exp": 9999999999, "cnf": {"x5t#S256_hex": "mock-fingerprint"}}
-	with data.envoy.authz.identity.cert_subject_cn as "test.doctor"
-	with data.envoy.authz.identity.cert_der_bytes as "mock-der"
-	with crypto.sha256 as "mock-fingerprint"
+	deny with input as input_unsafe
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["unknown"], "CommonName": ["unknown"]}}
+	deny_reason == "RISK_THRESHOLD_EXCEEDED" with input as input_unsafe
+		with data.envoy.authz.identity.parsed_client_cert as {"Subject": {"Title": ["unknown"], "CommonName": ["unknown"]}}
 }

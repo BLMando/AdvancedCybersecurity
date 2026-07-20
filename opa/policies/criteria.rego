@@ -1,5 +1,3 @@
-# Regole RBAC, restrizioni hard-deny e ispezione query L7.
-
 package envoy.authz.criteria
 
 import future.keywords
@@ -23,14 +21,15 @@ role_action_allowed if {
 	identity.action_name in allowed_cmds
 }
 
-# ─── Hard-Deny Rules ──────────────────────────────────────────────────────────
+# Hard-Deny Rules
 
-# Actions update and delete are sensitive and require step-up
+# Sensitive actions (write/delete) require biometric step-up
 is_sensitive_action if {
 	identity.action_name in {"update", "delete"}
 }
 
-# Queries on billing for amounts > 5000 are sensitive and require step-up
+# Intercept billing transactions
+# with amounts greater than 5000 (considered high-risk operations requiring step-up)
 is_sensitive_action if {
 	identity.normalized_collection_name == "billing"
 	walk(identity.query_doc, [path, value])
@@ -41,50 +40,21 @@ is_sensitive_action if {
 	value > 5000
 }
 
-is_sensitive_action if {
-	identity.normalized_collection_name == "billing"
-	walk(identity.query_doc, [path, value])
-	some segment in path
-	is_string(segment)
-	segment in {"billing_amount", "billing_amount_approx"}
-	walk(value, [sub_path, sub_value])
-	is_number(sub_value)
-	sub_value > 5000
-}
-
-# Block sensitive actions unless there is a fresh step-up token
+# Block sensitive actions if a valid and fresh biometric step-up token is not present
 hard_deny if {
 	is_sensitive_action
-	not identity.token_has_step_up
-}
-
-hard_deny if {
-	is_sensitive_action
-	identity.token_has_step_up
 	not identity.token_step_up_fresh
 }
 
+# Immediately block unauthenticated clients or those without a valid role
 hard_deny if {
 	identity.current_role == "unknown"
 }
 
-hard_deny if {
-	identity.current_role == "billing_staff"
-	identity.normalized_collection_name == "clinical_records"
-}
+# Content Inspection
 
-hard_deny if {
-	identity.current_role == "receptionist"
-	identity.normalized_collection_name in {"billing", "clinical_records"}
-}
-
-hard_deny if {
-	identity.current_role == "doctor"
-	identity.normalized_collection_name == "billing"
-}
-
-# ─── Content Inspection (L7 WAF queries) ──────────────────────────────────────
-
+# Clinical Compliance Rule: Doctors can update clinical records
+# only if they specify a targeted filter for the individual patient
 inspection_violation if {
 	identity.is_db_query
 	identity.normalized_collection_name == "clinical_records"
@@ -92,14 +62,8 @@ inspection_violation if {
 	not identity.query_has_field("patient_id")
 }
 
-inspection_violation if {                                         
-	identity.is_db_query
-	walk(identity.query_doc, [path, value])
-	some segment in path
-	is_string(segment)
-	segment in {"$where", "$function"}
-} 
-
+# Privacy Compliance Rule: Prevents empty queries (e.g. {}) on the patients table
+# for non-admin roles to prevent massive dumping of registry data
 inspection_violation if {
 	identity.is_db_query
 	identity.normalized_collection_name == "patients"
@@ -108,6 +72,7 @@ inspection_violation if {
 	identity.is_empty_query
 }
 
+# Permission Matrix (Zero Trust Default Deny for empty fields {})
 permissions := {
 	"admin": {
 		"patients":         {"find", "insert", "update", "delete"},

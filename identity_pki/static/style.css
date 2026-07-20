@@ -135,7 +135,7 @@ dl {
   margin: 0;
 }
 
-dl > div {
+dl>div {
   display: grid;
   gap: 4px;
   margin-bottom: 16px;
@@ -277,7 +277,7 @@ button.danger:hover,
   gap: 16px;
 }
 
-.detail-grid > div {
+.detail-grid>div {
   padding: 16px;
   border-radius: 18px;
   background: rgba(8, 15, 27, 0.72);
@@ -303,6 +303,7 @@ button.danger:hover,
 }
 
 @media (max-width: 900px) {
+
   .hero,
   .panel-grid,
   .form-grid,
@@ -394,21 +395,25 @@ button.danger:hover,
   font-weight: 700;
   border: 1px solid transparent;
 }
+
 .badge-success {
   background: rgba(34, 197, 94, 0.15);
   color: #bff5cd;
   border-color: rgba(34, 197, 94, 0.3);
 }
+
 .badge-danger {
   background: rgba(251, 113, 133, 0.15);
   color: #fecdd3;
   border-color: rgba(251, 113, 133, 0.3);
 }
+
 .badge-warning {
   background: rgba(245, 158, 11, 0.15);
   color: #fef3c7;
   border-color: rgba(245, 158, 11, 0.3);
 }
+
 .badge-muted {
   background: rgba(148, 163, 184, 0.15);
   color: #e2e8f0;
@@ -516,7 +521,7 @@ button:disabled {
   padding: 24px;
 }
 
-/* ── Query control bar ──────────────────────────────────────────── */
+/* Query control bar */
 .query-control-bar {
   display: flex;
   flex-wrap: wrap;
@@ -540,9 +545,17 @@ button:disabled {
   gap: 6px;
 }
 
-.qcb-identity { flex: 2 1 260px; }
-.qcb-narrow   { flex: 0 0 90px; }
-.qcb-submit   { flex: 0 0 auto; }
+.qcb-identity {
+  flex: 2 1 260px;
+}
+
+.qcb-narrow {
+  flex: 0 0 90px;
+}
+
+.qcb-submit {
+  flex: 0 0 auto;
+}
 
 .qcb-group select,
 .qcb-group input[type="number"] {
@@ -550,7 +563,7 @@ button:disabled {
   border-radius: 12px;
 }
 
-/* ── Filter chips row ───────────────────────────────────────────── */
+/* Filter chips row */
 .filter-chips-row {
   display: flex;
   flex-wrap: wrap;
@@ -581,7 +594,7 @@ button:disabled {
   font-size: 0.83rem;
 }
 
-/* ── Results header ─────────────────────────────────────────────── */
+/* Results header */
 .results-header {
   display: flex;
   justify-content: space-between;
@@ -592,7 +605,7 @@ button:disabled {
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-/* ── Live search input override ─────────────────────────────────── */
+/* Live search input override */
 #table-live-search {
   padding: 6px 12px;
   border-radius: 10px;
@@ -600,8 +613,8 @@ button:disabled {
   width: 220px;
 }
 
-/* ── Tab query goes full width ──────────────────────────────────── */
-#tab-query > .panel {
+/* Tab query goes full width */
+#tab-query>.panel {
   padding: 24px 28px;
 }
 
@@ -615,7 +628,7 @@ button:disabled {
   padding: 10px 12px;
 }
 
-/* ── Filter chips row ───────────────────────────────────────────── */
+/* Filter chips row */
 .filter-chips-row {
   display: flex;
   flex-wrap: wrap;
@@ -646,7 +659,7 @@ button:disabled {
   font-size: 0.83rem;
 }
 
-/* ── Results header ─────────────────────────────────────────────── */
+/* Results header */
 .results-header {
   display: flex;
   justify-content: space-between;
@@ -657,7 +670,7 @@ button:disabled {
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-/* ── Live search input override ─────────────────────────────────── */
+/* Live search input override */
 #table-live-search {
   padding: 6px 12px;
   border-radius: 10px;
@@ -665,14 +678,14 @@ button:disabled {
   width: 220px;
 }
 
-/* ── Tab query goes full width (single column) ──────────────────── */
-#tab-query > .panel {
+/* Tab query goes full width (single column) */
+#tab-query>.panel {
   padding: 28px 32px;
 }
 
 
 
-/* ── Inline table row action buttons ──────────────────────────── */
+/* Inline table row action buttons */
 .btn-action {
   display: inline-flex;
   align-items: center;
@@ -693,6 +706,7 @@ button:disabled {
   border-color: rgba(56, 189, 248, 0.35);
   color: var(--accent);
 }
+
 .btn-edit:hover {
   background: rgba(56, 189, 248, 0.25);
   border-color: var(--accent);
@@ -703,6 +717,7 @@ button:disabled {
   border-color: rgba(251, 113, 133, 0.35);
   color: var(--error);
 }
+
 .btn-delete:hover {
   background: rgba(251, 113, 133, 0.25);
   border-color: var(--error);
@@ -714,7 +729,7 @@ button:disabled {
   align-items: center;
 }
 
-/* ── Inline edit row panel ──────────────────────────────────────── */
+/* Inline edit row panel */
 .edit-row-panel {
   background: rgba(8, 18, 34, 0.95);
   border-top: 1px solid rgba(56, 189, 248, 0.18);
@@ -724,8 +739,15 @@ button:disabled {
 }
 
 @keyframes editPanelSlide {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .edit-row-grid {
@@ -748,7 +770,7 @@ button:disabled {
   padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.25);
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   font-size: 0.85rem;
 }
@@ -770,22 +792,29 @@ button:disabled {
   cursor: pointer;
   transition: opacity 0.15s;
 }
-.btn-save:hover { opacity: 0.85; }
+
+.btn-save:hover {
+  opacity: 0.85;
+}
 
 .btn-cancel-edit {
   padding: 6px 14px;
   border-radius: 10px;
   background: transparent;
-  border: 1px solid rgba(148,163,184,0.3);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   color: var(--muted);
   font-size: 0.83rem;
   cursor: pointer;
   transition: border-color 0.15s;
   min-height: 0;
 }
-.btn-cancel-edit:hover { border-color: var(--muted); color: var(--text); }
 
-/* ── Confirm dialog (small modal variant) ───────────────────────── */
+.btn-cancel-edit:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+/* Confirm dialog (small modal variant) */
 .confirm-dialog {
   width: min(400px, calc(100vw - 32px));
   background: var(--panel);
@@ -826,7 +855,10 @@ button:disabled {
   cursor: pointer;
   transition: opacity 0.15s;
 }
-.btn-confirm-delete:hover { opacity: 0.85; }
+
+.btn-confirm-delete:hover {
+  opacity: 0.85;
+}
 
 .edit-status-msg {
   font-size: 0.8rem;
@@ -834,18 +866,25 @@ button:disabled {
   border-radius: 6px;
   display: none;
 }
-.edit-status-msg.success { color: var(--success); display: inline; }
-.edit-status-msg.error { color: var(--error); display: inline; }
+
+.edit-status-msg.success {
+  color: var(--success);
+  display: inline;
+}
+
+.edit-status-msg.error {
+  color: var(--error);
+  display: inline;
+}
 
 /* Status Labels */
 .status-active {
   color: var(--success);
   font-weight: 600;
 }
+
 .status-revoked {
   color: var(--error);
   text-decoration: line-through;
   opacity: 0.7;
 }
-
-

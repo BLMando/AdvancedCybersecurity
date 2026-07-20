@@ -179,7 +179,7 @@
     <!-- Query Tab Content -->
     <div id="tab-query" class="tab-content">
       <section class="panel" style="margin-bottom: 0">
-        <!-- ── Top control bar ───────────────────────────────────────────────── -->
+        <!-- Top control bar -->
         <div class="query-control-bar">
           <!-- Identity -->
           <div class="qcb-group qcb-identity">
@@ -235,18 +235,18 @@
           </div>
         </div>
 
-        <!-- ── Dynamic filters ───────────────────────────────────────────────── -->
+        <!-- Dynamic filters -->
         <form id="query-form">
           <div id="simple-filter-container" class="filter-chips-row">
             <!-- populated by updateSimpleQueryFields() -->
           </div>
         </form>
 
-        <!-- ── Feedback boxes ────────────────────────────────────────────────── -->
+        <!-- Feedback boxes -->
         <div id="query-error-box" class="error-box" style="display: none; margin-top: 12px"></div>
         <div id="query-success-box" class="success-box" style="display: none; margin-top: 12px"></div>
 
-        <!-- ── Results section ───────────────────────────────────────────────── -->
+        <!-- Results section -->
         <div id="query-result-section" style="display: none; margin-top: 1.5rem">
           <!-- Meta + view toggle -->
           <div class="results-header">
@@ -332,8 +332,10 @@
           <div id="blocklist-success" class="success-box" style="display: none; margin-bottom: 1rem;"></div>
           <form id="form-block-ip" onsubmit="addIpToBlocklist(event)">
             <div class="form-group" style="margin-bottom: 1.25rem;">
-              <label for="block-ip-address" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">IP Address</label>
-              <input type="text" id="block-ip-address" placeholder="e.g. 198.51.100.1" required style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+              <label for="block-ip-address" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">IP
+                Address</label>
+              <input type="text" id="block-ip-address" placeholder="e.g. 198.51.100.1" required
+                style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
             </div>
             <button type="submit" class="btn primary" style="width: 100%;">Block IP</button>
           </form>
@@ -444,7 +446,7 @@
       <h3>Confirm Deletion</h3>
       <p id="confirm-delete-msg">
         Are you sure you want to delete this record? This operation is
-        irreversible and requires Step-Up Authentication.
+        irreversible.
       </p>
       <div class="confirm-actions">
         <button type="button" class="btn-cancel-edit" onclick="closeConfirmDelete()">
@@ -699,7 +701,7 @@
       badge.style.display = "none";
     });
 
-    // ─── Build filter chips per collection (chip-style) ──────────────────────
+    // Build filter chips per collection (chip-style)
     function updateSimpleQueryFields() {
       const collection = document.getElementById("query-collection").value;
       const container = document.getElementById("simple-filter-container");
@@ -818,7 +820,7 @@
       return parseFloat(valStr);
     }
 
-    // ─── Build filter payload (JSON) ─────────────────────────────────────────
+    // Build filter payload (JSON)
     function getFilterPayload() {
       const collection = document.getElementById("query-collection").value;
       const f = {};
@@ -887,7 +889,7 @@
       return JSON.stringify(f);
     }
 
-    // ─── Edit field schema per collection ──────────────────────────────────
+    // Edit field schema per collection
     const EDIT_FIELDS = {
       patients: [
         { key: "full_name", label: "Full Name", type: "text" },
@@ -985,7 +987,7 @@
     };
 
 
-    // ─── Render results table with Edit/Delete action buttons ──────────────
+    // Render results table with Edit/Delete action buttons
     function renderQueryResults(results, collection) {
       const table = document.getElementById("query-output-table");
       if (!results || results.length === 0) {
@@ -1016,30 +1018,125 @@
           row.blood_type || "N/A",
         ];
       } else if (collection === "clinical_records") {
-        headers = [
-          "Record ID",
-          "Patient ID",
-          "Condition",
-          "Medication",
-          "Result",
-          "Date",
-        ];
-        rowRenderer = (row) => {
-          let dateStr = "N/A";
-          if (row.recorded_at) {
-            dateStr = row.recorded_at.$date
-              ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
-              : new Date(row.recorded_at).toLocaleDateString("en-US");
+        const hasPseudonym = results.some(
+          (r) => r.patient_initials !== undefined || r.patient_age_band !== undefined
+        );
+        const hasPatientId = results.some((r) => r.patient_id !== undefined);
+
+        if (hasPseudonym) {
+          if (hasPatientId) {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Initials",
+              "Age Band",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.patient_initials || "N/A",
+                row.patient_age_band || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
+          } else {
+            headers = [
+              "Record ID",
+              "Patient Initials",
+              "Age Band",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_initials || "N/A",
+                row.patient_age_band || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
           }
-          return [
-            `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
-            row.patient_id || "N/A",
-            row.medical_condition || "N/A",
-            row.medication || "N/A",
-            row.test_results || "N/A",
-            dateStr,
-          ];
-        };
+        } else {
+          const hasNotes = results.some((r) => r.notes !== undefined);
+          if (hasNotes) {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Condition",
+              "Medication",
+              "Result",
+              "Notes",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                row.notes || "N/A",
+                dateStr,
+              ];
+            };
+          } else {
+            headers = [
+              "Record ID",
+              "Patient ID",
+              "Condition",
+              "Medication",
+              "Result",
+              "Date",
+            ];
+            rowRenderer = (row) => {
+              let dateStr = "N/A";
+              if (row.recorded_at) {
+                dateStr = row.recorded_at.$date
+                  ? new Date(row.recorded_at.$date).toLocaleDateString("en-US")
+                  : new Date(row.recorded_at).toLocaleDateString("en-US");
+              }
+              return [
+                `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
+                row.patient_id || "N/A",
+                row.medical_condition || "N/A",
+                row.medication || "N/A",
+                row.test_results || "N/A",
+                dateStr,
+              ];
+            };
+          }
+        }
       } else if (collection === "admissions") {
         headers = [
           "Admission ID",
@@ -1093,10 +1190,22 @@
           "Insurance",
         ];
         rowRenderer = (row) => {
-          let amountStr =
+          let amountVal =
             row.billing_amount !== undefined
-              ? `$ ${parseFloat(row.billing_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : "N/A";
+              ? row.billing_amount
+              : row.billing_amount_approx;
+          let isApprox =
+            row.billing_amount === undefined &&
+            row.billing_amount_approx !== undefined;
+          let amountStr = "N/A";
+          if (amountVal !== undefined && amountVal !== null) {
+            const formatted = parseFloat(amountVal).toLocaleString("en-US", {
+              minimumFractionDigits: isApprox ? 0 : 2,
+              maximumFractionDigits: 2,
+            });
+            amountStr = `$ ${formatted}${isApprox ? " (Approx)" : ""}`;
+          }
+
           let sc = "badge-muted";
           let label = row.payment_status || "N/A";
           const statusLower = (row.payment_status || "").toLowerCase();
@@ -1105,12 +1214,15 @@
           else if (statusLower === "disputed") { sc = "badge-danger"; label = "Disputed"; }
           else if (statusLower === "written_off") { sc = "badge-danger"; label = "Written Off"; }
 
+          let insuranceStr =
+            row.insurance_provider || row.insurance_masked || "N/A";
+
           return [
             `<span class="mono" style="font-size:0.78em">${extractId(row._id)}</span>`,
             row.patient_id || "N/A",
             amountStr,
             `<span class="badge ${sc}">${label}</span>`,
-            row.insurance_provider || "N/A",
+            insuranceStr,
           ];
         };
       } else if (collection === "providers") {
@@ -1168,7 +1280,7 @@
       table.innerHTML = headerHtml + rowsHtml;
     }
 
-    // ─── Extract plain string _id from BSON or plain object ────────────────
+    // Extract plain string _id from BSON or plain object
     function extractId(idVal) {
       if (!idVal) return "";
       if (typeof idVal === "string") return idVal;
@@ -1176,7 +1288,7 @@
       return JSON.stringify(idVal);
     }
 
-    // ─── Open inline Edit form ──────────────────────────────────────────────
+    // Open inline Edit form
     function openEditRow(idx, rawId, collection) {
       // Close any other open edit panel
       document.querySelectorAll('[id^="edit-row-"]').forEach((r) => {
@@ -1221,13 +1333,12 @@
         <div class="edit-row-actions">
           <button class="btn-save" onclick="saveRecord(${idx}, '${rawId}', '${collection}')">Save changes</button>
           <button class="btn-cancel-edit" onclick="document.getElementById('edit-row-${idx}').style.display='none'">Cancel</button>
-          <span style="font-size:0.78rem; color:var(--muted); margin-left:4px;">Requires Step-Up Authentication</span>
         </div>`;
 
       editRow.style.display = "table-row";
     }
 
-    // ─── Save record (Update) ───────────────────────────────────────────────
+    // Save record (Update)
     async function saveRecord(idx, rawId, collection) {
       const row = (window.lastQueryResults || [])[idx] || {};
       const fields = EDIT_FIELDS[collection] || [];
@@ -1312,10 +1423,10 @@
               throw new Error(data.message || data.error || "Update error");
             msgEl.className = "edit-status-msg success";
             msgEl.textContent = `${data.message || "Saved"}`;
-            // Close edit panel after success
+            // Close edit panel after success and update the table visually
             setTimeout(() => {
-              document.getElementById(`edit-row-${idx}`).style.display =
-                "none";
+              Object.assign(row, updateFields);
+              renderQueryResults(window.lastQueryResults, collection);
             }, 1200);
           } finally {
             fetch("http://localhost:9090/proxy/stop", {
@@ -1338,17 +1449,18 @@
           msgEl.className = "edit-status-msg success";
           msgEl.textContent = `${data.message || "Saved"}`;
           setTimeout(() => {
-            document.getElementById(`edit-row-${idx}`).style.display = "none";
+            Object.assign(row, updateFields);
+            renderQueryResults(window.lastQueryResults, collection);
           }, 1200);
 
-        } 
+        }
       } catch (err) {
         msgEl.className = "edit-status-msg error";
         msgEl.textContent = `Error: ${err.message}`;
       }
     }
 
-    // ─── Delete confirmation dialog ─────────────────────────────────────────
+    // Delete confirmation dialog
     let _pendingDeleteId = null,
       _pendingDeleteCollection = null,
       _pendingDeleteIdx = null;
@@ -1358,7 +1470,7 @@
       _pendingDeleteCollection = collection;
       _pendingDeleteIdx = idx;
       document.getElementById("confirm-delete-msg").innerHTML =
-        `Are you sure you want to delete the document with ID:<br><code style="font-size:0.82em; opacity:0.75">${rawId}</code><br><br>This operation is irreversible and requires Step-Up Authentication (OTP).`;
+        `Are you sure you want to delete the document with ID:<br><code style="font-size:0.82em; opacity:0.75">${rawId}</code><br><br>This operation is irreversible.`;
       document.getElementById("confirm-delete-modal").style.display = "flex";
       document.getElementById("confirm-delete-btn").onclick = () =>
         deleteRecord(
@@ -1375,7 +1487,7 @@
       _pendingDeleteIdx = null;
     }
 
-    // ─── Execute Delete ─────────────────────────────────────────────────────
+    // Execute Delete
     async function deleteRecord(rawId, collection, idx) {
       closeConfirmDelete();
       const user = document.getElementById("query-user").value;
@@ -1939,9 +2051,7 @@
             proxyToken = agentData.session_token;
             queryPayload.local_proxy_port = agentData.port;
 
-            submitBtn.textContent = needsStepUp
-              ? "Requesting Touch ID (Step-Up Required)..."
-              : "Requesting Touch ID / Windows Hello...";
+            submitBtn.textContent = "Requesting Touch ID / Windows Hello...";
 
             let tokenResult = null;
             let retryCount = 0;
@@ -1972,9 +2082,7 @@
                   await promptPrimaryAuth(email, needsStepUp);
 
                   retryCount++;
-                  submitBtn.textContent = needsStepUp
-                    ? "Requesting Touch ID (Step-Up Required)..."
-                    : "Requesting Touch ID / Windows Hello...";
+                  submitBtn.textContent = "Requesting Touch ID / Windows Hello...";
                   continue;
                 }
 

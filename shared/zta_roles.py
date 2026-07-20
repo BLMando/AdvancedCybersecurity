@@ -2,39 +2,39 @@
 
 ZTA_ROLES = {
     "doctor": {
-        "display_name": "Medico",
+        "display_name": "Doctor",
         "mongo_role": "zta_doctor",
-        "default_department": "Cardiologia",
+        "default_department": "Cardiology",
         "allowed_collections": ["patients", "providers", "admissions", "clinical_records"],
-        "description": "Accesso a dati clinici e cartelle pazienti",
+        "description": "Access to clinical data and patient records",
     },
     "billing_staff": {
-        "display_name": "Personale Amministrativo",
+        "display_name": "Billing Staff",
         "mongo_role": "zta_billing",
-        "default_department": "Amministrazione",
+        "default_department": "Billing",
         "allowed_collections": ["patients", "providers", "admissions", "billing"],
-        "description": "Accesso ai dati di fatturazione",
+        "description": "Access to billing data",
     },
     "auditor": {
-        "display_name": "Revisore",
+        "display_name": "Auditor",
         "mongo_role": "zta_auditor",
-        "default_department": "Compliance",
+        "default_department": "Audit",
         "allowed_collections": ["patients", "providers", "admissions", "clinical_records", "billing"],
-        "description": "Accesso in sola lettura a tutto, con dati mascherati",
+        "description": "Read-only access to everything, with masked data",
     },
     "receptionist": {
         "display_name": "Receptionist",
         "mongo_role": "zta_receptionist",
-        "default_department": "Accettazione",
+        "default_department": "Reception",
         "allowed_collections": ["patients", "admissions", "providers"],
-        "description": "Accesso all'agenda e ai pazienti, no dati clinici",
+        "description": "Access to schedule and patients, no clinical data",
     },
     "admin": {
-        "display_name": "Amministratore di Sistema",
+        "display_name": "System Administrator",
         "mongo_role": "zta_admin",
         "default_department": "IT",
         "allowed_collections": ["*"],
-        "description": "Accesso completo — solo per personale IT autorizzato",
+        "description": "Full access - only for authorized IT personnel",
     },
 }
 

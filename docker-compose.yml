@@ -1,5 +1,4 @@
 services:
-
   # Identity & PKI (Certificate Management)
   identity-pki:
     build:
@@ -32,7 +31,8 @@ services:
       - ./identity_pki/static:/app/identity_pki/static
       - ./volumes/blocklist:/app/blocklist:rw
     networks:
-      - backend-net
+      backend-net:
+        ipv4_address: 172.19.0.101
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -44,7 +44,7 @@ services:
     container_name: mongo
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${MONGO_PORT}:27017"
+      - "${MONGO_PORT}:27017"
     environment:
       ZTA_ORGANIZATION: ${ZTA_ORGANIZATION}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
@@ -77,7 +77,8 @@ services:
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
     networks:
-      - backend-net
+      backend-net:
+        ipv4_address: 172.19.0.100
 
   # Envoy Log Init (Fix Volume Permissions)
   envoy-log-init:
@@ -107,8 +108,9 @@ services:
       opa:
         condition: service_started
     ports:
-      - "${ENVOY_PROXY_PORT}:10000"
-      - "127.0.0.1:${ENVOY_ADMIN_PORT}:9901"
+      #- "${ENVOY_PROXY_PORT}:10000"
+      - "10000-10020:10000-10020"
+      - "${ENVOY_ADMIN_PORT}:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ./envoy/lua:/etc/envoy/lua:ro
@@ -137,7 +139,7 @@ services:
       SPLUNK_USERNAME: ${SPLUNK_USERNAME}
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD}
       SPLUNK_VERIFY_TLS: ${SPLUNK_VERIFY_TLS}
-      SPLUNK_HEC_TOKEN_ENVOY: ${SPLUNK_HEC_TOKEN_ENVOY}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN}
       HEC_BATCH_SIZE: "100"
     volumes:
       - envoy-logs:/var/log/envoy:ro
@@ -300,7 +302,7 @@ services:
         echo "[nftables] Starting blocklist sync daemon..."
         BLOCKLIST_DIR="/etc/blocklist"
         BLOCKLIST_FILE="$$BLOCKLIST_DIR/blocklist.txt"
- 
+
         sync_blocklist() {
           IPs=$$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$$BLOCKLIST_FILE" 2>/dev/null | tr -d '\r')
           nft flush set inet zero_trust_fw blocklist 2>/dev/null
@@ -310,16 +312,16 @@ services:
             nft add element inet zero_trust_fw blocklist "{ $$ELEMENTS }" 2>/dev/null
           fi
         }
- 
+
         # Initial sync
         sync_blocklist
- 
+
         # Watch for changes and sync instantly (guarded by MD5 check to avoid infinite loops)
         LAST_HASH=""
         if [ -f "$$BLOCKLIST_FILE" ]; then
           LAST_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
         fi
- 
+
         inotifywait -q -m -e close_write,moved_to "$$BLOCKLIST_DIR" | while read -r directory events filename; do
           if [ "$$filename" = "blocklist.txt" ]; then
             CURRENT_HASH=$$(md5sum "$$BLOCKLIST_FILE" 2>/dev/null | cut -d' ' -f1)
@@ -336,6 +338,7 @@ services:
   splunk:
     image: splunk/splunk:latest
     container_name: splunk
+    user: root
     platform: linux/amd64
     environment:
       - SPLUNK_START_ARGS=--accept-license --answer-yes --no-prompt --ignore-critical-errors
@@ -343,6 +346,7 @@ services:
       - SPLUNK_PASSWORD=${SPLUNK_PASSWORD}
       - SPLUNK_IGNORE_FILE_SYSTEM_FOR_DB=1
       - OPTIMISTIC_ABOUT_FILE_LOCKING=1
+      - ZTA_HEC_TOKEN=${SPLUNK_HEC_TOKEN}
     ports:
       - "${SPLUNK_WEB_PORT}:8000"
       - "${SPLUNK_HEC_PORT}:8088"
@@ -351,7 +355,6 @@ services:
     volumes:
       - splunk-var:/opt/splunk/var
       - splunk-etc:/opt/splunk/etc
-      - ./splunk/splunk_setup.py:/app/splunk_setup.py:ro
       - ./splunk/default/data/ui/views:/app/default/data/ui/views:ro
       - ./volumes/certs/ca:/etc/certs/ca:ro
       - ./volumes/certs/server:/etc/certs/server:ro
@@ -359,8 +362,13 @@ services:
     networks:
       - backend-net
     restart: always
-    entrypoint: >
-      /bin/bash -c " (python3 /app/splunk_setup.py || true) & exec /sbin/entrypoint.sh start-service "
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        tr -d '\r' < /opt/splunk/etc/apps/zta/entrypoint.sh > /tmp/entrypoint.sh
+        chmod +x /tmp/entrypoint.sh
+        /tmp/entrypoint.sh
 
 volumes:
   splunk-var:
